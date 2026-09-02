@@ -5,18 +5,23 @@ import { usePathname } from 'next/navigation';
 import Cookies from 'js-cookie';
 import {
   HiSquares2X2, HiFolder, HiDocumentText, HiCreditCard,
-  HiArrowDownTray, HiChatBubbleLeftRight, HiLifebuoy, HiChartBar,
+  HiArrowDownTray, HiLifebuoy, HiChartBar,
 } from 'react-icons/hi2';
 import clientApi from '@/lib/clientAxios';
 
 // Module key → nav item map (Dashboard is always visible)
+//
+// No standalone "Chat" entry — a Client only ever chats within a Project's
+// own Chat tab (Api\Client\ProjectChatController); the separate
+// account-level Sales Chat (Api\Client\ChatController, /client/chat) stays
+// reachable directly (e.g. a pre-project "Chat with Seller" notification
+// link) but is deliberately not surfaced as its own nav item anymore.
 const NAV = [
   { key: null,        label: 'Dashboard', icon: HiSquares2X2,         path: '/client/dashboard' },
   { key: 'projects',  label: 'Projects',  icon: HiFolder,              path: '/client/projects' },
   { key: 'invoices',  label: 'Invoices',  icon: HiDocumentText,        path: '/client/invoices' },
   { key: 'payments',  label: 'Payments',  icon: HiCreditCard,          path: '/client/payments' },
   { key: 'documents', label: 'Documents', icon: HiArrowDownTray,       path: '/client/documents' },
-  { key: 'chat',      label: 'Chat',      icon: HiChatBubbleLeftRight, path: '/client/chat' },
   { key: 'support',   label: 'Support',   icon: HiLifebuoy,            path: '/client/support' },
   { key: 'reports',   label: 'Reports',   icon: HiChartBar,            path: '/client/reports' },
 ];

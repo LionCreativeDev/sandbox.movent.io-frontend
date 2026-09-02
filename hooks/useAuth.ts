@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/axios';
-import { setAuthData, setActiveCompany, resolveStaffRedirect, logout as clearAuth } from '@/lib/auth';
+import { setAuthData, setActiveCompany, clearActiveCompany, resolveStaffRedirect, logout as clearAuth } from '@/lib/auth';
 import { User, Admin } from '@/types';
 import toast from 'react-hot-toast';
 
@@ -53,9 +53,14 @@ export const useAuth = () => {
   const applyUserLoginSuccess = (token: string, user: User) => {
     setAuthData(token, user, 'user');
     toast.success('Welcome back!');
-    // Rule 9: if user belongs to multiple companies, show company picker
-    const assignments = user?.company_assignments ?? [];
+    // Rule 9: if user belongs to multiple ACTIVE companies, show company
+    // picker. Filtered to active-only so a suspended-only assignment never
+    // gets auto-selected as the active company, and zero active assignments
+    // falls straight through to '/dashboard', where DashboardLayout's own
+    // active-only check shows the "not assigned to any company" empty state.
+    const assignments = (user?.company_assignments ?? []).filter(a => a.status === 'active');
     if (assignments.length > 1) {
+      clearActiveCompany();
       router.push('/select-company');
     } else {
       const active = assignments[0];

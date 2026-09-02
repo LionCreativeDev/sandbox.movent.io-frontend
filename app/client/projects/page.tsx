@@ -1,7 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { clientService } from '@/lib/services/clientService';
+import { fmtDateLong as fmtDate } from '@/lib/date';
 import Link from 'next/link';
+import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
 
 const GREEN = '#10b981';
 const STATUS_OPTS = ['', 'planning', 'active', 'on_hold', 'completed', 'cancelled'];
@@ -18,6 +20,7 @@ export default function ClientProjectsPage() {
   const [status, setStatus]     = useState('');
   const [search, setSearch]     = useState('');
   const [loading, setLoading]   = useState(true);
+  const [notEnabled, setNotEnabled] = useState(false);
 
   const load = (s: string, q: string) => {
     setLoading(true);
@@ -26,7 +29,7 @@ export default function ClientProjectsPage() {
     if (q) params.search = q;
     clientService.projects(Object.keys(params).length ? params : undefined)
       .then(setProjects)
-      .catch(() => setProjects([]))
+      .catch((err: any) => { if (err?.response?.status === 403) setNotEnabled(true); else setProjects([]); })
       .finally(() => setLoading(false));
   };
 
@@ -89,6 +92,8 @@ export default function ClientProjectsPage() {
       <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Loading projects…</div>
+        ) : notEnabled ? (
+          <PortalModuleDisabled feature="Projects" />
         ) : projects.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>No projects found.</div>
         ) : (
@@ -113,8 +118,8 @@ export default function ClientProjectsPage() {
                         {p.status?.replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td style={{ padding: '12px 18px', fontSize: 12, color: '#64748b' }}>{p.start_date || '—'}</td>
-                    <td style={{ padding: '12px 18px', fontSize: 12, color: '#64748b' }}>{p.deadline || '—'}</td>
+                    <td style={{ padding: '12px 18px', fontSize: 12, color: '#64748b' }}>{fmtDate(p.created_at)}</td>
+                    <td style={{ padding: '12px 18px', fontSize: 12, color: '#64748b' }}>{fmtDate(p.deadline)}</td>
                     <td style={{ padding: '12px 18px', minWidth: 100 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1, height: 6, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>

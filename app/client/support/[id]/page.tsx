@@ -2,15 +2,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { clientService } from '@/lib/services/clientService';
+import { TICKET_CATEGORIES } from '@/lib/services/adminSupportService';
 import toast from 'react-hot-toast';
+import { handleNotFound } from '@/lib/notFound';
 
 const GREEN = '#10b981';
+const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(TICKET_CATEGORIES.map(c => [c.value, c.label]));
 const SC: Record<string, { bg: string; color: string }> = {
   open:        { bg: '#eff6ff', color: '#2563eb' },
   in_progress: { bg: '#fffbeb', color: '#d97706' },
+  on_hold:     { bg: '#fef3c7', color: '#92400e' },
   resolved:    { bg: '#ecfdf5', color: '#059669' },
   closed:      { bg: '#f1f5f9', color: '#64748b' },
 };
+// Client can still reply while paused (on_hold) — agent is usually waiting
+// on more info from them. Only resolved/closed truly end the conversation
+// (matches Api\Client\SupportController::reply()'s block list).
+const REPLYABLE_STATUSES = ['open', 'in_progress', 'on_hold'];
 
 export default function ClientTicketDetailPage() {
   const { id }    = useParams();
@@ -20,21 +28,47 @@ export default function ClientTicketDetailPage() {
   const [file, setFile]         = useState<File | null>(null);
   const [sending, setSending]   = useState(false);
   const [loading, setLoading]   = useState(true);
+  // <input type="file"> is uncontrolled — setFile(null) clears our own
+  // state but the native element still visually shows the previously
+  // chosen filename. Bumping this key after every successful send remounts
+  // the input fresh, which is the only way to actually reset it.
+  const [fileInputKey, setFileInputKey] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastReplyCount = useRef<number | null>(null);
 
   const load = () => {
     clientService.ticket(Number(id))
       .then(setData)
-      .catch(() => router.push('/client/support'))
+      .catch((err) => { if (!handleNotFound(err, router)) router.push('/client/support'); })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, [id]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [data]);
+  // Staff/admin replies otherwise only show up after a manual page reload —
+  // poll quietly (no loading state, no redirect-away on a transient error)
+  // so a new reply appears without the client having to refresh.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      clientService.ticket(Number(id)).then(setData).catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [id]);
+  useEffect(() => {
+    const count = data?.replies?.length ?? 0;
+    // Only autoscroll when a reply was actually added — a background poll
+    // that returns unchanged data must not yank the client back down while
+    // they're reading older messages further up.
+    if (lastReplyCount.current === null || count > lastReplyCount.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    lastReplyCount.current = count;
+  }, [data]);
 
   const sendReply = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!replyMsg.trim()) return;
+    // A reply with just an attachment and no typed message is valid — only
+    // block a genuinely empty submit (neither message nor file).
+    if (!replyMsg.trim() && !file) return;
     setSending(true);
     try {
       const fd = new FormData();
@@ -43,6 +77,7 @@ export default function ClientTicketDetailPage() {
       await clientService.ticketReply(Number(id), fd);
       setReplyMsg('');
       setFile(null);
+      setFileInputKey(k => k + 1);
       toast.success('Reply sent');
       load();
     } catch { toast.error('Failed to send reply'); }
@@ -56,7 +91,7 @@ export default function ClientTicketDetailPage() {
   const sc = SC[t.status] || { bg: '#f1f5f9', color: '#64748b' };
 
   return (
-    <div style={{ maxWidth: 680 }}>
+    <div style={{ width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
         <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 20 }}>←</button>
         <div style={{ flex: 1 }}>
@@ -67,7 +102,10 @@ export default function ClientTicketDetailPage() {
             </span>
           </div>
           <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
-            Category: {t.category} · Priority: <strong style={{ color: t.priority === 'high' ? '#dc2626' : '#64748b' }}>{t.priority}</strong>
+            Category: {CATEGORY_LABEL[t.category] || t.category} · Priority: <strong style={{ color: t.priority === 'high' || t.priority === 'urgent' ? '#dc2626' : '#64748b' }}>{t.priority}</strong>
+            {t.project && <> · Project: <strong style={{ color: '#1e293b' }}>{t.project.name}</strong></>}
+            {t.invoice && <> · Invoice: <strong style={{ color: '#1e293b' }}>{t.invoice.invoice_number}</strong></>}
+            {t.payment_reference && <> · Payment Ref: <strong style={{ color: '#1e293b' }}>{t.payment_reference}</strong></>}
           </div>
         </div>
       </div>
@@ -89,6 +127,9 @@ export default function ClientTicketDetailPage() {
           ) : (
             (data.replies || []).map((r: any) => {
               const isClient = r.replied_by?.role_type === 'client';
+              // Company Admin replies carry replied_by_admin (repliedByAdmin
+              // relation) instead of replied_by — check it first.
+              const authorName = r.replied_by_admin?.name || r.replied_by?.name || 'Support';
               return (
                 <div key={r.id} style={{ display: 'flex', flexDirection: isClient ? 'row-reverse' : 'row', gap: 10, marginBottom: 14 }}>
                   <div style={{
@@ -97,11 +138,11 @@ export default function ClientTicketDetailPage() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 12, fontWeight: 700, color: isClient ? '#fff' : '#64748b',
                   }}>
-                    {r.replied_by?.name?.[0]?.toUpperCase() || '?'}
+                    {authorName[0]?.toUpperCase() || '?'}
                   </div>
                   <div style={{ maxWidth: '75%' }}>
                     <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 3, textAlign: isClient ? 'right' : 'left' }}>
-                      {r.replied_by?.name || 'Support'} · {r.created_at?.split('T')[0]}
+                      {authorName} · {r.created_at?.split('T')[0]}
                     </div>
                     <div style={{
                       padding: '10px 14px', borderRadius: 10,
@@ -111,6 +152,11 @@ export default function ClientTicketDetailPage() {
                     }}>
                       {r.message}
                     </div>
+                    {r.attachment_url && (
+                      <a href={r.attachment_url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 4, fontSize: 11, color: GREEN }}>
+                        📎 {r.attachment_name || 'Attachment'}
+                      </a>
+                    )}
                   </div>
                 </div>
               );
@@ -120,7 +166,7 @@ export default function ClientTicketDetailPage() {
         </div>
       </div>
 
-      {['open', 'in_progress'].includes(t.status) && (
+      {REPLYABLE_STATUSES.includes(t.status) && (
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: 18 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 12 }}>Add Reply</div>
           <form onSubmit={sendReply}>
@@ -136,9 +182,9 @@ export default function ClientTicketDetailPage() {
               }}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <input type="file" onChange={e => setFile(e.target.files?.[0] || null)} style={{ fontSize: 12, color: '#64748b', flex: 1 }} />
+              <input key={fileInputKey} type="file" onChange={e => setFile(e.target.files?.[0] || null)} style={{ fontSize: 12, color: '#64748b', flex: 1 }} />
               <button
-                type="submit" disabled={sending || !replyMsg.trim()}
+                type="submit" disabled={sending || (!replyMsg.trim() && !file)}
                 style={{
                   padding: '8px 20px', background: sending ? '#a7f3d0' : GREEN,
                   color: '#fff', border: 'none', borderRadius: 8,

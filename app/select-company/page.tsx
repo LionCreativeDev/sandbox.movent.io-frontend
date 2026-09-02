@@ -1,14 +1,23 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { isAuthenticated, getAuthType, getAuthUser, setActiveCompany, resolveStaffRedirect } from '@/lib/auth';
 import { User } from '@/types';
 import { HiBuildingOffice2, HiArrowRightOnRectangle, HiCheckCircle } from 'react-icons/hi2';
 
-export default function SelectCompanyPage() {
+const safeReturnTo = (target: string | null): string | null => {
+  if (!target || !target.startsWith('/') || target.startsWith('//')) return null;
+  if (target === '/select-company' || target.startsWith('/select-company?')) return null;
+  if (target === '/login' || target.startsWith('/login?')) return null;
+  return target;
+};
+
+function SelectCompanyPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser]           = useState<User | null>(null);
   const [selecting, setSelecting] = useState<number | null>(null);
+  const returnTo = safeReturnTo(searchParams.get('returnTo'));
 
   useEffect(() => {
     if (!isAuthenticated() || getAuthType() !== 'user') {
@@ -18,22 +27,29 @@ export default function SelectCompanyPage() {
     const u = getAuthUser() as User | null;
     if (!u) { router.replace('/login'); return; }
 
-    // Single company — no need to pick, set it and proceed
+    // Single ACTIVE company (regardless of how many suspended ones also
+    // exist) — no need to pick, set it and proceed. A suspended-only
+    // assignment must never get auto-selected as the active company; with
+    // zero active ones this falls through to resolveStaffRedirect(undefined)
+    // → '/dashboard', where DashboardLayout's own active-only check already
+    // shows the "not assigned to any company" empty state.
     const assignments = u.company_assignments ?? [];
-    if (assignments.length <= 1) {
-      const active = assignments[0];
+    const activeAssignments = assignments.filter(a => a.status === 'active');
+    if (activeAssignments.length <= 1) {
+      const active = activeAssignments[0];
       if (active) setActiveCompany(active.company_id);
-      router.replace(resolveStaffRedirect(active));
+      router.replace(returnTo ?? resolveStaffRedirect(active));
       return;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUser(u);
-  }, [router]);
+  }, [router, returnTo]);
 
   const choose = (companyId: number) => {
     setSelecting(companyId);
     setActiveCompany(companyId);
     const assignment = (user?.company_assignments ?? []).find(a => a.company_id === companyId);
-    router.push(resolveStaffRedirect(assignment));
+    router.push(returnTo ?? resolveStaffRedirect(assignment));
   };
 
   if (!user) return null;
@@ -148,5 +164,16 @@ export default function SelectCompanyPage() {
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
+  );
+}
+
+// useSearchParams() opts this page out of static prerendering unless it's
+// wrapped in a Suspense boundary — without this, `next build` fails on this
+// page entirely (see https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout).
+export default function SelectCompanyPage() {
+  return (
+    <Suspense fallback={null}>
+      <SelectCompanyPageInner />
+    </Suspense>
   );
 }

@@ -4,24 +4,30 @@ import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
+import SubmitButton from '@/components/ui/SubmitButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import PhoneInput from '@/components/ui/PhoneInput';
+import { ALL_COUNTRIES } from '@/lib/countries';
 
 interface FormState {
   name: string;
-  currency: string;
   industry: string;
   email: string;
   phone: string;
   address: string;
   timezone: string;
+  country: string;
 }
 
 const TIMEZONES = [
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'Europe/London',
+  'Asia/Dubai',
   'Asia/Karachi',
   'Asia/Kolkata',
-  'Asia/Dubai',
-  'Europe/London',
-  'America/New_York',
-  'America/Los_Angeles',
   'UTC',
 ];
 
@@ -35,19 +41,22 @@ export default function CreateCompanyPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>({
     name:     '',
-    currency: 'PKR',
     industry: '',
     email:    '',
     phone:    '',
     address:  '',
-    timezone: 'Asia/Karachi',
+    timezone: 'America/New_York',
+    country:  '',
   });
 
   const set = (k: keyof FormState) => (e: { target: { value: string } }) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
+  const setCompanyName = (e: { target: { value: string } }) =>
+    setForm(f => ({ ...f, name: e.target.value }));
 
   const submit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
+    if (saving) return; // Guards a double-click/Enter re-submit before the disabled prop re-renders.
     if (!form.name.trim()) { toast.error('Company name is required'); return; }
     setSaving(true);
     try {
@@ -75,6 +84,7 @@ export default function CreateCompanyPage() {
 
   return (
     <DashboardLayout title="Add Company">
+      <LoadingOverlay show={saving} message="Creating Account…" />
       {/* Breadcrumb */}
       <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 20 }}>
         <span
@@ -98,28 +108,19 @@ export default function CreateCompanyPage() {
               <label style={labelStyle}>Company Name *</label>
               <input
                 value={form.name}
-                onChange={set('name')}
+                onChange={setCompanyName}
                 placeholder="e.g. Acme Corp"
                 style={inputStyle}
                 required
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
-              <div>
-                <label style={labelStyle}>Currency *</label>
-                <select value={form.currency} onChange={set('currency')} style={inputStyle}>
-                  <option value="PKR">PKR — Pakistani Rupee</option>
-                  <option value="USD">USD — US Dollar</option>
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Industry</label>
-                <select value={form.industry} onChange={set('industry')} style={inputStyle}>
-                  <option value="">— Select —</option>
-                  {INDUSTRIES.map(i => <option key={i} value={i}>{i}</option>)}
-                </select>
-              </div>
+            <div style={{ marginBottom: 18 }}>
+              <label style={labelStyle}>Industry</label>
+              <select value={form.industry} onChange={set('industry')} style={inputStyle}>
+                <option value="">— Select —</option>
+                {INDUSTRIES.map(i => <option key={i} value={i}>{i}</option>)}
+              </select>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
@@ -135,12 +136,7 @@ export default function CreateCompanyPage() {
               </div>
               <div>
                 <label style={labelStyle}>Phone</label>
-                <input
-                  value={form.phone}
-                  onChange={set('phone')}
-                  placeholder="+92 300 0000000"
-                  style={inputStyle}
-                />
+                <PhoneInput value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
               </div>
             </div>
 
@@ -155,11 +151,20 @@ export default function CreateCompanyPage() {
               />
             </div>
 
-            <div>
-              <label style={labelStyle}>Timezone</label>
-              <select value={form.timezone} onChange={set('timezone')} style={inputStyle}>
-                {TIMEZONES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div>
+                <label style={labelStyle}>Country</label>
+                <select value={form.country} onChange={set('country')} style={inputStyle}>
+                  <option value="">— Select —</option>
+                  {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Timezone</label>
+                <select value={form.timezone} onChange={set('timezone')} style={inputStyle}>
+                  {TIMEZONES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -175,6 +180,7 @@ export default function CreateCompanyPage() {
               </div>
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#3b82f6', lineHeight: 1.8 }}>
                 <li>Each company has its own clients, projects, invoices</li>
+                <li>Every invoice is raised in USD</li>
                 <li>All your companies share the same client portal seat pool</li>
                 <li>Modules are copied from your first company automatically</li>
                 <li>You can manage which company a client belongs to on the client page</li>
@@ -182,18 +188,18 @@ export default function CreateCompanyPage() {
             </div>
 
             <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '20px 20px' }}>
-              <button
-                type="submit"
-                disabled={saving}
+              <SubmitButton
+                loading={saving}
+                loadingText="Creating Account…"
                 style={{
                   width: '100%', padding: '12px 0', background: saving ? '#93c5fd' : '#2563eb',
                   color: '#fff', border: 'none', borderRadius: 8,
-                  fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer',
+                  fontSize: 14, fontWeight: 700,
                   marginBottom: 10,
                 }}
               >
-                {saving ? 'Creating…' : 'Create Company'}
-              </button>
+                Create Company
+              </SubmitButton>
               <button
                 type="button"
                 onClick={() => router.back()}

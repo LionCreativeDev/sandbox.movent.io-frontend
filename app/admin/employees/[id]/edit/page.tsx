@@ -6,6 +6,8 @@ import { useModuleGuard } from '@/hooks/useModuleGuard';
 import { adminHrService, EmployeeStatus, EmploymentType } from '@/lib/services/adminHrService';
 import { inp, lbl, card } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
+import PhoneInput from '@/components/ui/PhoneInput';
+import { handleNotFound } from '@/lib/notFound';
 
 export default function EditEmployeePage() {
   useModuleGuard('employees');
@@ -36,7 +38,7 @@ export default function EditEmployeePage() {
       setSalary(emp.salary != null ? String(emp.salary) : '');
       setJoinDate(emp.join_date ? emp.join_date.slice(0, 10) : '');
       setStatus(emp.status);
-    }).catch(() => toast.error('Failed to load employee')).finally(() => setLoading(false));
+    }).catch((err) => { if (!handleNotFound(err, router)) toast.error('Failed to load employee'); }).finally(() => setLoading(false));
   }, [employeeId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -77,7 +79,7 @@ export default function EditEmployeePage() {
             </div>
             <div>
               <label style={lbl}>Phone</label>
-              <input style={inp} value={phone} onChange={e => setPhone(e.target.value)} />
+              <PhoneInput value={phone} onChange={setPhone} />
             </div>
             <div>
               <label style={lbl}>Department</label>

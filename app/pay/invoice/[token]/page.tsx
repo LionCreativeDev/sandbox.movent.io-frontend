@@ -2,7 +2,11 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import axios from 'axios';
+import { HiChatBubbleLeftRight } from 'react-icons/hi2';
 import InlineGatewayPayment, { InlineGatewayPaymentHandle } from '@/components/payments/InlineGatewayPayment';
+import ChatWithSellerDrawer from '@/components/invoice/ChatWithSellerDrawer';
+import { publicInvoiceChatService } from '@/lib/services/publicInvoiceChatService';
+import { fmtDateLong as fmtProjectDate } from '@/lib/date';
 
 interface PublicInvoiceItem {
   description: string;
@@ -11,9 +15,18 @@ interface PublicInvoiceItem {
   total: number;
 }
 
+interface ConversionPreview {
+  amount: number;
+  currency: string;
+  rate: number;
+}
+
 interface Gateway {
-  key: string;
+  id: number | null;
+  type: string;
   label: string;
+  supports_invoice_currency?: boolean;
+  conversion_preview?: ConversionPreview | null;
 }
 
 interface BankDetails {
@@ -45,11 +58,76 @@ interface PublicInvoice {
   token_expires_at?: string;
   items: PublicInvoiceItem[];
   available_gateways: Gateway[];
+  gateway_unavailable_message?: string | null;
   bank_details?: BankDetails | null;
   has_pending_payment: boolean;
+  project?: PublicProjectSummary | null;
+  // Every project tied to this account — completed, previous and latest —
+  // same "all projects" view a logged-in Client sees in the Client Portal.
+  project_history?: PublicProjectHistoryItem[];
+}
+
+interface PublicProjectDelivery {
+  id: number;
+  file_name: string;
+  delivered_at?: string | null;
+}
+
+interface PublicProjectHistoryItem {
+  id: number;
+  name: string;
+  status: string;
+  progress: number;
+  start_date?: string | null;
+  deadline?: string | null;
+  // Every file sent for this project, oldest last — not just the latest.
+  deliveries?: PublicProjectDelivery[];
+}
+
+interface PublicProjectSummary {
+  id: number;
+  name: string;
+  reference?: string | null;
+  status: string;
+  progress: number;
+  delivery_status?: string | null;
+  delivery_file_name?: string | null;
+  // Every file sent for this project, oldest last — not just the latest.
+  deliveries?: PublicProjectDelivery[];
+  is_main_invoice: boolean;
+  invoice_count: number;
+  portal_active: boolean;
+  view_mode: 'full' | 'progress';
+  start_date?: string | null;
+  created_at?: string | null;
+  deadline?: string | null;
+  total_invoiced?: number | null;
+  total_paid?: number | null;
+  outstanding?: number | null;
+  invoices?: PublicProjectInvoice[];
+}
+
+interface PublicProjectInvoice {
+  id: number;
+  invoice_number: string;
+  status: string;
+  total_amount: number;
+  paid_amount: number;
+  outstanding: number;
+  currency: string;
+  due_date?: string | null;
+  is_current: boolean;
 }
 
 type PageState = 'loading' | 'invalid' | 'expired' | 'paid' | 'active' | 'success' | 'pending_confirmation';
+
+const PROJECT_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
+  planning:  { bg: '#eff6ff', color: '#2563eb' },
+  active:    { bg: '#ecfdf5', color: '#059669' },
+  on_hold:   { bg: '#fffbeb', color: '#d97706' },
+  completed: { bg: '#f0fdf4', color: '#16a34a' },
+  cancelled: { bg: '#fef2f2', color: '#dc2626' },
+};
 
 const GATEWAY_META: Record<string, { icon: string; desc: string }> = {
   stripe:        { icon: '💳', desc: 'Visa, Mastercard, American Express' },
@@ -67,6 +145,10 @@ function fmtDate(d?: string) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+function cap(s: string) {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function PublicInvoicePayContent() {
   const params = useParams<{ token: string }>();
   const searchParams = useSearchParams();
@@ -75,14 +157,59 @@ function PublicInvoicePayContent() {
 
   const [pageState, setPageState]             = useState<PageState>('loading');
   const [invoice, setInvoice]                 = useState<PublicInvoice | null>(null);
-  const [selectedGateway, setSelectedGateway] = useState('');
+  const [selectedGateway, setSelectedGateway] = useState(''); // gateway TYPE (stripe/paypal/authorize_net/bank_transfer) — picks which UI to render
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null); // the specific company_gateway_id to charge
   const [gatewayRef, setGatewayRef]           = useState('');
   const [notes, setNotes]                     = useState('');
   const [paying, setPaying]                   = useState(false);
   const [payError, setPayError]               = useState('');
   const [receiptNumber, setReceiptNumber]     = useState('');
   const [onlinePaymentRef, setOnlinePaymentRef] = useState('');
+  const [chatAvailable, setChatAvailable]     = useState(false);
+  const [chatSellerName, setChatSellerName]   = useState<string | null>(null);
+  const [chatOpen, setChatOpen]               = useState(false);
+  const [chatUnread, setChatUnread]           = useState(0);
   const inlineRef = useRef<InlineGatewayPaymentHandle>(null);
+
+  // "Last message id this guest has actually seen", persisted per-invoice so
+  // a page reload doesn't re-flag old Seller replies as unread — there's no
+  // account/session to hang this off, just the browser's own localStorage,
+  // keyed by the token in the URL.
+  const lastSeenKey = `chat-last-seen-${token}`;
+  const markSeen = (messages: { id: number; is_guest: boolean }[]) => {
+    if (messages.length === 0) return;
+    const maxId = Math.max(...messages.map(m => m.id));
+    try { window.localStorage.setItem(lastSeenKey, String(maxId)); } catch {}
+    setChatUnread(0);
+  };
+
+  // Independent of pageState/payment flow — "Chat with Seller" should be
+  // reachable whether the invoice is still open, already paid, or awaiting
+  // confirmation. Hidden entirely if the invoice has neither a client nor a
+  // lead to anchor a persistent thread to (Api\Services\InvoiceChatContext).
+  // Keeps polling even while the drawer itself is closed (unlike
+  // ChatWithSellerDrawer's own poll, which only runs while open) purely to
+  // drive the floating button's unread badge — a guest with no login has no
+  // other way to know a reply arrived without opening the drawer to check.
+  useEffect(() => {
+    if (!token) return;
+    const check = () => {
+      publicInvoiceChatService.get(token)
+        .then(res => {
+          setChatAvailable(res.available);
+          setChatSellerName(res.seller_name);
+          if (chatOpen) return; // the open drawer already marks these seen as it polls
+          let lastSeen = 0;
+          try { lastSeen = Number(window.localStorage.getItem(lastSeenKey) ?? 0); } catch {}
+          const unread = res.messages.filter(m => !m.is_guest && m.id > lastSeen).length;
+          setChatUnread(unread);
+        })
+        .catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 20000);
+    return () => clearInterval(interval);
+  }, [token, chatOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!token) { setPageState('invalid'); return; }
@@ -92,7 +219,10 @@ function PublicInvoicePayContent() {
         setInvoice(inv);
         if (inv.status === 'paid') { setPageState('paid'); return; }
         if (inv.has_pending_payment) { setPageState('pending_confirmation'); return; }
-        if (inv.available_gateways.length > 0) setSelectedGateway(inv.available_gateways[0].key);
+        if (inv.available_gateways.length > 0) {
+          setSelectedGateway(inv.available_gateways[0].type);
+          setSelectedAccountId(inv.available_gateways[0].id);
+        }
         setPageState('active');
         if (searchParams.get('cancelled') === '1') {
           setPayError('Payment was cancelled. You can try again below.');
@@ -144,6 +274,207 @@ function PublicInvoicePayContent() {
     border: '1px solid #e2e8f0', padding: '24px 28px', marginBottom: 16,
   };
   const centreCard: React.CSSProperties = { ...card, textAlign: 'center', padding: '56px 40px', maxWidth: 460, marginLeft: 'auto', marginRight: 'auto' };
+  const renderProjectCard = (inv: PublicInvoice) => {
+    const p = inv.project;
+    if (!p) return null;
+    const full = p.view_mode === 'full';
+    const projectInvoices = p.invoices ?? [];
+
+    return (
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#94a3b8', marginBottom: 4 }}>Project Status</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a' }}>{p.name}</div>
+            {full && p.reference && <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>{p.reference}</div>}
+          </div>
+          <span style={{ padding: '4px 10px', borderRadius: 999, background: '#eff6ff', color: '#2563eb', fontSize: 11, fontWeight: 700 }}>
+            {cap(p.status)}
+          </span>
+        </div>
+
+        <div style={{ marginBottom: full ? 16 : 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 7 }}>
+            <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Progress</span>
+            <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 700 }}>{p.progress}%</span>
+          </div>
+          <div style={{ height: 9, borderRadius: 999, background: '#e2e8f0', overflow: 'hidden' }}>
+            <div style={{ width: `${Math.max(0, Math.min(100, p.progress))}%`, height: '100%', background: 'linear-gradient(135deg, #2563eb, #10b981)' }} />
+          </div>
+        </div>
+
+        {/* A guest customer has no client-portal login — this link is
+            their only way to reach the delivered file (see
+            PublicInvoiceController::downloadDeliverySubmission(), keyed off
+            the same payment token this page already runs on). Only the
+            latest delivery shows here — the full history of every file
+            ever sent lives in the Project History card below
+            (renderProjectHistoryCard()), which always lists all of them. */}
+        {p.delivery_status === 'delivered_to_client' && (() => {
+          const latest = p.deliveries?.[0];
+          return (
+          <div style={{ marginTop: 16, padding: '12px 14px', borderRadius: 10, background: '#f0fdfa', border: '1px solid #99f6e4' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#0f766e', marginBottom: latest ? 10 : 0 }}>
+              Your project is ready! 🎉
+            </div>
+            {latest ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '8px 10px', background: '#fff', border: '1px solid #ccfbf1', borderRadius: 7, flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{latest.file_name}</div>
+                  {latest.delivered_at && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>{fmtDate(latest.delivered_at)}</div>}
+                </div>
+                <a
+                  href={`${base}/public/invoices/${token}/deliveries/${latest.id}/download`}
+                  style={{ padding: '6px 14px', borderRadius: 6, background: '#0d9488', color: '#fff', fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
+                >
+                  Download
+                </a>
+              </div>
+            ) : (
+              <a
+                href={`${base}/public/invoices/${token}/delivery/download`}
+                style={{ padding: '9px 18px', borderRadius: 8, background: '#0d9488', color: '#fff', fontSize: 13, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
+              >
+                Download Deliverable
+              </a>
+            )}
+          </div>
+          );
+        })()}
+
+        {full && (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 12, paddingTop: 14, borderTop: '1px solid #f1f5f9' }}>
+              <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Start Date</div><div style={{ marginTop: 4, fontSize: 13, color: '#0f172a', fontWeight: 600 }}>{fmtProjectDate(p.created_at ?? undefined)}</div></div>
+              <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Due Date</div><div style={{ marginTop: 4, fontSize: 13, color: '#0f172a', fontWeight: 600 }}>{fmtDate(p.deadline ?? undefined)}</div></div>
+              <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Project Invoices</div><div style={{ marginTop: 4, fontSize: 13, color: '#0f172a', fontWeight: 600 }}>{p.invoice_count}</div></div>
+              <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>Outstanding</div><div style={{ marginTop: 4, fontSize: 13, color: (p.outstanding ?? 0) > 0 ? '#ea580c' : '#059669', fontWeight: 700 }}>{fmt(p.outstanding ?? 0, inv.currency)}</div></div>
+            </div>
+            {projectInvoices.length > 0 && (
+              <div style={{ marginTop: 16, borderTop: '1px solid #f1f5f9', paddingTop: 14 }}>
+                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 10 }}>Linked Invoices</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {projectInvoices.map(pi => (
+                    <div key={pi.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center', padding: '10px 12px', borderRadius: 8, background: pi.is_current ? '#eff6ff' : '#f8fafc', border: `1px solid ${pi.is_current ? '#bfdbfe' : '#e2e8f0'}` }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                          {pi.invoice_number}{pi.is_current ? ' (Current)' : ''}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                          {cap(pi.status)}{pi.due_date ? ` • Due ${fmtDate(pi.due_date)}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{fmt(pi.total_amount, pi.currency)}</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: pi.outstanding > 0 ? '#ea580c' : '#059669', marginTop: 3 }}>
+                          Outstanding {fmt(pi.outstanding, pi.currency)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  // Rendered as a fixed-position sibling wherever it appears below — safe to
+  // include in every pageState branch that has a loaded invoice (paid,
+  // pending_confirmation, success, active); never shown on invalid/expired/
+  // loading, since there's no valid invoice to resolve a chat thread for.
+  const chatWidget = chatAvailable ? (
+    <>
+      <button onClick={() => { setChatOpen(true); setChatUnread(0); }} style={{
+        position: 'fixed', bottom: 24, right: 24, zIndex: 500,
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '12px 18px', borderRadius: 999, border: 'none',
+        background: 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff',
+        fontSize: 13, fontWeight: 700, cursor: 'pointer',
+        boxShadow: '0 8px 24px rgba(37,99,235,0.35)',
+      }}>
+        <HiChatBubbleLeftRight size={18} /> Chat
+        {chatUnread > 0 && (
+          <span style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999,
+            background: '#dc2626', color: '#fff', fontSize: 11, fontWeight: 800,
+          }}>{chatUnread > 9 ? '9+' : chatUnread}</span>
+        )}
+      </button>
+      <ChatWithSellerDrawer
+        token={token}
+        sellerName={chatSellerName}
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        onMessages={markSeen}
+      />
+    </>
+  ) : null;
+
+  // Full project history for this account — completed, previous and latest
+  // — the same "all projects" view a logged-in Client sees in the Client
+  // Portal (frontend/app/client/projects/page.tsx). No financials here,
+  // unlike renderProjectCard()'s single current-project card.
+  const renderProjectHistoryCard = (inv: PublicInvoice) => {
+    const history = inv.project_history ?? [];
+    if (history.length === 0) return null;
+
+    return (
+      <div style={card}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#94a3b8', marginBottom: 14 }}>
+          Project History ({history.length})
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {history.map(p => {
+            const sc = PROJECT_STATUS_STYLE[p.status] || { bg: '#f1f5f9', color: '#64748b' };
+            const files = p.deliveries ?? [];
+            return (
+              <div key={p.id} style={{ padding: '10px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                    <span style={{ fontSize: 11, padding: '2px 9px', borderRadius: 20, background: sc.bg, color: sc.color, fontWeight: 500, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
+                      {p.status?.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: 100, flexShrink: 0 }}>
+                    <div style={{ flex: 1, height: 5, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ width: `${p.progress}%`, height: '100%', background: p.progress === 100 ? '#16a34a' : '#2563eb', borderRadius: 3 }} />
+                    </div>
+                    <span style={{ fontSize: 10, color: '#64748b' }}>{p.progress}%</span>
+                  </div>
+                </div>
+
+                {/* Every file sent for this project, not just the latest —
+                    see PublicInvoiceController::downloadDeliverySubmission(). */}
+                {files.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10, paddingTop: 10, borderTop: '1px solid #e2e8f0' }}>
+                    {files.map(d => (
+                      <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '6px 10px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, flexWrap: 'wrap' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.file_name}</div>
+                          {d.delivered_at && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>{fmtDate(d.delivered_at)}</div>}
+                        </div>
+                        <a
+                          href={`${base}/public/invoices/${token}/deliveries/${d.id}/download`}
+                          style={{ padding: '4px 12px', borderRadius: 6, background: '#0d9488', color: '#fff', fontSize: 11, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
+                        >
+                          Download
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   if (pageState === 'loading') return (
     <div style={{ ...wrap, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -200,6 +531,9 @@ function PublicInvoicePayContent() {
           </div>
         </div>
       </div>
+      {renderProjectCard(invoice)}
+      {chatWidget}
+      {renderProjectHistoryCard(invoice)}
     </div></div>
   );
 
@@ -223,11 +557,14 @@ function PublicInvoicePayContent() {
           ))}
         </div>
       </div>
+      {renderProjectCard(invoice)}
+      {chatWidget}
+      {renderProjectHistoryCard(invoice)}
     </div></div>
   );
 
   if (pageState === 'success' && invoice) {
-    const gw             = invoice.available_gateways.find(g => g.key === selectedGateway);
+    const gw             = invoice.available_gateways.find(g => g.id === selectedAccountId) ?? invoice.available_gateways.find(g => g.type === selectedGateway);
     const isBankTransfer = selectedGateway === 'bank_transfer';
     return (
       <div style={wrap}><div style={inner}>
@@ -273,6 +610,9 @@ function PublicInvoicePayContent() {
             {isBankTransfer ? `Status will be updated after verification by ${invoice.company_name}` : 'A receipt has been recorded for this payment.'}
           </p>
         </div>
+        {renderProjectCard(invoice)}
+        {chatWidget}
+        {renderProjectHistoryCard(invoice)}
       </div></div>
     );
   }
@@ -284,6 +624,12 @@ function PublicInvoicePayContent() {
   const isPartial       = invoice.status === 'partially_paid';
   const isBankSelected  = selectedGateway === 'bank_transfer';
   const isOnlineGateway = selectedGateway && selectedGateway !== 'bank_transfer';
+  const selectedGw      = invoice.available_gateways.find(g => g.id === selectedAccountId) ?? invoice.available_gateways.find(g => g.type === selectedGateway);
+  // PayPal's Buttons SDK is loaded with a `currency` query param that must
+  // match the order it's about to create — once the backend converts an
+  // unsupported invoice currency, that's the converted currency, not the
+  // invoice's own.
+  const chargeCurrency  = selectedGw?.conversion_preview?.currency ?? invoice.currency;
 
   return (
     <div style={wrap}>
@@ -329,6 +675,9 @@ function PublicInvoicePayContent() {
           {invoice.customer_phone   && <div style={{ fontSize: 13, color: '#64748b', marginBottom: 2 }}>{invoice.customer_phone}</div>}
           {invoice.customer_address && <div style={{ fontSize: 13, color: '#64748b' }}>{invoice.customer_address}</div>}
         </div>
+
+        {renderProjectCard(invoice)}
+        {renderProjectHistoryCard(invoice)}
 
         {/* Line Items */}
         <div style={card}>
@@ -405,7 +754,9 @@ function PublicInvoicePayContent() {
           <div style={{ ...card, background: '#fef2f2', border: '1px solid #fecaca', textAlign: 'center', padding: '32px 24px' }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: '#dc2626', marginBottom: 6 }}>No Payment Methods Available</div>
-            <div style={{ fontSize: 13, color: '#ef4444' }}>Please contact {invoice.company_name} to arrange payment.</div>
+            <div style={{ fontSize: 13, color: '#ef4444' }}>
+              {invoice.gateway_unavailable_message ?? `Please contact ${invoice.company_name} to arrange payment.`}
+            </div>
           </div>
         )}
 
@@ -415,35 +766,47 @@ function PublicInvoicePayContent() {
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#94a3b8', marginBottom: 14 }}>Select Payment Method</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {invoice.available_gateways.map(gw => {
-                const meta   = GATEWAY_META[gw.key] ?? { icon: '💰', desc: '' };
-                const active = selectedGateway === gw.key;
+                const meta   = GATEWAY_META[gw.type] ?? { icon: '💰', desc: '' };
+                const active = gw.id !== null ? selectedAccountId === gw.id : selectedGateway === gw.type;
                 return (
-                  <button
-                    key={gw.key}
-                    type="button"
-                    onClick={() => setSelectedGateway(gw.key)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 14, width: '100%',
-                      padding: '14px 16px', borderRadius: 8, cursor: 'pointer', textAlign: 'left',
-                      border: `2px solid ${active ? '#3b82f6' : '#e2e8f0'}`,
-                      background: active ? '#eff6ff' : '#fff',
-                    }}
-                  >
-                    <span style={{ fontSize: 24, lineHeight: 1, flexShrink: 0 }}>{meta.icon}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{gw.label}</div>
-                      {meta.desc && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{meta.desc}</div>}
-                    </div>
-                    <div style={{
-                      width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                      border: `2px solid ${active ? '#3b82f6' : '#cbd5e1'}`,
-                      background: active ? '#3b82f6' : 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#fff', fontSize: 11, fontWeight: 700,
-                    }}>
-                      {active ? '✓' : ''}
-                    </div>
-                  </button>
+                  <div key={gw.id ?? gw.type}>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedGateway(gw.type); setSelectedAccountId(gw.id); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+                        padding: '14px 16px', borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                        border: `2px solid ${active ? '#3b82f6' : '#e2e8f0'}`,
+                        background: active ? '#eff6ff' : '#fff',
+                      }}
+                    >
+                      <span style={{ fontSize: 24, lineHeight: 1, flexShrink: 0 }}>{meta.icon}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{gw.label}</div>
+                        {meta.desc && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{meta.desc}</div>}
+                      </div>
+                      <div style={{
+                        width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+                        border: `2px solid ${active ? '#3b82f6' : '#cbd5e1'}`,
+                        background: active ? '#3b82f6' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: '#fff', fontSize: 11, fontWeight: 700,
+                      }}>
+                        {active ? '✓' : ''}
+                      </div>
+                    </button>
+                    {gw.conversion_preview && (
+                      <div style={{
+                        fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a',
+                        borderRadius: 6, padding: '6px 10px', marginTop: 6,
+                      }}>
+                        {gw.label} doesn&apos;t support {invoice.currency} — you&apos;ll be charged{' '}
+                        <strong>{fmt(gw.conversion_preview.amount, gw.conversion_preview.currency)}</strong>
+                        {' '}for {fmt(invoice.total_amount - invoice.paid_amount, invoice.currency)}
+                        {' '}(1 {invoice.currency} = {gw.conversion_preview.rate.toFixed(4)} {gw.conversion_preview.currency}).
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -481,14 +844,15 @@ function PublicInvoicePayContent() {
           <div style={card}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#94a3b8', marginBottom: 14 }}>Card Details</div>
             <InlineGatewayPayment
-              key={selectedGateway}
+              key={selectedAccountId ?? selectedGateway}
               ref={inlineRef}
               gateway={selectedGateway as 'stripe' | 'paypal' | 'authorize_net'}
               apiClient={axios}
-              initUrl={`${base}/public/invoices/${token}/gateways/${selectedGateway}/init`}
+              initUrl={`${base}/public/invoices/${token}/gateways/${selectedGateway}/init${selectedAccountId ? `?company_gateway_id=${selectedAccountId}` : ''}`}
               createOrderUrl={selectedGateway === 'paypal' ? `${base}/public/invoices/${token}/gateways/paypal/create-order` : undefined}
               chargeUrl={`${base}/public/invoices/${token}/gateways/${selectedGateway}/charge`}
-              currency={invoice.currency}
+              companyGatewayId={selectedAccountId}
+              currency={chargeCurrency}
               disabled={paying}
               onProcessingChange={setPaying}
               onSuccess={result => {
@@ -568,6 +932,7 @@ function PublicInvoicePayContent() {
         </div>
 
       </div>
+      {chatWidget}
     </div>
   );
 }

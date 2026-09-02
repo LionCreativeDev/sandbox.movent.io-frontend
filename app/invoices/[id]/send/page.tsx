@@ -5,9 +5,11 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminInvoiceService } from '@/lib/services/adminInvoiceService';
 import api from '@/lib/axios';
 import { getAuthType } from '@/lib/auth';
+import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { Invoice } from '@/types';
 import { HiArrowLeft, HiPaperAirplane, HiClipboard, HiClipboardDocumentCheck, HiEnvelope } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
+import { handleNotFound } from '@/lib/notFound';
 
 const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   draft:          { bg: '#f1f5f9', color: '#64748b', label: 'Draft' },
@@ -19,6 +21,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 };
 
 export default function SendInvoicePage() {
+  useAdminGuard();
   const router    = useRouter();
   const { id }    = useParams<{ id: string }>();
   const invoiceId = Number(id);
@@ -42,7 +45,7 @@ export default function SendInvoicePage() {
         const clientEmail = (inv as any).client?.email ?? '';
         if (clientEmail) setEmail(clientEmail);
       })
-      .catch(() => router.push('/invoices'))
+      .catch((err) => { if (!handleNotFound(err, router)) router.push('/invoices'); })
       .finally(() => setLoading(false));
   }, [invoiceId]); // eslint-disable-line react-hooks/exhaustive-deps
 

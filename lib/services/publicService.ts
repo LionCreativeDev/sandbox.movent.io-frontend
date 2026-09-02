@@ -13,6 +13,7 @@ export interface RegisterData {
   currency: 'USD';
   start_type: 'trial' | 'paid';
   timezone: string;
+  country?: string;
   max_users?: number | null;
   max_companies?: number | null;
 }
@@ -46,6 +47,11 @@ export const publicService = {
 
   checkEmail: async (email: string): Promise<boolean> => {
     const res = await api.post('/public/check-email', { email });
+    return res.data.data.available;
+  },
+
+  checkCompanyName: async (companyName: string): Promise<boolean> => {
+    const res = await api.post('/public/check-company-name', { company_name: companyName });
     return res.data.data.available;
   },
 

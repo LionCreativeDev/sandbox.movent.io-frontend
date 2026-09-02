@@ -4,14 +4,34 @@ import { useRouter, useParams } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminInvoiceService } from '@/lib/services/adminInvoiceService';
 import { Invoice, InvoiceItem } from '@/types';
+import api from '@/lib/axios';
+import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { HiArrowLeft, HiPlusCircle, HiTrash } from 'react-icons/hi2';
+import { handleNotFound } from '@/lib/notFound';
 
 const inp: React.CSSProperties = { width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', color: '#0f172a', boxSizing: 'border-box' };
 const lbl: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' };
 
 interface LineItem { description: string; quantity: number; unit_price: number; }
+interface GatewayAccountOption { id: number; gateway_type: string; label: string; is_default: boolean; is_active?: boolean }
+
+// Per gateway TYPE, not globally: if a type has exactly one active account,
+// auto-select it; otherwise select whichever account of that type is
+// explicitly flagged default. A type with 2+ accounts and none marked
+// default is left unselected — the user picks.
+function defaultGatewaySelection(accounts: GatewayAccountOption[]): number[] {
+  const byType = new Map<string, GatewayAccountOption[]>();
+  accounts.forEach(a => byType.set(a.gateway_type, [...(byType.get(a.gateway_type) ?? []), a]));
+  const ids: number[] = [];
+  byType.forEach(list => {
+    if (list.length === 1) ids.push(list[0].id);
+    else { const def = list.find(a => a.is_default); if (def) ids.push(def.id); }
+  });
+  return ids;
+}
 
 export default function EditInvoicePage() {
+  useAdminGuard();
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const invoiceId = Number(params.id);
@@ -27,12 +47,19 @@ export default function EditInvoicePage() {
   const [taxRate, setTaxRate]   = useState(0);
   const [discount, setDiscount] = useState(0);
   const [notes, setNotes]       = useState('');
+  const [gatewayAccounts, setGatewayAccounts]       = useState<GatewayAccountOption[]>([]);
+  const [selectedGatewayIds, setSelectedGatewayIds] = useState<number[]>([]);
+  const [gatewaysLoaded, setGatewaysLoaded]         = useState(false);
 
   useEffect(() => {
     adminInvoiceService.getOne(invoiceId).then(inv => {
       setInvoice(inv);
       setCurrency(inv.currency);
-      setDueDate(inv.due_date ?? '');
+      // due_date comes back as a full ISO timestamp
+      // ("2026-09-15T00:00:00.000000Z") — an <input type="date"> silently
+      // rejects anything but plain YYYY-MM-DD and just renders blank,
+      // making an invoice's existing due date look like it never saved.
+      setDueDate(inv.due_date ? inv.due_date.slice(0, 10) : '');
       setTaxRate(inv.tax_rate);
       setDiscount(inv.discount_amount);
       setNotes(inv.notes ?? '');
@@ -41,8 +68,31 @@ export default function EditInvoicePage() {
         quantity:    it.quantity,
         unit_price:  it.unit_price,
       })));
-    }).catch(() => setError('Failed to load invoice')).finally(() => setLoading(false));
+
+      api.get('/admin/settings').then(r => {
+        const accounts = (r.data.data.gateways as GatewayAccountOption[]).filter(g => g.is_active);
+        setGatewayAccounts(accounts);
+        const explicit = inv.gateway_account_ids ?? [];
+        setSelectedGatewayIds(explicit.length ? explicit : defaultGatewaySelection(accounts));
+        setGatewaysLoaded(true);
+      }).catch(() => setGatewaysLoaded(true));
+    }).catch((err) => { if (!handleNotFound(err, router)) setError('Failed to load invoice'); }).finally(() => setLoading(false));
   }, [invoiceId]);
+
+  // Only one account per gateway TYPE can be selected at once for an invoice
+  // — selecting one clears any other selected account of that same type.
+  // Different types (e.g. Stripe + PayPal) stay independent.
+  const toggleGatewaySelection = (id: number) => {
+    const account = gatewayAccounts.find(a => a.id === id);
+    if (!account) return;
+    setSelectedGatewayIds(p => {
+      const withoutSameType = p.filter(x => {
+        const a = gatewayAccounts.find(g => g.id === x);
+        return !a || a.gateway_type !== account.gateway_type;
+      });
+      return p.includes(id) ? withoutSameType : [...withoutSameType, id];
+    });
+  };
 
   const setItem = (i: number, k: keyof LineItem, v: string | number) =>
     setItems(prev => prev.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
@@ -61,12 +111,12 @@ export default function EditInvoicePage() {
     setSaving(true); setError('');
     try {
       await adminInvoiceService.update(invoiceId, {
-        currency,
         tax_rate:        taxRate,
         discount_amount: discount,
         notes:    notes || null,
         due_date: dueDate || null,
         items: items.map(r => ({ description: r.description, quantity: r.quantity, unit_price: r.unit_price })),
+        gateway_account_ids: selectedGatewayIds,
       });
       router.push(`/invoices/${invoiceId}`);
     } catch (err: unknown) {
@@ -85,7 +135,7 @@ export default function EditInvoicePage() {
 
   return (
     <DashboardLayout title={`Edit ${invoice.invoice_number}`}>
-      <div style={{ maxWidth: 900 }}>
+      <div style={{ width: '100%' }}>
         <button onClick={() => router.push(`/invoices/${invoiceId}`)} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
           <HiArrowLeft size={16} /> Back to {invoice.invoice_number}
         </button>
@@ -103,13 +153,12 @@ export default function EditInvoicePage() {
                   {error && <div style={{ marginBottom: 14, padding: '9px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, color: '#dc2626', fontSize: 13 }}>{error}</div>}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
                     <div>
+                      {/* USD is the system's only supported currency now —
+                          no longer editable. Shown read-only (not hidden) so
+                          an older invoice on a legacy currency (e.g. PKR)
+                          isn't silently misrepresented as USD here. */}
                       <label style={lbl}>Currency</label>
-                      <select style={inp} value={currency} onChange={e => setCurrency(e.target.value)}>
-                        <option value="PKR">PKR</option>
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                        <option value="GBP">GBP</option>
-                      </select>
+                      <input style={{ ...inp, background: '#f1f5f9', color: '#94a3b8', cursor: 'not-allowed' }} value={currency} disabled />
                     </div>
                     <div>
                       <label style={lbl}>Due Date</label>
@@ -147,6 +196,38 @@ export default function EditInvoicePage() {
                       </button>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* Payment Gateways card */}
+              <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden', marginTop: 16 }}>
+                <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
+                  <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Payment Gateways for this Invoice</h3>
+                </div>
+                <div style={{ padding: 22 }}>
+                  {!gatewaysLoaded ? (
+                    <div style={{ fontSize: 13, color: '#94a3b8' }}>Loading…</div>
+                  ) : gatewayAccounts.length === 0 ? (
+                    <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, fontSize: 13, color: '#dc2626' }}>
+                      No payment gateway is configured for this company. Please configure a payment gateway before sending invoice.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {gatewayAccounts.map(g => (
+                        <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: gatewayAccounts.length > 1 ? 'pointer' : 'default' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedGatewayIds.includes(g.id)}
+                            onChange={() => toggleGatewaySelection(g.id)}
+                            disabled={gatewayAccounts.length === 1}
+                            style={{ width: 16, height: 16, accentColor: '#2563eb' }}
+                          />
+                          <span style={{ fontSize: 13, color: '#0f172a' }}>{g.label}</span>
+                          {g.is_default && <span style={{ padding: '2px 8px', borderRadius: 20, background: '#ecfdf5', color: '#059669', fontSize: 10.5, fontWeight: 700 }}>DEFAULT</span>}
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

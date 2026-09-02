@@ -20,15 +20,18 @@ function fmt(n: number, cur = 'USD') {
 
 function StatCard({ label, value, sub, color, href }: { label: string; value: string | number; sub?: string; color?: string; href?: string }) {
   const inner = (
-    <div style={{ background: '#fff', borderRadius: 14, padding: '20px 22px', border: '1px solid #e2e8f0', flex: 1, minWidth: 150, cursor: href ? 'pointer' : 'default', transition: 'box-shadow .15s' }}
+    <div style={{ background: '#fff', borderRadius: 14, padding: '20px 22px', border: '1px solid #e2e8f0', height: '100%', boxSizing: 'border-box', cursor: href ? 'pointer' : 'default', transition: 'box-shadow .15s' }}
       onMouseEnter={e => href && ((e.currentTarget as HTMLElement).style.boxShadow = '0 4px 16px rgba(0,0,0,.08)')}
       onMouseLeave={e => href && ((e.currentTarget as HTMLElement).style.boxShadow = 'none')}>
       <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 800, color: color || '#1e293b' }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>{sub}</div>}
+      {/* Always rendered (invisible when absent) so every card reserves the
+          same footer space and matches height, regardless of whether it has
+          a sub line — never collapse this to `sub && <div>...` again. */}
+      <div style={{ fontSize: 12, color: '#64748b', marginTop: 4, visibility: sub ? 'visible' : 'hidden' }}>{sub || ' '}</div>
     </div>
   );
-  return href ? <Link href={href} style={{ textDecoration: 'none', flex: 1, minWidth: 150 }}>{inner}</Link> : <div style={{ flex: 1, minWidth: 150 }}>{inner}</div>;
+  return href ? <Link href={href} style={{ textDecoration: 'none', display: 'block', height: '100%' }}>{inner}</Link> : <div style={{ height: '100%' }}>{inner}</div>;
 }
 
 export default function ClientDashboardPage() {
@@ -49,7 +52,6 @@ export default function ClientDashboardPage() {
   );
 
   const s   = data?.stats   || {};
-  const cur = data?.currency || 'PKR';
   const hasProjects = (data?.modules || []).includes('projects');
   const recentInvoices: any[] = data?.recent_invoices || [];
   const recentProjects: any[] = data?.recent_projects || [];
@@ -59,35 +61,56 @@ export default function ClientDashboardPage() {
       <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1e293b', margin: '0 0 4px' }}>Dashboard</h1>
       <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 24px' }}>Welcome to your client portal</p>
 
-      {/* ── Invoice summary stat cards ── */}
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 24 }}>
+      {/* ── Summary stat widgets — fixed 4-per-row grid, wraps to a new row
+          instead of packing however many fit the screen width ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
         <StatCard
-          label="Total Invoiced"
-          value={fmt(s.total_invoiced || 0, cur)}
-          sub={`${s.total_invoices || 0} invoice${s.total_invoices !== 1 ? 's' : ''}`}
+          label="Total Invoices"
+          value={s.total_invoices ?? 0}
           color="#1e293b"
           href="/client/invoices"
         />
         <StatCard
-          label="Amount Paid"
-          value={fmt(s.total_paid || 0, cur)}
+          label="Paid Invoices"
+          value={s.paid_count ?? 0}
+          sub={fmt(s.paid_amount ?? 0, 'USD')}
           color="#059669"
+          href="/client/invoices"
         />
         <StatCard
-          label="Outstanding"
-          value={fmt(s.outstanding || 0, cur)}
-          sub={s.overdue_count > 0 ? `${s.overdue_count} overdue` : undefined}
-          color={s.outstanding > 0 ? '#ea580c' : '#059669'}
-          href={s.outstanding > 0 ? '/client/invoices' : undefined}
+          label="Pending Invoices"
+          value={s.pending_count ?? 0}
+          sub={fmt(s.pending_amount ?? 0, 'USD')}
+          color="#d97706"
+          href="/client/invoices"
         />
-        {s.pending_count > 0 && (
-          <StatCard
-            label="Awaiting Payment"
-            value={s.pending_count}
-            sub="invoices unpaid"
-            color="#d97706"
-            href="/client/invoices"
-          />
+        {hasProjects && (
+          <>
+            <StatCard
+              label="Total Projects"
+              value={s.total_projects ?? 0}
+              color="#1e293b"
+              href="/client/projects"
+            />
+            <StatCard
+              label="Pending Projects"
+              value={s.pending_projects ?? 0}
+              color="#d97706"
+              href="/client/projects"
+            />
+            <StatCard
+              label="Ongoing Projects"
+              value={s.ongoing_projects ?? 0}
+              color="#2563eb"
+              href="/client/projects"
+            />
+            <StatCard
+              label="Completed Projects"
+              value={s.completed_projects ?? 0}
+              color="#16a34a"
+              href="/client/projects"
+            />
+          </>
         )}
       </div>
 
@@ -124,9 +147,9 @@ export default function ClientDashboardPage() {
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>{fmt(inv.total_amount || 0, inv.currency || cur)}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>{fmt(inv.total_amount || 0, inv.currency || 'USD')}</div>
                       {balance > 0 && inv.status !== 'paid' && (
-                        <div style={{ fontSize: 11, color: '#ea580c', marginTop: 1 }}>Balance: {fmt(balance, inv.currency || cur)}</div>
+                        <div style={{ fontSize: 11, color: '#ea580c', marginTop: 1 }}>Balance: {fmt(balance, inv.currency || 'USD')}</div>
                       )}
                       <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, marginTop: 2, display: 'inline-block', ...st }}>{st.label}</span>
                     </div>

@@ -6,6 +6,7 @@ import api from '@/lib/axios';
 import { getAuthType, getAuthUser } from '@/lib/auth';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { User } from '@/types';
+import { MODULE_CATALOG } from '@/lib/moduleConfig';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Plan {
@@ -20,15 +21,17 @@ interface Stats {
   clients:   { total: number; portal: number; active: number };
   projects:  { total: number; active: number; done: number; on_hold: number };
   tasks:     { todo: number; in_progress: number; completed: number; overdue: number };
-  invoices:  { total: number; unpaid: number; overdue: number; paid: number; total_billed: number; total_unpaid: number };
-  payments:  { total_received: number; this_month: number };
+  invoices:  { total: number; unpaid: number; overdue: number; paid: number; by_currency: CurrencyBilling[] };
+  payments:  { by_currency: CurrencyPayments[] };
   employees: { total: number; users: number };
   support:   { open_tickets: number };
 }
+interface CurrencyBilling { currency: string; total_billed: number; total_unpaid: number }
+interface CurrencyPayments { currency: string; total_received: number; this_month: number }
 interface Company { id: number; name: string; is_active: boolean; clients_count: number; portal_clients_count: number; seat_limit: number | null }
 interface RecentLead    { id: number; name: string; email: string | null; status: string; source: string | null; created_at: string }
 interface RecentClient  { id: number; name: string; company_name: string | null; portal_access: boolean; status: string; created_at: string }
-interface RecentInvoice { id: number; invoice_number: string; total_amount: number; status: string; due_date: string | null; created_at: string }
+interface RecentInvoice { id: number; invoice_number: string; total_amount: number; currency: string; status: string; due_date: string | null; created_at: string }
 interface RecentProject { id: number; name: string; status: string; deadline: string | null; created_at: string }
 interface DashData {
   modules: string[];
@@ -38,7 +41,7 @@ interface DashData {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-const PKR = (n: number) => '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+const PKR = (n: number, cur = 'USD') => `${cur} ${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   active: { bg: '#ecfdf5', color: '#059669' }, won: { bg: '#ecfdf5', color: '#059669' },
@@ -60,6 +63,13 @@ const ago = (d: string) => {
   if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
   if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
   return Math.floor(diff / 86400) + 'd ago';
+};
+// Matches frontend/app/pay/invoice/[token]/page.tsx's fmtDate — a named
+// month reads unambiguously everywhere, unlike raw ISO strings or numeric
+// D/M/Y (which reads as M/D/Y to half the audience).
+const fmtDate = (d?: string | null) => {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 };
 
 function StatCard({ label, value, sub, color, href }: { label: string; value: string | number; sub?: string; color: string; href?: string }) {
@@ -117,6 +127,21 @@ export default function DashboardPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [modules, setModules] = useState<string[]>([]);
 
+  // Re-called by CompanySelector's onChange too — switching companies just
+  // needs this same fetch to run again; the axios interceptor already
+  // attaches the newly-active company's X-Active-Company-Id header.
+  const loadAdminDashboard = () => {
+    setLoading(true);
+    api.get('/admin/dashboard')
+      .then(r => {
+        const d: DashData = r.data.data;
+        setData(d);
+        setModules(d.modules ?? []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
   useEffect(() => {
     const type = getAuthType();
     setIsAdmin(type === 'admin');
@@ -135,14 +160,13 @@ export default function DashboardPage() {
       // project_management is intentionally NOT a blanket "any permission in
       // this module → show every shortcut" mapping like the others above —
       // a Seller holds several project_management keys (chat, client-facing
-      // comments, linked projects) but must never see the Tasks/Timesheets/
-      // Production shortcuts, so each one requires its own specific key,
-      // mirroring the same permAny lists Sidebar.tsx uses for these nav items.
+      // comments, linked projects) but must never see the Tasks/Timesheets
+      // shortcuts, so each one requires its own specific key, mirroring the
+      // same permAny lists Sidebar.tsx uses for these nav items.
       const PROJECT_MGMT_SHORTCUT_PERMS: Record<string, string[]> = {
         projects:   ['canViewProjects', 'canViewLinkedProjects', 'canViewProjectDashboard'],
         tasks:      ['canViewTasks'],
         timesheets: ['canViewTimesheets'],
-        production: ['canViewProductionQueue', 'canViewProductionDashboard', 'canStartProductionTasks', 'canSubmitProductionTasks'],
       };
       const mods = new Set<string>();
       for (const a of assignments) {
@@ -163,15 +187,8 @@ export default function DashboardPage() {
       return;
     }
 
-    api.get('/admin/dashboard')
-      .then(r => {
-        const d: DashData = r.data.data;
-        setData(d);
-        setModules(d.modules ?? []);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    loadAdminDashboard();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const s  = data?.stats;
   const pl = data?.plan;
@@ -179,9 +196,17 @@ export default function DashboardPage() {
   const has = (mod: string) => modules.includes(mod);
   const hasFinance = has('invoices') || has('payments');
 
+  // `modules` is the raw, granular company_modules key list (e.g.
+  // 'invoice_reminders', 'team_resources') — not what the Admin actually
+  // "purchased". Count against MODULE_CATALOG's 7 top-level purchasable
+  // modules instead, matching what /admin/upgrade-modules shows as bought.
+  const purchasedModules = MODULE_CATALOG.filter(m => m.internalKeys.some(k => modules.includes(k)));
+
   const clientStats      = s?.clients   ?? { total: 0, portal: 0, active: 0 };
-  const invoiceStats     = s?.invoices  ?? { total: 0, unpaid: 0, overdue: 0, paid: 0, total_billed: 0, total_unpaid: 0 };
-  const payStats         = s?.payments  ?? { total_received: 0, this_month: 0 };
+  const invoiceStats     = s?.invoices  ?? { total: 0, unpaid: 0, overdue: 0, paid: 0, by_currency: [] as CurrencyBilling[] };
+  const payStats         = s?.payments  ?? { by_currency: [] as CurrencyPayments[] };
+  const billingByCurrency  = invoiceStats.by_currency ?? [];
+  const paymentsByCurrency = payStats.by_currency ?? [];
   const invoicesByStatus = data?.by_status.invoices ?? {};
   const recentClients    = data?.recent.clients  ?? [];
   const recentInvoices   = data?.recent.invoices ?? [];
@@ -206,7 +231,6 @@ export default function DashboardPage() {
       projects:   { icon: '📋', label: 'Projects',    desc: 'Active project tracking',     href: '/projects',   color: '#0891b2', bg: '#ecfeff' },
       tasks:      { icon: '✅', label: 'Tasks',       desc: 'My assigned tasks',           href: '/tasks',      color: '#16a34a', bg: '#f0fdf4' },
       timesheets: { icon: '⏱️', label: 'Timesheets',  desc: 'Log & review work hours',     href: '/timesheets', color: '#d97706', bg: '#fffbeb' },
-      production: { icon: '🎬', label: 'Production',  desc: 'Production queue',            href: '/projects/production', color: '#dc2626', bg: '#fef2f2' },
       compliance: { icon: '🛡️', label: 'Compliance',  desc: 'Policies & risk',             href: '/compliance', color: '#b91c1c', bg: '#fef2f2' },
       reports:    { icon: '📊', label: 'Reports',     desc: 'Financial reports',           href: '/reports',    color: '#d97706', bg: '#fffbeb' },
     };
@@ -284,21 +308,47 @@ export default function DashboardPage() {
   // A bare path like '/projects' routes into the sub-user page, which then
   // calls /user/* endpoints with this Admin's token and 401s, which the axios
   // interceptor treats as an expired session and force-logs-out.
+  // Billed/Revenue are split one card per currency present — an admin can
+  // have invoices/payments in more than one currency (e.g. after switching
+  // Settings currency), and blending amounts across currencies into one
+  // number is meaningless. Mirrors the by_currency pattern in /reports and
+  // the client dashboard.
+  const billingCards = has('invoices')
+    ? billingByCurrency.map(b => ({
+        label: billingByCurrency.length > 1 ? `Total Billed (${b.currency})` : 'Total Billed',
+        value: PKR(b.total_billed, b.currency),
+        sub:   `${PKR(b.total_unpaid, b.currency)} pending`,
+        color: '#059669', href: '/admin/invoices',
+      }))
+    : [];
+  const revenueCards = hasFinance
+    ? paymentsByCurrency.map(p => ({
+        label: paymentsByCurrency.length > 1 ? `Revenue (${p.currency})` : 'Revenue',
+        value: PKR(p.total_received, p.currency),
+        sub:   `${PKR(p.this_month, p.currency)} this month`,
+        color: '#16a34a', href: '/admin/payments',
+      }))
+    : [];
+
   const statCards = [
     has('leads')    && s && { label: 'Leads',        value: s.leads.total,                sub: `${s.leads.new} new · ${s.leads.won} won`,                              color: '#2563eb', href: '/admin/leads' },
-    has('clients')  &&      { label: 'Clients',      value: clientStats.total,            sub: `${clientStats.portal} portal active`,                                  color: '#7c3aed', href: '/admin/clients' },
+    has('client_portal') && { label: 'Clients',      value: clientStats.total,            sub: `${clientStats.portal} portal active`,                                  color: '#7c3aed', href: '/admin/clients' },
     has('projects') && s && { label: 'Projects',     value: s.projects.total,             sub: `${s.projects.active} active · ${s.projects.done} done`,               color: '#059669', href: '/admin/projects' },
     has('tasks')    && s && { label: 'Tasks',        value: s.tasks.todo + s.tasks.in_progress, sub: s.tasks.overdue ? `${s.tasks.overdue} overdue!` : `${s.tasks.completed} done`, color: s.tasks.overdue ? '#dc2626' : '#0891b2', href: '/admin/tasks' },
     has('invoices') &&      { label: 'Invoices',     value: invoiceStats.total,           sub: `${invoiceStats.unpaid} unpaid · ${invoiceStats.overdue} overdue`,       color: '#d97706', href: '/admin/invoices' },
-    has('invoices') &&      { label: 'Total Billed', value: PKR(invoiceStats.total_billed),  sub: `${PKR(invoiceStats.total_unpaid)} pending`,                        color: '#059669', href: '/admin/invoices' },
-    hasFinance      &&      { label: 'Revenue',      value: PKR(payStats.total_received),    sub: `${PKR(payStats.this_month)} this month`,                            color: '#16a34a', href: '/admin/payments' },
+    ...billingCards,
+    ...revenueCards,
+    // Placeholder — no Expense model/table exists in this codebase yet.
+    // Reserves the card's spot in the layout for when that feature lands;
+    // deliberately not wired to any query.
+    hasFinance      &&      { label: 'Expenses',     value: '—',                              sub: 'Coming soon',                                                      color: '#94a3b8', href: '' },
     has('hr')       && s && { label: 'Employees',    value: s.employees.total,            sub: `${s.employees.users} system users`,                                    color: '#64748b', href: '/admin/hr' },
   ].filter(Boolean) as { label: string; value: string | number; sub: string; color: string; href: string }[];
 
   const alerts = s ? [
     has('tasks')    && s.tasks.overdue    > 0 && { n: s.tasks.overdue,          label: 'overdue tasks' },
     has('invoices') && s.invoices.overdue > 0 && { n: s.invoices.overdue,       label: 'overdue invoices' },
-    has('clients')  && s.support.open_tickets > 0 && { n: s.support.open_tickets, label: 'open support tickets' },
+    has('client_portal') && s.support.open_tickets > 0 && { n: s.support.open_tickets, label: 'open support tickets' },
   ].filter(Boolean) as { n: number; label: string }[] : [];
 
   const breakdowns = [
@@ -327,7 +377,7 @@ export default function DashboardPage() {
         );
       }),
     },
-    has('clients') && recentClients.length > 0 && {
+    has('client_portal') && recentClients.length > 0 && {
       key: 'clients', title: 'Recent Clients', href: '/admin/clients',
       items: recentClients.map((c: RecentClient) => {
         const cs = sc(c.status);
@@ -358,7 +408,7 @@ export default function DashboardPage() {
               <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{p.name}</div>
               <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 20, background: c.bg, color: c.color, fontWeight: 600, whiteSpace: 'nowrap', marginLeft: 6, flexShrink: 0 }}>{cap(p.status)}</span>
             </div>
-            {p.deadline && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Due: {p.deadline}</div>}
+            {p.deadline && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Due: {fmtDate(p.deadline)}</div>}
             <div suppressHydrationWarning style={{ fontSize: 10, color: '#cbd5e1', marginTop: 2 }}>{ago(p.created_at)}</div>
           </Link>
         );
@@ -373,11 +423,11 @@ export default function DashboardPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>{inv.invoice_number}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#059669' }}>{PKR(inv.total_amount)}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#059669' }}>{PKR(inv.total_amount, inv.currency)}</div>
               </div>
               <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 20, background: c.bg, color: c.color, fontWeight: 600, flexShrink: 0, marginLeft: 6 }}>{cap(inv.status)}</span>
             </div>
-            {inv.due_date && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Due: {inv.due_date}</div>}
+            {inv.due_date && <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Due: {fmtDate(inv.due_date)}</div>}
             <div suppressHydrationWarning style={{ fontSize: 10, color: '#cbd5e1', marginTop: 2 }}>{ago(inv.created_at)}</div>
           </Link>
         );
@@ -413,14 +463,12 @@ export default function DashboardPage() {
               <span style={{ fontSize: 11, padding: '5px 13px', borderRadius: 20, fontWeight: 600, background: subB.bg, color: subB.color }}>
                 {subB.label}
               </span>
+              <Link href="/admin/upgrade-modules" style={{ fontSize: 12, padding: '5px 13px', borderRadius: 20, fontWeight: 600, background: '#f1f5f9', color: '#475569', textDecoration: 'none' }}>
+                {purchasedModules.length}/{MODULE_CATALOG.length} modules purchased
+              </Link>
               <span style={{ fontSize: 12, color: pl.users_limit !== null && pl.users_used >= pl.users_limit ? '#dc2626' : '#94a3b8', fontWeight: 500 }}>
                 {pl.users_used ?? 1}/{pl.users_limit ?? '∞'} users
               </span>
-              {pl.can_add_company && (
-                <Link href="/admin/companies/create" style={{ fontSize: 11, padding: '5px 12px', background: '#2563eb', color: '#fff', borderRadius: 8, fontWeight: 600, textDecoration: 'none' }}>
-                  + Add Company
-                </Link>
-              )}
               <Link href="/admin/upgrade-modules" style={{ fontSize: 11, padding: '5px 12px', background: '#fff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 8, fontWeight: 600, textDecoration: 'none' }}>
                 Upgrade Modules
               </Link>
@@ -508,62 +556,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Companies breakdown ─────────────────────────────────────── */}
-      {data && data.companies.length > 0 && (
-        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>My Companies</span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {pl?.can_add_company && (
-                <Link href="/admin/companies/create" style={{ fontSize: 11, color: '#fff', background: '#2563eb', fontWeight: 600, textDecoration: 'none', padding: '4px 12px', borderRadius: 6 }}>+ Add Company</Link>
-              )}
-              {has('clients') && (
-                <Link href="/admin/clients" style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, textDecoration: 'none', padding: '4px 12px', border: '1px solid #bfdbfe', borderRadius: 6 }}>Manage Clients →</Link>
-              )}
-            </div>
-          </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#f8fafc' }}>
-                {['Company', 'Status', 'Seat Limit', 'Clients', 'Portal Active', 'Usage'].map(h => (
-                  <th key={h} style={{ padding: '9px 18px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.companies.map(c => {
-                const limit = c.seat_limit;
-                const pct   = limit ? Math.min(Math.round((c.portal_clients_count / limit) * 100), 100) : 0;
-                const bc    = pct >= 90 ? '#dc2626' : pct >= 70 ? '#d97706' : '#059669';
-                return (
-                  <tr key={c.id} style={{ borderBottom: '1px solid #f8fafc' }}>
-                    <td style={{ padding: '12px 18px', fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{c.name}</td>
-                    <td style={{ padding: '12px 18px' }}>
-                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, fontWeight: 500, background: c.is_active ? '#ecfdf5' : '#f1f5f9', color: c.is_active ? '#059669' : '#94a3b8' }}>
-                        {c.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px 18px', fontSize: 15, fontWeight: 800, color: '#2563eb' }}>{limit ?? '∞'}</td>
-                    <td style={{ padding: '12px 18px', fontSize: 15, fontWeight: 700, color: '#1e293b' }}>{c.clients_count}</td>
-                    <td style={{ padding: '12px 18px' }}>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: '#059669' }}>{c.portal_clients_count}</span>
-                      {limit && <span style={{ fontSize: 11, color: '#94a3b8' }}> / {limit}</span>}
-                    </td>
-                    <td style={{ padding: '12px 18px', minWidth: 140 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ flex: 1, height: 5, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: limit ? `${pct}%` : '0%', background: bc, borderRadius: 3 }} />
-                        </div>
-                        <span style={{ fontSize: 10, color: bc, fontWeight: 600, whiteSpace: 'nowrap' }}>{limit ? `${pct}%` : '—'}</span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
     </DashboardLayout>
   );
 }

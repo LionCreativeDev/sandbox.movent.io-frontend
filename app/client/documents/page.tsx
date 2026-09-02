@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { clientService } from '@/lib/services/clientService';
 import clientApi from '@/lib/clientAxios';
 import toast from 'react-hot-toast';
+import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
 
 const GREEN = '#10b981';
 const TYPE_OPTS = ['', 'pdf', 'spreadsheet', 'word', 'image', 'other'];
@@ -13,6 +14,7 @@ export default function ClientDocumentsPage() {
   const [search, setSearch]   = useState('');
   const [loading, setLoading] = useState(true);
   const [dlId, setDlId]       = useState<number | null>(null);
+  const [notEnabled, setNotEnabled] = useState(false);
 
   const load = (t: string, s?: string) => {
     setLoading(true);
@@ -21,7 +23,7 @@ export default function ClientDocumentsPage() {
     if (s) params.search = s;
     clientService.documents(Object.keys(params).length ? params : undefined)
       .then(setDocs)
-      .catch(() => setDocs([]))
+      .catch((err: any) => { if (err?.response?.status === 403) setNotEnabled(true); else setDocs([]); })
       .finally(() => setLoading(false));
   };
 
@@ -30,7 +32,9 @@ export default function ClientDocumentsPage() {
   const download = async (id: number, fileName: string, source: string) => {
     setDlId(id);
     try {
-      const path = source === 'attachment' ? `/client/attachments/${id}/download` : `/client/documents/${id}/download`;
+      const path = source === 'attachment' ? `/client/attachments/${id}/download`
+        : source === 'delivery' ? `/client/delivery-submissions/${id}/download`
+        : `/client/documents/${id}/download`;
       const res = await clientApi.get(path, { responseType: 'blob' });
       const url = URL.createObjectURL(res.data);
       const a   = document.createElement('a');
@@ -84,6 +88,8 @@ export default function ClientDocumentsPage() {
       <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Loading…</div>
+        ) : notEnabled ? (
+          <PortalModuleDisabled feature="Documents" />
         ) : docs.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>No documents shared with you yet.</div>
         ) : (

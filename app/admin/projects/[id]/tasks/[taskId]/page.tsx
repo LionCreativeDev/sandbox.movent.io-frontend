@@ -4,11 +4,12 @@ import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import toast from 'react-hot-toast';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
-import { adminProjectService, Task, TaskActivity, ProjectComment, MentionableUser } from '@/lib/services/adminProjectService';
+import { adminProjectService, Task, TaskActivity, ProjectComment, ProjectTaskAttachment, MentionableUser } from '@/lib/services/adminProjectService';
 import { getAuthUser } from '@/lib/auth';
 import { ROLE_LABELS } from '@/lib/roleUtils';
 import { Admin } from '@/types';
-import { card, lbl, inp, Badge, ThumbIcon, TASK_SC, PRIORITY_SC, PRODUCTION_SC, PRODUCTION_LABEL, fmtDate, ALLOWED_ATTACHMENT_TYPES, asRelation } from '@/components/admin/projects/shared';
+import { card, lbl, inp, Badge, ThumbIcon, TASK_SC, PRIORITY_SC, fmtDate, fmtFileSize, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, asRelation } from '@/components/admin/projects/shared';
+import { handleNotFound } from '@/lib/notFound';
 
 const TASK_TYPE_LABEL: Record<string, string> = {
   general: 'General', production: 'Production', client_request: 'Client Request', internal: 'Internal',
@@ -73,6 +74,10 @@ export default function AdminTaskDetailPage() {
   const [activities, setActivities] = useState<TaskActivity[]>([]);
   const [comments, setComments] = useState<ProjectComment[]>([]);
 
+  const [attachments, setAttachments] = useState<ProjectTaskAttachment[]>([]);
+  const [attLoading, setAttLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+
   const [commentBody, setCommentBody] = useState('');
   const [postingComment, setPostingComment] = useState(false);
   const [commentFile, setCommentFile] = useState<File | null>(null);
@@ -94,9 +99,11 @@ export default function AdminTaskDetailPage() {
       const found = tasks.find(t => t.id === taskId) ?? null;
       if (!found) { toast.error('Task not found'); router.replace(`/admin/projects/${projectId}/tasks`); return; }
       setTask(found);
-    } catch {
-      toast.error('Task not found');
-      router.replace(`/admin/projects/${projectId}/tasks`);
+    } catch (err) {
+      if (!handleNotFound(err, router)) {
+        toast.error('Task not found');
+        router.replace(`/admin/projects/${projectId}/tasks`);
+      }
     } finally { setLoading(false); }
   };
 
@@ -108,12 +115,50 @@ export default function AdminTaskDetailPage() {
     try { setComments(await adminProjectService.comments.list(projectId, taskId)); } catch { /* silent */ }
   };
 
+  const loadAttachments = async () => {
+    setAttLoading(true);
+    try { setAttachments(await adminProjectService.taskAttachments.list(projectId, taskId)); }
+    catch { toast.error('Failed to load attachments'); }
+    finally { setAttLoading(false); }
+  };
+
   useEffect(() => {
     loadTask();
     loadActivity();
     loadComments();
+    loadAttachments();
     adminProjectService.comments.mentionableUsers(projectId, 'internal', taskId).then(setMentionCandidates).catch(() => setMentionCandidates([]));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const uploadAttachments = async (files: FileList | null) => {
+    if (!files) return;
+    setUploading(true);
+    let failed = 0;
+    for (const file of Array.from(files)) {
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+      if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${file.name}: file type not allowed`); failed++; continue; }
+      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) { toast.error(`${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); failed++; continue; }
+      try { await adminProjectService.taskAttachments.upload(projectId, taskId, file); }
+      catch { failed++; toast.error(`${file.name}: upload failed`); }
+    }
+    if (failed < files.length) toast.success('Attachment(s) uploaded');
+    setUploading(false);
+    loadAttachments();
+  };
+
+  const downloadAttachment = async (a: ProjectTaskAttachment) => {
+    try { await adminProjectService.taskAttachments.download(projectId, taskId, a.id, a.original_name); }
+    catch { toast.error('Download failed'); }
+  };
+
+  const deleteAttachment = async (a: ProjectTaskAttachment) => {
+    if (!confirm(`Delete "${a.original_name}"?`)) return;
+    try {
+      await adminProjectService.taskAttachments.remove(projectId, taskId, a.id);
+      toast.success('Attachment deleted');
+      setAttachments(prev => prev.filter(x => x.id !== a.id));
+    } catch { toast.error('Failed to delete attachment'); }
+  };
 
   // Comments have no realtime push — poll so a sub-user's new comment shows
   // up without the viewer having to manually reload the page.
@@ -267,11 +312,10 @@ export default function AdminTaskDetailPage() {
 
   const assignedTo = asRelation(task.assigned_to);
   const assignedByLabel = asRelation(task.assigned_by)?.name ?? 'Company Admin';
-  const productionQueue = task.production_queue;
 
   return (
     <DashboardLayout title="Task">
-      <div style={{ maxWidth: 900 }}>
+      <div style={{ width: '100%', maxWidth: 1240 }}>
         <button onClick={() => router.push(`/admin/projects/${projectId}/tasks`)} style={{
           background: '#f1f5f9', border: 'none', borderRadius: 8,
           padding: '8px 14px', fontSize: 13, cursor: 'pointer', color: '#64748b', marginBottom: 16,
@@ -310,13 +354,10 @@ export default function AdminTaskDetailPage() {
               <Badge label={task.status} sc={TASK_SC[task.status]} />
               <Badge label={task.priority} sc={PRIORITY_SC[task.priority]} />
               {task.task_type && <Badge label={TASK_TYPE_LABEL[task.task_type] ?? task.task_type} />}
-              {productionQueue && (
-                <Badge label={PRODUCTION_LABEL[productionQueue.status] ?? productionQueue.status} sc={PRODUCTION_SC[productionQueue.status]} />
-              )}
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, margin: '20px 0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, margin: '20px 0' }}>
             <Field label="Assigned To" value={assignedTo ? `${assignedTo.name}${assignedTo.email ? ` (${assignedTo.email})` : ''}` : 'Unassigned'} />
             <Field label="Assigned By" value={assignedByLabel} />
             <Field label="Project" value={task.project?.name} />
@@ -337,6 +378,53 @@ export default function AdminTaskDetailPage() {
             <div>
               <div style={lbl}>Notes</div>
               <div style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{task.notes}</div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Attachments ── */}
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0 }}>Attachments ({attachments.length})</h3>
+            <label style={{
+              padding: '6px 14px', borderRadius: 8, border: '1.5px dashed #cbd5e1',
+              background: uploading ? '#f1f5f9' : '#f8fafc', color: '#475569',
+              fontSize: 12, fontWeight: 500, cursor: uploading ? 'not-allowed' : 'pointer',
+            }}>
+              {uploading ? 'Uploading…' : '+ Add Files'}
+              <input
+                type="file" multiple disabled={uploading} style={{ display: 'none' }}
+                accept={ALLOWED_ATTACHMENT_TYPES.map(t => `.${t}`).join(',')}
+                onChange={e => { uploadAttachments(e.target.files); e.target.value = ''; }}
+              />
+            </label>
+          </div>
+          {attLoading ? (
+            <div style={{ padding: 12, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+          ) : attachments.length === 0 ? (
+            <div style={{ fontSize: 13, color: '#94a3b8' }}>No attachments uploaded yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {attachments.map(a => (
+                <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f8fafc' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b' }}>{a.original_name}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                      {a.file_type ?? 'file'} · {fmtFileSize(a.file_size)} · {a.uploaded_by_admin?.name ?? a.uploaded_by_user?.name ?? '—'} · {fmtDate(a.created_at)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button onClick={() => downloadAttachment(a)} style={{
+                      padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                      background: '#2563eb', color: '#fff', border: 'none',
+                    }}>Download</button>
+                    <button onClick={() => deleteAttachment(a)} style={{
+                      padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                      background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6,
+                    }}>Delete</button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

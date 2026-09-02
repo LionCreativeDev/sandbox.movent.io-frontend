@@ -1,15 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { userGeneralChatService, ChatThreadSummary } from '@/lib/services/generalChatService';
+import { userGeneralChatService, ChatThreadSummary, EligibleChatUser } from '@/lib/services/generalChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
 import { inp, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
 import { getAuthUser } from '@/lib/auth';
 import { User } from '@/types';
-import api from '@/lib/axios';
 import toast from 'react-hot-toast';
-
-interface EligibleUser { id: number; name: string; role_type: string }
+import { chatSenderName } from '@/lib/chatSender';
 
 // Avatar background rotates through a small fixed palette keyed off the
 // thread id, purely cosmetic — so a sidebar full of conversations doesn't
@@ -53,7 +51,7 @@ export default function ChatPage() {
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
 
-  const [eligibleUsers, setEligibleUsers] = useState<EligibleUser[]>([]);
+  const [eligibleUsers, setEligibleUsers] = useState<EligibleChatUser[]>([]);
   const [showNewDirect, setShowNewDirect] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [groupTitle, setGroupTitle] = useState('');
@@ -69,6 +67,10 @@ export default function ChatPage() {
       .finally(() => setLoadingThreads(false));
   };
 
+  const loadEligibleUsers = () => {
+    userGeneralChatService.eligibleUsers().then(setEligibleUsers).catch(() => {});
+  };
+
   const loadMessages = (threadId: number) => {
     userGeneralChatService.messages(threadId).then(setMessages).catch(() => {});
     // Opening a thread marks it read server-side — refresh the sidebar
@@ -79,7 +81,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     loadThreads();
-    api.get('/user/chat/eligible-users').then(r => setEligibleUsers(r.data.data)).catch(() => {});
+    loadEligibleUsers();
   }, []);
 
   useEffect(() => {
@@ -101,6 +103,7 @@ export default function ChatPage() {
       const { thread_id } = await userGeneralChatService.createDirect(userId);
       setShowNewDirect(false);
       loadThreads();
+      loadEligibleUsers();
       setActiveThreadId(thread_id);
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Failed to start chat');
@@ -203,9 +206,14 @@ export default function ChatPage() {
 
           {showNewDirect && (
             <div style={{ padding: 12, borderBottom: '1px solid #f1f5f9', maxHeight: 220, overflowY: 'auto' }}>
-              {eligibleUsers.length === 0 ? (
+              {/* Someone I already have a 1:1 with isn't offered again here —
+                  their existing conversation already shows in the list on
+                  the left; picking them again would just reopen the same
+                  thread (see findDirectThread()). Still shown, unfiltered,
+                  in the New Group checklist below. */}
+              {eligibleUsers.filter(u => !u.has_direct_thread).length === 0 ? (
                 <div style={{ fontSize: 12, color: '#94a3b8' }}>No eligible users found.</div>
-              ) : eligibleUsers.map(u => (
+              ) : eligibleUsers.filter(u => !u.has_direct_thread).map(u => (
                 <div key={u.id} onClick={() => startDirect(u.id)} style={{ padding: '7px 8px', borderRadius: 7, cursor: 'pointer', fontSize: 12.5, color: '#334155' }}
                   onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
@@ -303,7 +311,7 @@ export default function ChatPage() {
                   <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 13, marginTop: 20 }}>No messages yet. Say hello 👋</div>
                 ) : messages.map(m => {
                   const isMine = m.sender_id != null && m.sender_id === me?.id;
-                  const senderName = m.sender?.name ?? m.sender_admin?.name ?? '—';
+                  const senderName = chatSenderName(m);
                   return (
                     <div key={m.id} style={{ display: 'flex', justifyContent: isMine ? 'flex-end' : 'flex-start', gap: 8 }}>
                       {!isMine && (

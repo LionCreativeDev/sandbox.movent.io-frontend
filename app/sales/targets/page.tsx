@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
-import { salesTargetService, SalesTarget } from '@/lib/services/salesExtrasService';
+import { salesTargetService, SalesTarget, TeamSalesTarget } from '@/lib/services/salesExtrasService';
 import { can } from '@/lib/auth';
 import { inp, lbl, card, StatCard } from '@/components/admin/projects/shared';
+import TeamTargetsTable from '@/components/sales/TeamTargetsTable';
 import toast from 'react-hot-toast';
 
 export default function SalesTargetsPage() {
@@ -16,6 +17,30 @@ export default function SalesTargetsPage() {
   const [targetValue, setTargetValue] = useState('');
   const [targetDeals, setTargetDeals] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Lead Manager only — every Seller/Lead Manager's target, not just their
+  // own (see Api\User\SalesTargetController::team()).
+  const canManageTeam = can('sales', 'canManageSalesTargets');
+  const [team, setTeam] = useState<TeamSalesTarget[]>([]);
+  const [teamLoading, setTeamLoading] = useState(true);
+
+  const loadTeam = () => {
+    setTeamLoading(true);
+    salesTargetService.team.list()
+      .then(setTeam)
+      .catch(() => toast.error('Failed to load team targets'))
+      .finally(() => setTeamLoading(false));
+  };
+
+  const saveTeamTarget = async (userId: number, payload: { target_value?: number | null; target_deals?: number | null }) => {
+    try {
+      await salesTargetService.team.update(userId, payload);
+      toast.success('Target updated');
+      loadTeam();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to update target');
+    }
+  };
 
   const load = () => {
     setLoading(true);
@@ -28,6 +53,7 @@ export default function SalesTargetsPage() {
   useEffect(() => {
     if (!can('sales', 'canViewSalesTargets')) { router.replace('/dashboard'); return; }
     load();
+    if (canManageTeam) loadTeam();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async (e: React.FormEvent) => {
@@ -52,7 +78,7 @@ export default function SalesTargetsPage() {
 
   return (
     <DashboardLayout title="Sales Targets">
-      <div style={{ maxWidth: 900 }}>
+      <div style={{ width: '100%' }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 4px' }}>Sales Targets</h1>
         <p style={{ margin: '0 0 20px', fontSize: 13, color: '#94a3b8' }}>{target.period_start} – {target.period_end}</p>
 
@@ -89,6 +115,23 @@ export default function SalesTargetsPage() {
               {saving ? 'Saving…' : 'Save Target'}
             </button>
           </form>
+        )}
+
+        {canManageTeam && (
+          <div style={{ marginTop: 28 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>Team Targets</h2>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: '#94a3b8' }}>
+              Set this month&apos;s target for the Sellers you oversee.
+            </p>
+            {/* No readOnlyRoles passed — the team endpoint now returns
+                Sellers only (Api\User\SalesTargetController::team()), so a
+                read-only peer-Lead-Manager row can no longer reach here. */}
+            {teamLoading ? (
+              <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>Loading…</div>
+            ) : (
+              <TeamTargetsTable targets={team} onSave={saveTeamTarget} />
+            )}
+          </div>
         )}
       </div>
     </DashboardLayout>

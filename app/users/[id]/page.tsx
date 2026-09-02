@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { userService, UserActivity } from '@/lib/services/userService';
-import { ROLE_LABELS, computeAccessLabel } from '@/lib/roleUtils';
+import { roleDisplayLabel, computeAccessLabel } from '@/lib/roleUtils';
 import { MODULE_CATALOG } from '@/lib/moduleCatalog';
 import { SIMPLE_PROJECT_PERMISSIONS, collapseProjectPermissions } from '@/lib/simplifiedProjectPermissions';
+import { handleNotFound } from '@/lib/notFound';
 import { User } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { HiArrowLeft, HiPencilSquare } from 'react-icons/hi2';
@@ -44,7 +45,7 @@ export default function UserProfilePage() {
   useEffect(() => {
     Promise.all([userService.getOne(id), userService.getActivity(id)])
       .then(([u, act]) => { setUser(u); setActivity(act); })
-      .catch(() => setError('Failed to load user'))
+      .catch((err) => { if (!handleNotFound(err, router)) setError('Failed to load user'); })
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -59,11 +60,11 @@ export default function UserProfilePage() {
       merged[mod] = Array.from(new Set([...(merged[mod] ?? []), ...keys]));
     }
   }
-  const accessLabel = Object.keys(merged).length > 0 ? computeAccessLabel(merged) : (ROLE_LABELS[user.role_type] ?? user.role_type);
+  const accessLabel = Object.keys(merged).length > 0 ? computeAccessLabel(merged) : roleDisplayLabel(user);
 
   return (
     <DashboardLayout title="User Profile">
-      <div style={{ maxWidth: 900 }}>
+      <div style={{ width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <button onClick={() => router.push('/admin/users')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
             <HiArrowLeft size={16} /> Back to Users
@@ -94,7 +95,7 @@ export default function UserProfilePage() {
               <div style={{ fontSize: 13, color: '#64748b', marginTop: 3 }}>{user.email}{user.phone ? ` · ${user.phone}` : ''}</div>
               <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
                 <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 50, fontSize: 12, fontWeight: 600, background: '#eff6ff', color: '#2563eb' }}>{accessLabel}</span>
-                <span style={{ fontSize: 12, color: '#94a3b8' }}>{ROLE_LABELS[user.role_type] ?? user.role_type}</span>
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>{roleDisplayLabel(user)}</span>
               </div>
             </div>
           </div>
@@ -104,7 +105,14 @@ export default function UserProfilePage() {
         <div style={card}>
           <h3 style={sectionTitle}>Details</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
-            <div><div style={fieldLabel}>Company</div><div style={fieldValue}>{user.company?.name ?? '—'}</div></div>
+            <div>
+              <div style={fieldLabel}>{assignments.length > 1 ? 'Companies' : 'Company'}</div>
+              <div style={fieldValue}>
+                {assignments.length > 0
+                  ? assignments.map(a => a.company_name + (a.status === 'suspended' ? ' (suspended)' : '')).join(', ')
+                  : (user.company?.name ?? '—')}
+              </div>
+            </div>
             <div><div style={fieldLabel}>Created By</div><div style={fieldValue}>{user.created_by?.name ?? 'Company Admin'}</div></div>
             <div><div style={fieldLabel}>Joined Date</div><div style={fieldValue}>{fmtDate(user.created_at)}</div></div>
             <div><div style={fieldLabel}>Last Login</div><div style={fieldValue}>{fmtDate(user.last_login_at)}</div></div>
@@ -155,7 +163,6 @@ export default function UserProfilePage() {
                 { label: 'Managed Projects', count: activity.managed_projects?.length ?? 0 },
                 { label: 'Member Of', count: activity.member_projects?.length ?? 0 },
                 { label: 'Assigned Tasks', count: activity.assigned_tasks?.length ?? 0 },
-                { label: 'Production Tasks', count: activity.production_tasks?.length ?? 0 },
                 { label: 'Timesheets', count: activity.timesheets?.length ?? 0 },
                 { label: 'Deliverables', count: activity.deliverables?.length ?? 0 },
               ].map(s => (

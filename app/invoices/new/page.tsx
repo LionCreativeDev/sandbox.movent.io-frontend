@@ -5,13 +5,18 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminInvoiceService, InvoicePayload } from '@/lib/services/adminInvoiceService';
 import { adminClientService, ClientCompany } from '@/lib/services/adminClientService';
 import { userClientService } from '@/lib/services/userClientService';
-import { adminLeadService, userLeadService } from '@/lib/services/adminLeadService';
-import { Client, User } from '@/types';
-import { getAuthType, getAuthUser, can } from '@/lib/auth';
+import { adminLeadService, userLeadService, Lead } from '@/lib/services/adminLeadService';
+import { adminProjectService, Project } from '@/lib/services/adminProjectService';
+import { userProjectService } from '@/lib/services/userProjectService';
+import { Admin, Client, User } from '@/types';
+import { getAuthType, getAuthUser, can, getActiveCompany } from '@/lib/auth';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
-import { HiArrowLeft, HiPlusCircle, HiTrash, HiUserCircle, HiUsers } from 'react-icons/hi2';
+import PhoneInput from '@/components/ui/PhoneInput';
+import { HiArrowLeft, HiFolder, HiFolderPlus, HiPlusCircle, HiTrash, HiUserCircle, HiUsers } from 'react-icons/hi2';
+import SubmitButton from '@/components/ui/SubmitButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
 
 const inp: React.CSSProperties = { width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', color: '#0f172a', boxSizing: 'border-box' };
 const lbl: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' };
@@ -19,7 +24,25 @@ const lbl: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 7
 interface LineItem { description: string; quantity: number; unit_price: number; }
 const EMPTY_ITEM = (): LineItem => ({ description: '', quantity: 1, unit_price: 0 });
 
+interface GatewayAccountOption { id: number; gateway_type: string; label: string; is_default: boolean; is_active?: boolean }
+
+// Per gateway TYPE, not globally: if a type has exactly one active account,
+// auto-select it (nothing else to choose from); otherwise select whichever
+// account of that type is explicitly flagged default. A type with 2+
+// accounts and none marked default is left unselected — the user picks.
+function defaultGatewaySelection(accounts: GatewayAccountOption[]): number[] {
+  const byType = new Map<string, GatewayAccountOption[]>();
+  accounts.forEach(a => byType.set(a.gateway_type, [...(byType.get(a.gateway_type) ?? []), a]));
+  const ids: number[] = [];
+  byType.forEach(list => {
+    if (list.length === 1) ids.push(list[0].id);
+    else { const def = list.find(a => a.is_default); if (def) ids.push(def.id); }
+  });
+  return ids;
+}
+
 type CustomerType = 'client' | 'guest';
+type ProjectMode = 'new' | 'existing';
 
 function NewInvoiceForm() {
   useAdminGuard();
@@ -39,29 +62,65 @@ function NewInvoiceForm() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [authResolved, setAuthResolved] = useState(false);
   const [leadPrefilled, setLeadPrefilled] = useState(false);
+  const [dealLead, setDealLead] = useState<Lead | null>(null);
   const [clientPrefilled, setClientPrefilled] = useState(false);
 
   // Company + settings
   const [companies, setCompanies]   = useState<ClientCompany[]>([]);
   const [companyId, setCompanyId]   = useState(0);
-  const [currency, setCurrency]     = useState('USD');
+  // The selected company's OWN currency — never a shared/admin-wide value,
+  // since one admin can own companies that each invoice in a different
+  // currency (see Company::invoicingProfile() on the backend, same fix).
+  const currency = companies.find(c => c.id === companyId)?.currency ?? 'USD';
   const [dueDate, setDueDate]       = useState('');
   const [taxRate, setTaxRate]       = useState(0);
   const [discount, setDiscount]     = useState(0);
   const [notes, setNotes]           = useState('');
+  const [invoicePurpose, setInvoicePurpose] = useState('');
   const [items, setItems]           = useState<LineItem[]>([EMPTY_ITEM()]);
 
   // Customer type — starts as 'client'; useEffect corrects to 'guest' for sub-users
   const [customerType, setCustomerType] = useState<CustomerType>('client');
   const [clients, setClients]           = useState<Client[]>([]);
-  const [loadingClients, setLoadingClients] = useState(false);
+  // Starts true (not false) — companyId resolves asynchronously on mount, and
+  // the lead/client prefill effects below gate on `!loadingClients` to avoid
+  // reading a stale, still-empty `clients` list. Defaulting to false left a
+  // window where that guard was wrongly open before the real fetch ever
+  // started, so a lead that had already been converted to a client would
+  // get permanently prefilled as "Guest" (clients.some(...) against an empty
+  // array) before its actual client ever loaded.
+  const [loadingClients, setLoadingClients] = useState(true);
   const [clientId, setClientId]         = useState<number | null>(null);
+  // Why the client list came back empty, when it wasn't simply "none exist".
+  // A 403 from GET /user/clients (missing canViewClients) used to be swallowed
+  // and rendered as "No clients found for this company", which reads as an empty
+  // database rather than the permission problem it actually is.
+  const [clientsError, setClientsError] = useState('');
 
   // Guest fields
   const [guestName, setGuestName]       = useState('');
   const [guestEmail, setGuestEmail]     = useState('');
   const [guestPhone, setGuestPhone]     = useState('');
   const [guestAddress, setGuestAddress] = useState('');
+
+  // Project — 'existing' mirrors the manual Line Items flow this form
+  // already had; 'new' replaces Line Items entirely with a single
+  // title/reference/amount, since the project (and its billing) doesn't
+  // exist yet.
+  const [projectMode, setProjectMode]         = useState<ProjectMode>('new');
+  const [projectModuleAvailable, setProjectModuleAvailable] = useState(false);
+  const [projects, setProjects]               = useState<Project[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [projectId, setProjectId]             = useState<number | null>(null);
+  const [projectTitle, setProjectTitle]       = useState('');
+  const [projectReference, setProjectReference] = useState('');
+  const [projectAmount, setProjectAmount]     = useState(0);
+
+  // Payment gateway selection for this invoice
+  const [gatewayAccounts, setGatewayAccounts]     = useState<GatewayAccountOption[]>([]);
+  const [selectedGatewayIds, setSelectedGatewayIds] = useState<number[]>([]);
+  const [canSelectGateway, setCanSelectGateway]   = useState(false);
+  const [gatewaysLoaded, setGatewaysLoaded]        = useState(false);
 
   // Submit
   const [saving, setSaving]   = useState(false);
@@ -77,15 +136,32 @@ function NewInvoiceForm() {
     setAuthResolved(true);
     if (!adminFlag) {
       const user = getAuthUser() as User | null;
+      const hasProjects = can('project_management', 'canViewProjects') || can('project_management', 'canViewLinkedProjects');
+      setProjectModuleAvailable(hasProjects);
+      if (hasProjects && !leadId) setProjectMode('existing');
       if (user?.company) {
         const c: ClientCompany = { id: user.company.id, name: user.company.name, currency: user.company.currency ?? 'USD' };
         setCompanies([c]);
         setCompanyId(c.id);
       }
     } else {
+      const admin = getAuthUser() as Admin | null;
+      const hasProjects = (admin?.modules ?? []).includes('projects') || (admin?.modules ?? []).includes('project_management');
+      setProjectModuleAvailable(hasProjects);
+      if (hasProjects && !leadId) setProjectMode('existing');
       adminClientService.companies().then(cs => {
         setCompanies(cs);
-        if (cs.length) setCompanyId(companyIdParam && cs.some(c => c.id === companyIdParam) ? companyIdParam : cs[0].id);
+        if (!cs.length) return;
+        // Same priority order as the CompanySelector's own init logic and
+        // Api\Admin\ClientController::index(): an explicit ?company_id= wins,
+        // then whichever company is active (the CompanySelector dropdown),
+        // then the first company as a last resort. Without this, creating
+        // an invoice straight from the sidebar (no query param) always
+        // defaulted to the alphabetically-first company regardless of which
+        // one was actually selected as active — including its currency.
+        const active = getActiveCompany();
+        const fallback = typeof active === 'number' && cs.some(c => c.id === active) ? active : cs[0].id;
+        setCompanyId(companyIdParam && cs.some(c => c.id === companyIdParam) ? companyIdParam : fallback);
       }).catch(() => {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -96,23 +172,73 @@ function NewInvoiceForm() {
     if (!companyId) { setClients([]); return; }
     setLoadingClients(true);
     setClientId(null);
+    setClientsError('');
     const load = isAdmin
       ? adminClientService.list({ company_id: String(companyId) }).then(res => res.clients)
       : userClientService.list();
     load
       .then(list => setClients(list))
-      .catch(() => setClients([]))
+      .catch((err: unknown) => {
+        setClients([]);
+        const status = (err as { response?: { status?: number } }).response?.status;
+        setClientsError(status === 403
+          ? 'You don’t have permission to view this company’s clients. Ask your Company Admin to grant you "View Clients", or switch to Guest.'
+          : 'Could not load clients. Please retry, or switch to Guest.');
+      })
       .finally(() => setLoadingClients(false));
   }, [companyId, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Pre-fill from a Lead (e.g. arriving via /invoices/new?lead_id=50 from a
-  // won lead's detail page) — once, and only after the client list (if any)
-  // has loaded so we can match lead.client_id against it.
+  // Load this company's projects for the "Existing Project" picker — the
+  // same visibility rule the Projects module already applies (created by
+  // this staff member, or a Seller's own assigned/handed-off projects).
   useEffect(() => {
-    if (!authResolved || !leadId || leadPrefilled || loadingClients) return;
+    if (!companyId || !projectModuleAvailable) return;
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoadingProjects(true);
+      setProjectId(null);
+    });
+    const load = isAdmin
+      ? adminProjectService.list({ company_id: String(companyId) })
+      : userProjectService.list();
+    load
+      .then(list => { if (!cancelled) setProjects(list); })
+      .catch(() => { if (!cancelled) setProjects([]); })
+      .finally(() => { if (!cancelled) setLoadingProjects(false); });
+    return () => { cancelled = true; };
+  }, [companyId, isAdmin, projectModuleAvailable]);
+
+  // Existing-project picker only makes sense scoped to the selected client —
+  // otherwise every project in the company (including other clients') shows
+  // up as a pickable option for this invoice.
+  const visibleProjects = customerType === 'client' && clientId
+    ? projects.filter(p => p.client_id === clientId)
+    : projects;
+
+  // Selecting/changing the client can strand a previously-picked project
+  // that belongs to someone else — drop it so the picker doesn't silently
+  // keep a cross-client selection.
+  useEffect(() => {
+    if (projectId && !visibleProjects.some(p => p.id === projectId)) setProjectId(null);
+  }, [clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill from a Lead (e.g. arriving via /invoices/new?lead_id=50 from a
+  // won lead's detail page) — once. Doesn't wait on (or validate against)
+  // the client list: lead.client_id is already company-scoped and
+  // permission-checked server-side, so it's trusted directly rather than
+  // gated on clients having already loaded — the <select> below reflects
+  // the selection correctly as soon as its options populate either way,
+  // and gating on the client list here was a source of a real race
+  // condition (the client list can still be loading, or briefly empty,
+  // when this resolves).
+  useEffect(() => {
+    if (!authResolved || !leadId || leadPrefilled) return;
     const svc = isAdmin ? adminLeadService : userLeadService;
     svc.getOne(leadId).then(lead => {
-      if (lead.client_id && clients.some(c => c.id === lead.client_id)) {
+      setCompanyId(lead.company_id);
+
+      if (lead.client_id) {
         setCustomerType('client');
         setClientId(lead.client_id);
       } else {
@@ -121,9 +247,35 @@ function NewInvoiceForm() {
         if (lead.email) setGuestEmail(lead.email);
         if (lead.phone) setGuestPhone(lead.phone);
       }
+
+      // Carry the Deal's own figures onto the invoice — without this the
+      // form starts with an empty PKR 0 line item, so ANY payment (however
+      // small) trivially satisfies total_amount and the invoice shows
+      // "Paid" even though nothing meaningful was actually collected.
+      setDealLead(lead);
+      if (lead.proposed_project_title) {
+        setInvoicePurpose(lead.required_kickoff_amount ? 'Kickoff Payment' : lead.proposed_project_title);
+      }
+
+      // A won lead has no project yet — default to naming one, carrying the
+      // deal's own proposed title/reference so they travel with the invoice.
+      setProjectMode('new');
+      setProjectTitle(lead.name);
+      if (lead.deal_reference) setProjectReference(lead.deal_reference);
+      const kickoff = lead.required_kickoff_amount ?? lead.estimated_value ?? 0;
+      if (kickoff > 0) {
+        setItems([{
+          description: lead.proposed_project_title
+            ? `${lead.proposed_project_title}${lead.scope_summary ? ' — ' + lead.scope_summary : ''}`
+            : (lead.scope_summary || 'Kickoff payment'),
+          quantity: 1,
+          unit_price: kickoff,
+        }]);
+      }
+
       setLeadPrefilled(true);
     }).catch(() => setLeadPrefilled(true));
-  }, [authResolved, leadId, leadPrefilled, loadingClients, clients, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authResolved, leadId, leadPrefilled, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill from a Client (e.g. arriving via /invoices/new?client_id=12 from
   // a client's own detail page) — once, and only after that company's client
@@ -137,12 +289,81 @@ function NewInvoiceForm() {
     setClientPrefilled(true);
   }, [authResolved, clientIdParam, leadId, clientPrefilled, loadingClients, clients]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load this tenant's active gateway accounts once auth is resolved —
+  // Admin reads the full Settings gateway list (already has everything);
+  // a sub-user reads the lightweight read-only endpoint instead, which also
+  // reports whether they're allowed to change the selection at all. Both
+  // responses also carry the Settings > Invoice tab defaults (tax rate,
+  // payment terms, notes/footer) — previously saved there but never actually
+  // prefilled here, so every invoice silently started at 0%/blank/no-due-date
+  // regardless of what was configured.
+  useEffect(() => {
+    if (!authResolved) return;
+    const load = isAdmin
+      ? api.get('/admin/settings').then(r => ({
+          accounts: (r.data.data.gateways as GatewayAccountOption[]).filter(g => g.is_active),
+          canSelect: true,
+          defaults: { tax_rate: r.data.data.invoice.tax_rate, payment_terms: r.data.data.invoice.payment_terms, notes: r.data.data.invoice.notes },
+        }))
+      : api.get('/user/invoices/gateway-accounts').then(r => ({
+          accounts: r.data.data.accounts as GatewayAccountOption[],
+          canSelect: !!r.data.data.can_select_gateway,
+          defaults: r.data.data.invoice_defaults as { tax_rate: number; payment_terms: number; notes: string },
+        }));
+
+    load.then(({ accounts, canSelect, defaults }) => {
+      setGatewayAccounts(accounts);
+      setCanSelectGateway(canSelect);
+      setSelectedGatewayIds(defaultGatewaySelection(accounts));
+      setGatewaysLoaded(true);
+
+      if (defaults) {
+        setTaxRate(defaults.tax_rate || 0);
+        if (defaults.notes) setNotes(defaults.notes);
+        if (defaults.payment_terms > 0) {
+          const d = new Date();
+          d.setDate(d.getDate() + defaults.payment_terms);
+          setDueDate(d.toISOString().slice(0, 10));
+        }
+      }
+    }).catch(() => setGatewaysLoaded(true));
+  }, [authResolved, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Only one account per gateway TYPE can be selected at once for an invoice
+  // (offering two PayPal accounts on the same invoice is ambiguous — which
+  // one actually gets charged) — selecting one clears any other selected
+  // account of that same type. Different types (e.g. Stripe + PayPal) stay
+  // independent and can both be selected.
+  const toggleGatewaySelection = (id: number) => {
+    const account = gatewayAccounts.find(a => a.id === id);
+    if (!account) return;
+    setSelectedGatewayIds(p => {
+      const withoutSameType = p.filter(x => {
+        const a = gatewayAccounts.find(g => g.id === x);
+        return !a || a.gateway_type !== account.gateway_type;
+      });
+      return p.includes(id) ? withoutSameType : [...withoutSameType, id];
+    });
+  };
+  const noGatewayConfigured = gatewaysLoaded && gatewayAccounts.length === 0;
+
   const setItem = (i: number, k: keyof LineItem, v: string | number) =>
     setItems(prev => prev.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
   const addItem    = () => setItems(p => [...p, EMPTY_ITEM()]);
   const removeItem = (i: number) => setItems(p => p.filter((_, idx) => idx !== i));
 
-  const subtotal = items.reduce((s, r) => s + r.quantity * r.unit_price, 0);
+  // "New Project" normally replaces the manual Line Items list with a single
+  // title/amount row — there's no project yet to itemize billing against.
+  // Arriving from a won lead is the exception: that lead's own figures are
+  // already prefilled into Line Items above, so those stand as the billing
+  // detail and only the project's title/reference are named here.
+  const showLineItems = projectMode === 'existing' || !!leadId;
+
+  const effectiveItems: LineItem[] = showLineItems
+    ? items
+    : [{ description: projectTitle.trim() || 'New Project', quantity: 1, unit_price: projectAmount }];
+
+  const subtotal = effectiveItems.reduce((s, r) => s + r.quantity * r.unit_price, 0);
   const taxAmt   = (subtotal * taxRate) / 100;
   const total    = Math.max(0, subtotal + taxAmt - discount);
 
@@ -155,19 +376,33 @@ function NewInvoiceForm() {
   // the error state) if the form isn't ready to submit.
   const buildPayload = (): InvoicePayload | null => {
     if (!companyId) { setError('Select a company'); return null; }
-    if (items.some(r => !r.description.trim())) { setError('All items need a description'); return null; }
+    if (noGatewayConfigured) { setError('Please activate a payment gateway before creating an invoice.'); return null; }
     if (customerType === 'client' && !clientId) { setError('Select a client, or switch to Guest for an external customer'); return null; }
     if (customerType === 'guest' && !guestName.trim()) { setError('Customer name is required for guest invoices'); return null; }
+    if (projectMode === 'existing' && !projectId) { setError('Select an existing project, or switch to New Project'); return null; }
+    if (projectMode === 'new' && !projectTitle.trim()) { setError('Project title is required'); return null; }
+    if (showLineItems) {
+      if (items.some(r => !r.description.trim())) { setError('All items need a description'); return null; }
+    } else if (!projectAmount || projectAmount <= 0) {
+      setError('Enter the amount for this invoice');
+      return null;
+    }
 
     return {
       company_id:      companyId,
       lead_id:         leadId || undefined,
-      currency,
+      // Not sent — `currency` here is just a read-only preview of the
+      // selected company's own currency. The backend always derives it
+      // fresh from Company::invoicingProfile() when omitted (see
+      // Api\Admin\InvoiceController::store()/Api\User\InvoiceController::store()),
+      // so there's no risk of sending a stale cached value.
       tax_rate:        taxRate,
       discount_amount: discount,
       notes:           notes || null,
       due_date:        dueDate || null,
-      items: items.map(r => ({ description: r.description, quantity: r.quantity, unit_price: r.unit_price })),
+      invoice_purpose: invoicePurpose || undefined,
+      items: effectiveItems.map(r => ({ description: r.description, quantity: r.quantity, unit_price: r.unit_price })),
+      gateway_account_ids: selectedGatewayIds,
       ...(customerType === 'client'
         ? { client_id: clientId }
         : {
@@ -178,10 +413,15 @@ function NewInvoiceForm() {
             customer_address: guestAddress.trim() || null,
           }
       ),
+      ...(projectMode === 'existing'
+        ? { project_id: projectId }
+        : { project_id: null, project_title: projectTitle.trim(), project_reference: projectReference.trim() || null }
+      ),
     };
   };
 
   const handleCreate = async (sendAfter: boolean) => {
+    if (saving || sending || linking) return; // Guards a double-click/Enter re-submit before the disabled prop re-renders.
     const recipientEmail = customerType === 'client'
       ? clients.find(c => c.id === clientId)?.email
       : guestEmail.trim();
@@ -232,6 +472,7 @@ function NewInvoiceForm() {
   // email required, unlike Create & Send) — generateLink already marks the
   // invoice as sent on its own, matching existing invoice-module behavior.
   const handleCreateAndLink = async () => {
+    if (saving || sending || linking) return; // Guards a double-click/Enter re-submit before the disabled prop re-renders.
     setError('');
     setCreatedLink('');
     const payload = buildPayload();
@@ -287,9 +528,36 @@ function NewInvoiceForm() {
     );
   };
 
+  const projectModeBtn = (mode: ProjectMode, icon: React.ReactNode, label: string, sub: string): React.ReactNode => {
+    const active = projectMode === mode;
+    return (
+      <button
+        type="button"
+        onClick={() => setProjectMode(mode)}
+        style={{
+          flex: 1, padding: '12px 16px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
+          border: `2px solid ${active ? '#2563eb' : '#e2e8f0'}`,
+          background: active ? '#eff6ff' : '#fafafa',
+          transition: 'border-color .15s, background .15s',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 3 }}>
+          <span style={{ color: active ? '#2563eb' : '#94a3b8' }}>{icon}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: active ? '#1d4ed8' : '#374151' }}>{label}</span>
+          {active && <span style={{ marginLeft: 'auto', width: 16, height: 16, borderRadius: '50%', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 900, flexShrink: 0 }}>✓</span>}
+        </div>
+        <div style={{ fontSize: 11, color: '#94a3b8', paddingLeft: 25 }}>{sub}</div>
+      </button>
+    );
+  };
+
   return (
     <DashboardLayout title="New Invoice">
-      <div style={{ maxWidth: 900 }}>
+      <LoadingOverlay
+        show={saving || sending || linking}
+        message={sending ? 'Creating & Sending Invoice…' : 'Creating Invoice…'}
+      />
+      <div>
         <button onClick={() => router.back()} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
           <HiArrowLeft size={16} /> Back
         </button>
@@ -310,6 +578,28 @@ function NewInvoiceForm() {
                     </div>
                   )}
 
+                  {/* Deal banner — this invoice is being created FOR a
+                      specific Won lead/Deal; shows exactly what it's for and
+                      the kickoff figure the line item below was prefilled
+                      from, so the seller can see/adjust it before sending. */}
+                  {dealLead && (
+                    <div style={{ marginBottom: 16, padding: '10px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8 }}>
+                      <div style={{ fontSize: 13, color: '#1e3a5f', fontWeight: 600 }}>
+                        For Deal: {dealLead.proposed_project_title || dealLead.name}
+                        {dealLead.deal_reference && <span style={{ color: '#3b82f6', fontWeight: 500 }}> — {dealLead.deal_reference}</span>}
+                      </div>
+                      {(dealLead.required_kickoff_amount || dealLead.estimated_value) ? (
+                        <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 3 }}>
+                          Required kickoff amount: {(dealLead.required_kickoff_amount ?? dealLead.estimated_value)?.toLocaleString()} — pre-filled as the line item below, adjust if this invoice is for a different amount.
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#dc2626', marginTop: 3 }}>
+                          No kickoff amount is set on this Deal — enter the correct amount in the line item below before sending.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Company */}
                   <div style={{ marginBottom: 16 }}>
                     <label style={lbl}>Company *</label>
@@ -323,14 +613,10 @@ function NewInvoiceForm() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 0 }}>
                     <div>
                       <label style={lbl}>Currency</label>
-                      <select style={inp} value={currency} onChange={e => setCurrency(e.target.value)}>
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                        <option value="GBP">GBP</option>
-                        <option value="AED">AED</option>
-                        <option value="SAR">SAR</option>
-                        <option value="PKR">PKR</option>
-                      </select>
+                      {/* Locked to whatever Company Admin configured in
+                          Settings (see Company::invoicingProfile() on the
+                          backend) — never picked per-invoice. */}
+                      <input style={{ ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }} value={currency} disabled readOnly />
                     </div>
                     <div>
                       <label style={lbl}>Due Date</label>
@@ -340,6 +626,14 @@ function NewInvoiceForm() {
                       <label style={lbl}>Notes</label>
                       <input style={inp} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional note…" />
                     </div>
+                  </div>
+
+                  {/* Invoice Purpose — what this invoice is FOR, shown
+                      prominently to the client (spec §5), even before any
+                      Project exists. */}
+                  <div style={{ marginTop: 14 }}>
+                    <label style={lbl}>Invoice Purpose</label>
+                    <input style={inp} value={invoicePurpose} onChange={e => setInvoicePurpose(e.target.value)} placeholder="e.g. 50% Advance Payment" />
                   </div>
                 </div>
               </div>
@@ -364,6 +658,10 @@ function NewInvoiceForm() {
                       <label style={lbl}>Select Client *</label>
                       {loadingClients ? (
                         <div style={{ padding: '10px 0', fontSize: 13, color: '#94a3b8' }}>Loading clients…</div>
+                      ) : clientsError ? (
+                        <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, fontSize: 13, color: '#dc2626' }}>
+                          {clientsError} <button type="button" onClick={() => setCustomerType('guest')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#2563eb', fontWeight: 600, fontSize: 13, padding: 0 }}>Switch to Guest</button>
+                        </div>
                       ) : clients.length === 0 ? (
                         <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, fontSize: 13, color: '#dc2626' }}>
                           No clients found for this company. <button type="button" onClick={() => setCustomerType('guest')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#2563eb', fontWeight: 600, fontSize: 13, padding: 0 }}>Switch to Guest</button>
@@ -412,7 +710,7 @@ function NewInvoiceForm() {
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                         <div>
                           <label style={lbl}>Phone <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span></label>
-                          <input style={inp} value={guestPhone} onChange={e => setGuestPhone(e.target.value)} placeholder="+1 234 567 8900" />
+                          <PhoneInput value={guestPhone} onChange={setGuestPhone} />
                         </div>
                         <div>
                           <label style={lbl}>Billing Address <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span></label>
@@ -429,7 +727,89 @@ function NewInvoiceForm() {
                 </div>
               </div>
 
+              {/* Project card */}
+              <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden', marginBottom: 16 }}>
+                <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
+                  <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Project</h3>
+                </div>
+                <div style={{ padding: 22 }}>
+
+                  {/* Mode toggle */}
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
+                    {projectModuleAvailable && projectModeBtn('existing', <HiFolder size={15} />, 'Existing Project', 'Bill against a project already created or assigned to you')}
+                    {projectModeBtn('new',      <HiFolderPlus size={15} />, 'New Project', 'Name the project and set an amount for this invoice')}
+                  </div>
+
+                  {/* Existing Project picker */}
+                  {projectModuleAvailable && projectMode === 'existing' && (
+                    <div>
+                      <label style={lbl}>Select Project *</label>
+                      {loadingProjects ? (
+                        <div style={{ padding: '10px 0', fontSize: 13, color: '#94a3b8' }}>Loading projects…</div>
+                      ) : customerType === 'client' && !clientId ? (
+                        <div style={{ padding: '10px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 13, color: '#64748b' }}>
+                          Select a client above to see their projects.
+                        </div>
+                      ) : visibleProjects.length === 0 ? (
+                        <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, fontSize: 13, color: '#dc2626' }}>
+                          {customerType === 'client' ? 'This client has no projects yet.' : 'No projects found.'} <button type="button" onClick={() => setProjectMode('new')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#2563eb', fontWeight: 600, fontSize: 13, padding: 0 }}>Switch to New Project</button>
+                        </div>
+                      ) : (
+                        <select
+                          style={inp}
+                          value={projectId ?? ''}
+                          onChange={e => setProjectId(Number(e.target.value) || null)}
+                        >
+                          <option value="">Select a project…</option>
+                          {visibleProjects.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      )}
+                      {projectId && (() => {
+                        const sel = visibleProjects.find(p => p.id === projectId);
+                        if (!sel) return null;
+                        return (
+                          <div style={{ marginTop: 10, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12, color: '#166534' }}>
+                            <div style={{ fontWeight: 700 }}>{sel.name}</div>
+                            {sel.client?.name && <div style={{ marginTop: 2 }}>{sel.client.name}</div>}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* New Project fields */}
+                  {projectMode === 'new' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                        <div>
+                          <label style={lbl}>Project Title *</label>
+                          <input style={inp} value={projectTitle} onChange={e => setProjectTitle(e.target.value)} placeholder="e.g. Website Redesign" />
+                        </div>
+                        <div>
+                          <label style={lbl}>Reference <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span></label>
+                          <input style={inp} value={projectReference} onChange={e => setProjectReference(e.target.value)} placeholder="e.g. PRJ-1042" />
+                        </div>
+                      </div>
+                      {!showLineItems && (
+                        <div>
+                          <label style={lbl}>Amount for the Invoice *</label>
+                          <input type="number" min={0} step="0.01" style={inp} value={projectAmount} onChange={e => setProjectAmount(parseFloat(e.target.value) || 0)} placeholder="0.00" />
+                        </div>
+                      )}
+                      {showLineItems && (
+                        <div style={{ fontSize: 12, color: '#64748b', background: '#f8fafc', borderRadius: 7, padding: '8px 12px' }}>
+                          💡 This invoice&apos;s amount comes from the Line Items below, pre-filled from the deal — adjust them if needed.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Line items card */}
+              {showLineItems && (
               <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden' }}>
                 <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Line Items</h3>
@@ -454,6 +834,44 @@ function NewInvoiceForm() {
                       </button>
                     </div>
                   ))}
+                </div>
+              </div>
+              )}
+
+              {/* Payment Gateways card */}
+              <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden', marginTop: 16 }}>
+                <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
+                  <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Payment Gateways for this Invoice</h3>
+                </div>
+                <div style={{ padding: 22 }}>
+                  {!gatewaysLoaded ? (
+                    <div style={{ fontSize: 13, color: '#94a3b8' }}>Loading…</div>
+                  ) : gatewayAccounts.length === 0 ? (
+                    <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, fontSize: 13, color: '#dc2626' }}>
+                      No payment gateway is configured for this company. Please configure a payment gateway before sending invoice.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {gatewayAccounts.map(g => (
+                        <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: (canSelectGateway && gatewayAccounts.length > 1) ? 'pointer' : 'default' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedGatewayIds.includes(g.id)}
+                            onChange={() => toggleGatewaySelection(g.id)}
+                            disabled={!canSelectGateway || gatewayAccounts.length === 1}
+                            style={{ width: 16, height: 16, accentColor: '#2563eb' }}
+                          />
+                          <span style={{ fontSize: 13, color: '#0f172a' }}>{g.label}</span>
+                          {g.is_default && <span style={{ padding: '2px 8px', borderRadius: 20, background: '#ecfdf5', color: '#059669', fontSize: 10.5, fontWeight: 700 }}>DEFAULT</span>}
+                        </label>
+                      ))}
+                      {!canSelectGateway && (
+                        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+                          You don&apos;t have permission to change the payment gateway for this invoice — the company default will be used.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -497,29 +915,38 @@ function NewInvoiceForm() {
                 </div>
               )}
 
-              <button
+              <SubmitButton
                 type="submit"
-                disabled={saving || sending || linking}
-                style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: saving ? '#93c5fd' : 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 15, fontWeight: 700, cursor: (saving || sending || linking) ? 'not-allowed' : 'pointer', marginBottom: 10 }}
+                loading={saving}
+                loadingText="Creating Invoice…"
+                disabled={sending || linking || noGatewayConfigured}
+                title={noGatewayConfigured ? 'Configure a payment gateway before creating invoice' : undefined}
+                style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: saving ? '#93c5fd' : 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 15, fontWeight: 700, marginBottom: 10, opacity: noGatewayConfigured ? 0.5 : 1 }}
               >
-                {saving ? 'Creating…' : 'Save as Draft'}
-              </button>
-              <button
+                Save as Draft
+              </SubmitButton>
+              <SubmitButton
                 type="button"
                 onClick={handleCreateAndLink}
-                disabled={saving || sending || linking}
-                style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1.5px solid #0284c7', background: linking ? '#f0f9ff' : '#fff', color: '#0284c7', fontSize: 15, fontWeight: 700, cursor: (saving || sending || linking) ? 'not-allowed' : 'pointer', marginBottom: 10 }}
+                loading={linking}
+                loadingText="Creating Invoice…"
+                disabled={saving || sending || noGatewayConfigured}
+                title={noGatewayConfigured ? 'Configure a payment gateway before sending invoice' : undefined}
+                style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1.5px solid #0284c7', background: linking ? '#f0f9ff' : '#fff', color: '#0284c7', fontSize: 15, fontWeight: 700, marginBottom: 10, opacity: noGatewayConfigured ? 0.5 : 1 }}
               >
-                {linking ? 'Creating…' : 'Create Invoice'}
-              </button>
-              <button
+                Create Invoice
+              </SubmitButton>
+              <SubmitButton
                 type="button"
                 onClick={() => handleCreate(true)}
-                disabled={saving || sending || linking}
-                style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1.5px solid #2563eb', background: sending ? '#eff6ff' : '#fff', color: '#2563eb', fontSize: 15, fontWeight: 700, cursor: (saving || sending || linking) ? 'not-allowed' : 'pointer' }}
+                loading={sending}
+                loadingText="Creating & Sending…"
+                disabled={saving || linking || noGatewayConfigured}
+                title={noGatewayConfigured ? 'Configure a payment gateway before sending invoice' : undefined}
+                style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1.5px solid #2563eb', background: sending ? '#eff6ff' : '#fff', color: '#2563eb', fontSize: 15, fontWeight: 700, opacity: noGatewayConfigured ? 0.5 : 1 }}
               >
-                {sending ? 'Creating & Sending…' : 'Create & Send Invoice'}
-              </button>
+                Create & Send Invoice
+              </SubmitButton>
             </div>
           </div>
         </form>

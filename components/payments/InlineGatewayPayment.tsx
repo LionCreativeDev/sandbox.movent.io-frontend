@@ -56,6 +56,11 @@ export interface InlineGatewayPaymentProps {
   initUrl: string;
   createOrderUrl?: string;
   chargeUrl: string;
+  // Which specific company gateway account (not just gateway type) to
+  // charge — required once a tenant can hold more than one account of the
+  // same type. Omit/null for callers still on the legacy single-account
+  // resolution (backend falls back to the type's default account).
+  companyGatewayId?: number | null;
   currency: string;
   disabled?: boolean;
   onProcessingChange?: (processing: boolean) => void;
@@ -73,7 +78,7 @@ const spinner = (
 );
 
 const InlineGatewayPayment = forwardRef<InlineGatewayPaymentHandle, InlineGatewayPaymentProps>(function InlineGatewayPayment(
-  { gateway, apiClient, initUrl, createOrderUrl, chargeUrl, currency, disabled, onProcessingChange, onSuccess, onError },
+  { gateway, apiClient, initUrl, createOrderUrl, chargeUrl, companyGatewayId, currency, disabled, onProcessingChange, onSuccess, onError },
   ref,
 ) {
   const [initData, setInitData]       = useState<GatewayInitData | null>(null);
@@ -122,6 +127,9 @@ const InlineGatewayPayment = forwardRef<InlineGatewayPaymentHandle, InlineGatewa
         stripeRef.current = stripe;
         const elements = stripe.elements();
         const cardEl = elements.create('card', {
+          // Same as app/payment/page.tsx — no billing-address collection
+          // anywhere on this form, so hide Stripe's default ZIP/postal field.
+          hidePostalCode: true,
           style: {
             base: { fontSize: '15px', color: '#0f172a', fontFamily: 'system-ui, -apple-system, sans-serif', '::placeholder': { color: '#94a3b8' } },
             invalid: { color: '#dc2626' },
@@ -157,7 +165,7 @@ const InlineGatewayPayment = forwardRef<InlineGatewayPaymentHandle, InlineGatewa
         style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'pay' },
         createOrder: async () => {
           try {
-            const res = await apiClient.post(createOrderUrl, {});
+            const res = await apiClient.post(createOrderUrl, { company_gateway_id: companyGatewayId });
             return res.data.data.order_id;
           } catch (err: unknown) {
             const ex = err as { response?: { data?: { message?: string } } };
@@ -169,7 +177,7 @@ const InlineGatewayPayment = forwardRef<InlineGatewayPaymentHandle, InlineGatewa
         onApprove: async (data) => {
           setProcessing(true);
           try {
-            const res = await apiClient.post(chargeUrl, { paypal_order_id: data.orderID });
+            const res = await apiClient.post(chargeUrl, { paypal_order_id: data.orderID, company_gateway_id: companyGatewayId });
             onSuccess(res.data.data);
           } catch (err: unknown) {
             const ex = err as { response?: { data?: { message?: string } } };
@@ -198,7 +206,7 @@ const InlineGatewayPayment = forwardRef<InlineGatewayPaymentHandle, InlineGatewa
       document.body.appendChild(script);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway, initData?.client_id, createOrderUrl, currency]);
+  }, [gateway, initData?.client_id, createOrderUrl, currency, companyGatewayId]);
 
   // ── Load Accept.js for Authorize.net ──────────────────────────────────────
   useEffect(() => {
@@ -240,7 +248,7 @@ const InlineGatewayPayment = forwardRef<InlineGatewayPaymentHandle, InlineGatewa
             type: 'card', card: stripeCardRef.current,
           });
           if (pmError) { onError(pmError.message ?? 'Invalid card details'); return; }
-          const res = await apiClient.post(chargeUrl, { payment_method_id: paymentMethod!.id });
+          const res = await apiClient.post(chargeUrl, { payment_method_id: paymentMethod!.id, company_gateway_id: companyGatewayId });
           onSuccess(res.data.data);
         } catch (err: unknown) {
           const ex = err as { response?: { data?: { message?: string } } };
@@ -279,6 +287,7 @@ const InlineGatewayPayment = forwardRef<InlineGatewayPaymentHandle, InlineGatewa
               const res = await apiClient.post(chargeUrl, {
                 opaque_data_descriptor: response.opaqueData.dataDescriptor,
                 opaque_data_value:      response.opaqueData.dataValue,
+                company_gateway_id:     companyGatewayId,
               });
               onSuccess(res.data.data);
             } catch (err: unknown) {
@@ -292,7 +301,7 @@ const InlineGatewayPayment = forwardRef<InlineGatewayPaymentHandle, InlineGatewa
       }
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [gateway, initData, cardNumber, cardExpiry, cardCvc, acceptJsReady, chargeUrl]);
+  }), [gateway, initData, cardNumber, cardExpiry, cardCvc, acceptJsReady, chargeUrl, companyGatewayId]);
 
   const wrapStyle: React.CSSProperties = { opacity: disabled ? 0.6 : 1, pointerEvents: disabled ? 'none' : 'auto' };
 

@@ -9,7 +9,19 @@ import { adminNotificationService } from '@/lib/services/adminNotificationServic
 import { Badge, STATUS_SC, PRIORITY_SC, fmtDate, asRelation } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
 
-interface PmOption { id: number; name: string }
+const assignedToName = (project: Project): string => {
+  // role_in_project (this project's own team role) is the real signal — a
+  // team member's account-level role_type is often something else entirely
+  // (e.g. a Seller or Developer put on the team as this project's PM), so
+  // matching on user.role_type instead silently missed every such PM.
+  const teamRow = project.team_members?.find(member => member.role_in_project === 'project_manager');
+  const sellerId = typeof project.seller_id === 'object' ? project.seller_id?.id : project.seller_id;
+  // A project's own Seller carries this exact team row as a cosmetic
+  // stand-in PM on a self-run project (see ProjectSellerAssignmentService::
+  // assign()) — a REAL PM (someone else) always takes priority over it.
+  const assignedProjectManager = teamRow?.user?.id !== sellerId ? teamRow?.user : null;
+  return assignedProjectManager?.name ?? project.project_manager?.name ?? teamRow?.user?.name ?? '—';
+};
 
 export default function ProjectsPage() {
   useModuleGuard('projects');
@@ -19,11 +31,6 @@ export default function ProjectsPage() {
   const [search, setSearch]     = useState('');
   const [statusF, setStatusF]   = useState('');
   const [priorityF, setPriorityF] = useState('');
-  // Project Manager dropdown options, per company (a Company Admin can own
-  // several companies, and each project's assignable PM list is scoped to
-  // its own company — same source as the Create/Edit Project forms).
-  const [pmOptionsByCompany, setPmOptionsByCompany] = useState<Record<number, PmOption[]>>({});
-  const [reassigningId, setReassigningId] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -34,31 +41,8 @@ export default function ProjectsPage() {
       if (priorityF) params.priority = priorityF;
       const list = await adminProjectService.list(params);
       setProjects(list);
-
-      const companyIds = [...new Set(list.map(p => p.company_id).filter((id): id is number => !!id))];
-      const missing = companyIds.filter(id => !(id in pmOptionsByCompany));
-      if (missing.length > 0) {
-        const entries = await Promise.all(missing.map(async id => {
-          try {
-            const d = await adminProjectService.projectUsers(id);
-            return [id, d.project_managers.map(u => ({ id: u.user_id, name: u.name }))] as const;
-          } catch { return [id, []] as const; }
-        }));
-        setPmOptionsByCompany(prev => ({ ...prev, ...Object.fromEntries(entries) }));
-      }
     } catch { toast.error('Failed to load projects'); }
     finally { setLoading(false); }
-  };
-
-  const reassignPm = async (project: Project, newPmId: string) => {
-    setReassigningId(project.id);
-    try {
-      const updated = await adminProjectService.update(project.id, { project_manager_id: newPmId ? Number(newPmId) : null });
-      setProjects(prev => prev.map(p => p.id === project.id ? updated : p));
-      toast.success('Project Manager updated');
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to update Project Manager');
-    } finally { setReassigningId(null); }
   };
 
   useEffect(() => {
@@ -122,7 +106,7 @@ export default function ProjectsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['Project', 'Company', 'Client', 'Project Manager', 'Status', 'Priority', 'Progress', 'Deadline', 'Actions'].map(h => (
+                {['Project', 'Company', 'Client', 'Assigned To', 'Status', 'Priority', 'Progress', 'Deadline', 'Actions'].map(h => (
                   <th key={h} style={{
                     padding: '10px 16px', textAlign: 'left', fontSize: 11,
                     fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap',
@@ -144,30 +128,8 @@ export default function ProjectsPage() {
                     <div style={{ fontSize: 11, color: '#94a3b8' }}>by {asRelation(p.created_by)?.name ?? p.created_by_admin?.name ?? 'Unknown'}</div>
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{p.company?.name ?? '—'}</td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{p.client?.name ?? '—'}</td>
-                  <td style={{ padding: '12px 16px', fontSize: 12 }} onClick={e => e.stopPropagation()}>
-                    <select
-                      value={p.project_manager_id ?? ''}
-                      disabled={reassigningId === p.id}
-                      onChange={e => reassignPm(p, e.target.value)}
-                      style={{
-                        padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7,
-                        fontSize: 12, outline: 'none', background: '#fafafa', color: '#334155',
-                        maxWidth: 160, cursor: reassigningId === p.id ? 'wait' : 'pointer',
-                      }}
-                    >
-                      <option value="">Unassigned</option>
-                      {(pmOptionsByCompany[p.company_id] ?? []).map(u => (
-                        <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
-                      {/* Keep the current PM selectable even if they've since become
-                          ineligible (e.g. deactivated) so the dropdown never silently
-                          shows the wrong selection. */}
-                      {p.project_manager && !(pmOptionsByCompany[p.company_id] ?? []).some(u => u.id === p.project_manager_id) && (
-                        <option value={p.project_manager_id ?? ''}>{p.project_manager.name}</option>
-                      )}
-                    </select>
-                  </td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{p.client?.name ?? p.invoice?.customer_name ?? p.lead?.name ?? '—'}</td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{assignedToName(p)}</td>
                   <td style={{ padding: '12px 16px' }}><Badge label={p.status} sc={STATUS_SC[p.status]} /></td>
                   <td style={{ padding: '12px 16px' }}><Badge label={p.priority} sc={PRIORITY_SC[p.priority]} /></td>
                   <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{p.progress ?? 0}%</td>

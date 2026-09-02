@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminLeadService, userLeadService, Lead } from '@/lib/services/adminLeadService';
-import { adminClientService, ClientCompany } from '@/lib/services/adminClientService';
 import { getAuthType, getAuthUser, can } from '@/lib/auth';
 import { Admin } from '@/types';
 import { HiPlusCircle, HiMagnifyingGlass } from 'react-icons/hi2';
@@ -17,7 +16,17 @@ const STATUSES = [
   { key: 'negotiation',label: 'Negotiation' },
   { key: 'won',        label: 'Won' },
   { key: 'lost',       label: 'Lost' },
+  // Not a stored lead status — a pseudo-filter the backend understands (see
+  // Api\{Admin,User}\LeadController::index()) that narrows to leads which
+  // have become Clients. They also appear in the unfiltered list above,
+  // labelled "Client".
+  { key: 'converted',  label: 'Client' },
 ];
+
+// A converted lead is stored as status='won' (leads.status has no 'client'
+// value, and the Sales Dashboard / pipeline all key off 'won'), but on screen
+// it should read as what it actually is now.
+const STATUS_LABEL: Record<string, string> = { converted: 'Client' };
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   new:         { bg: '#eff6ff', color: '#2563eb' },
@@ -27,6 +36,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   negotiation: { bg: '#fffbeb', color: '#d97706' },
   won:         { bg: '#ecfdf5', color: '#059669' },
   lost:        { bg: '#fef2f2', color: '#dc2626' },
+  converted:   { bg: '#eef2ff', color: '#4f46e5' },
 };
 
 const PRIORITY_STYLE: Record<string, { bg: string; color: string }> = {
@@ -62,17 +72,15 @@ export default function LeadsPage() {
   const canCreate = isAdmin || can('sales', 'canCreateLeads');
 
   const [leads, setLeads]         = useState<Lead[]>([]);
-  const [companies, setCompanies] = useState<ClientCompany[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
   const [status, setStatus]       = useState('');
   const [priority, setPriority]   = useState('');
-  const [companyId, setCompanyId] = useState('');
 
-  useEffect(() => {
-    if (isAdmin) adminClientService.companies().then(setCompanies).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
+  // Company filtering is the topbar Company Switcher's job (Api\Admin\
+  // LeadController::index() already defaults to activeCompanyIds() when no
+  // explicit ?company_id is sent) — this page no longer duplicates it with
+  // its own dropdown.
   const load = async () => {
     setLoading(true);
     try {
@@ -80,7 +88,6 @@ export default function LeadsPage() {
       if (search)    params.search     = search;
       if (status)    params.status     = status;
       if (priority)  params.priority   = priority;
-      if (companyId) params.company_id = companyId;
       const data = isAdmin
         ? await adminLeadService.list(params)
         : await userLeadService.list(params);
@@ -89,10 +96,10 @@ export default function LeadsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [status, priority, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [status, priority]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = (e: React.SyntheticEvent<HTMLFormElement>) => { e.preventDefault(); load(); };
-  const clearFilters = () => { setSearch(''); setStatus(''); setPriority(''); setCompanyId(''); };
+  const clearFilters = () => { setSearch(''); setStatus(''); setPriority(''); };
 
   const wonCount  = leads.filter(l => l.status === 'won').length;
   const lostCount = leads.filter(l => l.status === 'lost').length;
@@ -103,7 +110,7 @@ export default function LeadsPage() {
 
   return (
     <DashboardLayout title="Leads">
-      <div style={{ maxWidth: 1200 }}>
+      <div style={{ width: '100%', maxWidth: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Leads</h1>
@@ -157,14 +164,8 @@ export default function LeadsPage() {
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </select>
-            {isAdmin && companies.length > 1 && (
-              <select value={companyId} onChange={e => setCompanyId(e.target.value)} style={{ padding: '8px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa' }}>
-                <option value="">All Companies</option>
-                {companies.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
-              </select>
-            )}
             <button type="submit" style={{ padding: '8px 18px', borderRadius: 7, border: 'none', background: '#f1f5f9', color: '#475569', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Search</button>
-            {(search || priority || companyId) && <button type="button" onClick={clearFilters} style={{ padding: '8px 14px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: '#fff', color: '#94a3b8', fontSize: 13, cursor: 'pointer' }}>Clear</button>}
+            {(search || priority) && <button type="button" onClick={clearFilters} style={{ padding: '8px 14px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: '#fff', color: '#94a3b8', fontSize: 13, cursor: 'pointer' }}>Clear</button>}
           </div>
         </form>
 
@@ -182,14 +183,17 @@ export default function LeadsPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                  {['Name', 'Company', 'Status', 'Priority', 'Est. Value', 'Source', 'Assigned', ''].map(h => (
+                  {['Name', 'Company', 'Status', 'Priority', 'Est. Value', 'Source', 'Assigned', 'Created By', ''].map(h => (
                     <th key={h} style={{ padding: '11px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {leads.map((lead, i) => {
-                  const ss = STATUS_STYLE[lead.status] ?? { bg: '#f1f5f9', color: '#64748b' };
+                  // A converted lead's raw status is 'won' — show it as the
+                  // Client it has become instead.
+                  const statusKey = lead.converted_at ? 'converted' : lead.status;
+                  const ss = STATUS_STYLE[statusKey] ?? { bg: '#f1f5f9', color: '#64748b' };
                   const ps = PRIORITY_STYLE[lead.priority] ?? { bg: '#f1f5f9', color: '#64748b' };
                   const href = `${leadRoot}/${lead.id}`;
                   return (
@@ -200,7 +204,7 @@ export default function LeadsPage() {
                       </td>
                       <td style={{ padding: '13px 14px', color: '#475569', fontSize: 13 }}>{lead.company_name ?? '—'}</td>
                       <td style={{ padding: '13px 14px' }}>
-                        <span style={{ padding: '3px 10px', borderRadius: 50, fontSize: 11, fontWeight: 600, ...ss }}>{cap(lead.status)}</span>
+                        <span style={{ padding: '3px 10px', borderRadius: 50, fontSize: 11, fontWeight: 600, ...ss }}>{STATUS_LABEL[statusKey] ?? cap(statusKey)}</span>
                       </td>
                       <td style={{ padding: '13px 14px' }}>
                         <span style={{ padding: '3px 10px', borderRadius: 50, fontSize: 11, fontWeight: 600, ...ps }}>{cap(lead.priority)}</span>
@@ -208,6 +212,7 @@ export default function LeadsPage() {
                       <td style={{ padding: '13px 14px', color: '#059669', fontSize: 13, fontWeight: 600 }}>{PKR(lead.estimated_value)}</td>
                       <td style={{ padding: '13px 14px', color: '#64748b', fontSize: 12 }}>{lead.source ? cap(lead.source.replace('_', ' ')) : '—'}</td>
                       <td style={{ padding: '13px 14px', color: '#475569', fontSize: 12 }}>{lead.assigned_user?.name ?? '—'}</td>
+                      <td style={{ padding: '13px 14px', color: '#475569', fontSize: 12 }}>{lead.creator?.name ?? '—'}</td>
                       <td style={{ padding: '13px 14px' }}>
                         <button onClick={e => { e.stopPropagation(); router.push(href); }} style={{ padding: '5px 12px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff', color: '#4f46e5', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>View</button>
                       </td>

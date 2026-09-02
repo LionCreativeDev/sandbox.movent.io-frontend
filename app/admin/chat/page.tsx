@@ -1,14 +1,15 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { adminGeneralChatService } from '@/lib/services/generalChatService';
+import { adminGeneralChatService, EligibleChatUser } from '@/lib/services/generalChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
 import { inp, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
+import { chatSenderName } from '@/lib/chatSender';
 
 interface Company { id: number; name: string }
-interface CompanyUser { id: number; name: string; role_type: string }
+type CompanyUser = EligibleChatUser;
 
 // Avatar background rotates through a small fixed palette keyed off the
 // thread id, purely cosmetic — so a sidebar full of conversations doesn't
@@ -97,10 +98,11 @@ export default function AdminChatPage() {
   // the group-creation checklist — using the dedicated eligible-users
   // endpoint (not the general /admin/users listing) so nothing shown here
   // can ever fail createGroup()'s own "must have chat access" check.
-  useEffect(() => {
+  const loadCompanyUsers = () => {
     if (!groupCompanyId) { setCompanyUsers([]); return; }
     adminGeneralChatService.eligibleUsers(Number(groupCompanyId)).then(setCompanyUsers).catch(() => setCompanyUsers([]));
-  }, [groupCompanyId]);
+  };
+  useEffect(loadCompanyUsers, [groupCompanyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeThread = threads.find(t => t.id === activeThreadId) ?? null;
   const visibleThreads = search.trim()
@@ -123,6 +125,7 @@ export default function AdminChatPage() {
       const { thread_id } = await adminGeneralChatService.createDirect(Number(groupCompanyId), userId);
       setShowNewDirect(false);
       loadThreads();
+      loadCompanyUsers();
       setActiveThreadId(thread_id);
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Failed to start chat');
@@ -227,11 +230,15 @@ export default function AdminChatPage() {
                 </select>
               )}
               <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                {/* Someone Admin already has a 1:1 with isn't offered again
+                    here — their existing conversation already shows in the
+                    list on the left (see createDirect()). Still shown,
+                    unfiltered, in the New Group checklist below. */}
                 {!groupCompanyId ? (
                   <div style={{ fontSize: 12, color: '#94a3b8' }}>Select a company first.</div>
-                ) : companyUsers.length === 0 ? (
+                ) : companyUsers.filter(u => !u.has_direct_thread).length === 0 ? (
                   <div style={{ fontSize: 12, color: '#94a3b8' }}>No users with chat access found for this company. Grant &quot;Use General Chat&quot; from Edit User first.</div>
-                ) : companyUsers.map(u => (
+                ) : companyUsers.filter(u => !u.has_direct_thread).map(u => (
                   <div key={u.id} onClick={() => startDirect(u.id)} style={{ padding: '7px 8px', borderRadius: 7, cursor: 'pointer', fontSize: 12.5, color: '#334155' }}
                     onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
@@ -333,7 +340,7 @@ export default function AdminChatPage() {
                   <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 13, marginTop: 20 }}>No messages yet. Say hello 👋</div>
                 ) : messages.map(m => {
                   const isMine = m.sender_admin_id != null;
-                  const senderName = m.sender?.name ?? m.sender_admin?.name ?? '—';
+                  const senderName = chatSenderName(m);
                   return (
                     <div key={m.id} style={{ display: 'flex', justifyContent: isMine ? 'flex-end' : 'flex-start', gap: 8 }}>
                       {!isMine && (

@@ -4,11 +4,13 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { userService } from '@/lib/services/userService';
 import { getAvailableModules } from '@/lib/moduleCatalog';
-import { SIMPLE_PROJECT_PERMISSIONS } from '@/lib/simplifiedProjectPermissions';
-import { USER_ROLE_TYPE_OPTIONS, getRoleDefaultPermissions } from '@/lib/roleUtils';
+import { SIMPLE_PROJECT_PERMISSIONS, collapseProjectPermissions } from '@/lib/simplifiedProjectPermissions';
+import { USER_ROLE_TYPE_OPTIONS, CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, getRoleDefaultPermissions } from '@/lib/roleUtils';
+import { handleNotFound } from '@/lib/notFound';
 import { CompanyOption, User } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { HiArrowLeft } from 'react-icons/hi2';
+import PhoneInput from '@/components/ui/PhoneInput';
 
 // Mirrors the same helper in app/users/new/page.tsx — visible permission
 // keys per catalog module (respecting requiresDb/hideIfCatalogKey), so role
@@ -22,6 +24,44 @@ function visiblePermsByModule(availMods: ReturnType<typeof getAvailableModules>,
       .map(p => p.key);
   }
   return out;
+}
+
+// The "N permissions selected" badge must count what's actually checked on
+// screen, not raw granular permission keys — mirrors app/users/new/page.tsx's
+// identical fix. Project Management shows simplified bundle checkboxes, each
+// expanding into several granular keys (e.g. "Manage Projects" = 7 keys) —
+// one checked box must count as 1, not 7 (collapseProjectPermissions(), same
+// as the checkbox `checked` state uses). A granted key that isn't currently
+// visible (module not purchased, or hidden by hideIfCatalogKey) has no
+// checkbox to reflect, so it's excluded via the same visiblePermsByModule()
+// filtering the checkboxes themselves use.
+function visibleSelectedCount(
+  companyId: number,
+  perms: Record<number, Record<string, string[]>>,
+  companies: CompanyOption[],
+): number {
+  const modPermsFor = perms[companyId] ?? {};
+  let total = 0;
+
+  const accountPerms = modPermsFor['account'] ?? [];
+  if (accountPerms.includes('canAddUsers')) total += 1;
+  if (accountPerms.includes('canUseGeneralChat')) total += 1;
+
+  const co = companies.find(c => c.id === companyId);
+  const rawDb = co?.modules ?? [];
+  const availMods = getAvailableModules(rawDb);
+  const visible = visiblePermsByModule(availMods, rawDb);
+
+  for (const mod of availMods) {
+    if (mod.key === 'project_management') {
+      total += collapseProjectPermissions(modPermsFor.project_management ?? []).length;
+      continue;
+    }
+    const granted = modPermsFor[mod.key] ?? [];
+    total += (visible[mod.key] ?? []).filter(k => granted.includes(k)).length;
+  }
+
+  return total;
 }
 
 const inp: React.CSSProperties = {
@@ -47,6 +87,13 @@ function EditUserPageContent() {
 
   // Basic info
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', role_type: '' });
+  // What the Role <select> itself shows — either a real role_type, or the
+  // "+ Custom Role…" sentinel when this user has a custom_role_label. form's
+  // own role_type always holds the real structural bucket ("behaves like")
+  // regardless of which mode this is in — see roleUtils.CUSTOM_ROLE_SENTINEL.
+  const [roleSelectValue, setRoleSelectValue] = useState('');
+  const [customRoleLabel, setCustomRoleLabel] = useState('');
+  const isCustomRole = roleSelectValue === CUSTOM_ROLE_SENTINEL;
 
   // Permissions: companyId → moduleKey → permKey[]
   const [perms, setPerms]                 = useState<Record<number, Record<string, string[]>>>({});
@@ -60,6 +107,8 @@ function EditUserPageContent() {
     Promise.all([userService.getOne(id), userService.listCompanyOptions()])
       .then(([user, cos]: [User, CompanyOption[]]) => {
         setForm({ name: user.name, email: user.email, password: '', phone: user.phone ?? '', role_type: user.role_type ?? '' });
+        setCustomRoleLabel(user.custom_role_label ?? '');
+        setRoleSelectValue(user.custom_role_label ? CUSTOM_ROLE_SENTINEL : (user.role_type ?? ''));
 
         const assignments = user.company_assignments ?? [];
         const ids = assignments.map(a => a.company_id);
@@ -74,7 +123,7 @@ function EditUserPageContent() {
         }
         setPerms(initialPerms);
       })
-      .catch(() => setError('Failed to load user'))
+      .catch((err) => { if (!handleNotFound(err, router)) setError('Failed to load user'); })
       .finally(() => setLoading(false));
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -99,6 +148,63 @@ function EditUserPageContent() {
       const allSel = allKeys.every(k => cur.includes(k));
       return { ...prev, [companyId]: { ...(prev[companyId] ?? {}), [moduleKey]: allSel ? [] : [...allKeys] } };
     });
+  };
+
+  // Assign Multiple Companies to User — purely local state, same as every
+  // other edit on this page; nothing is persisted until the existing Save
+  // button runs its existing per-company loop (userService.
+  // updateCompanyPermissions), which already firstOrCreate()s the
+  // CompanyUserAssignment row server-side, so no new endpoint is needed.
+  const [pickCompanyId, setPickCompanyId] = useState('');
+  const unassignedCompanies = companies.filter(c => !assignedIds.includes(c.id));
+
+  const addCompany = () => {
+    if (!pickCompanyId) return;
+    const cid = Number(pickCompanyId);
+    if (assignedIds.includes(cid)) return;
+
+    const co = companies.find(c => c.id === cid);
+    const rawDb = co?.modules ?? [];
+    const availMods = getAvailableModules(rawDb);
+    const allPerms = visiblePermsByModule(availMods, rawDb);
+    setPerms(prev => ({ ...prev, [cid]: getRoleDefaultPermissions(form.role_type, availMods.map(m => m.key), allPerms) }));
+    setAssignedIds(prev => [...prev, cid]);
+    setActiveCompanyId(cid);
+    setPickCompanyId('');
+  };
+
+  // Unassign Company from User — reuses the already-existing
+  // userService.remove(id, companyId), the same call the Users list page's
+  // "Delete" button already makes (bare, without a companyId, for the
+  // "remove their only company" case). This is an immediate, destructive
+  // API call (unlike Add Company above) — it doesn't wait for the page's
+  // own Save button, matching how the list page's delete already behaves.
+  const [removingCompanyId, setRemovingCompanyId] = useState<number | null>(null);
+
+  const removeCompany = async (companyId: number) => {
+    const co = companies.find(c => c.id === companyId);
+    const remainingIds = assignedIds.filter(cid => cid !== companyId);
+    const confirmMsg = remainingIds.length === 0
+      ? `Remove ${co?.name ?? 'this company'} from this user? This is their only company — they will lose all company-specific CRM access until a company is assigned again.`
+      : `Remove ${co?.name ?? 'this company'} from this user?`;
+    if (!confirm(confirmMsg)) return;
+
+    setRemovingCompanyId(companyId);
+    try {
+      await userService.remove(id, companyId);
+      setAssignedIds(remainingIds);
+      setPerms(prev => {
+        const next = { ...prev };
+        delete next[companyId];
+        return next;
+      });
+      if (activeCompanyId === companyId) setActiveCompanyId(remainingIds[0] ?? null);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message ?? 'Failed to remove company');
+    } finally {
+      setRemovingCompanyId(null);
+    }
   };
 
   // Changing the role is a meaningful action (it implies "this person's job
@@ -130,7 +236,23 @@ function EditUserPageContent() {
     setPerms(nextPerms);
   };
 
+  // The Role <select> itself — picking "+ Custom Role…" just switches the UI
+  // into custom mode (reveals the name + "Behaves like" fields) without
+  // touching form.role_type/permissions yet; picking any real role exits
+  // custom mode (clearing the custom label) and runs the normal
+  // confirm-then-apply-defaults flow via handleRoleChange().
+  const handleRoleSelectChange = (value: string) => {
+    setRoleSelectValue(value);
+    if (value === CUSTOM_ROLE_SENTINEL) return;
+    setCustomRoleLabel('');
+    handleRoleChange(value);
+  };
+
   const handleSave = async () => {
+    if (isCustomRole && !customRoleLabel.trim()) {
+      setError('Please enter a name for this custom role.');
+      return;
+    }
     setSaving(true); setError('');
     try {
       // Update basic info
@@ -140,6 +262,7 @@ function EditUserPageContent() {
         password:  form.password || undefined,
         phone:     form.phone || null,
         role_type: form.role_type || undefined,
+        custom_role_label: isCustomRole ? (customRoleLabel.trim() || null) : null,
       });
 
       // Update permissions per company
@@ -162,7 +285,7 @@ function EditUserPageContent() {
 
   return (
     <DashboardLayout title="Edit User">
-      <div style={{ maxWidth: 860 }}>
+      <div style={{ width: '100%', maxWidth: 'none' }}>
         <button onClick={() => router.push('/admin/users')} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
           <HiArrowLeft size={16} /> Back to Users
         </button>
@@ -203,17 +326,37 @@ function EditUserPageContent() {
                 </div>
                 <div>
                   <label style={lbl}>Phone</label>
-                  <input style={inp} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+92 300 0000000" />
+                  <PhoneInput value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
                 </div>
                 <div>
                   <label style={lbl}>Role</label>
-                  <select style={inp} value={form.role_type} onChange={e => handleRoleChange(e.target.value)}>
+                  <select style={inp} value={roleSelectValue} onChange={e => handleRoleSelectChange(e.target.value)}>
                     <option value="">Auto-detect from assigned modules</option>
                     {USER_ROLE_TYPE_OPTIONS.map(r => (
                       <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
+                    <option value={CUSTOM_ROLE_SENTINEL}>+ Custom Role…</option>
                   </select>
                 </div>
+                {isCustomRole && (
+                  <>
+                    <div>
+                      <label style={lbl}>Custom Role Name *</label>
+                      <input style={inp} value={customRoleLabel} onChange={e => setCustomRoleLabel(e.target.value)} placeholder="e.g. Marketing Lead" maxLength={100} />
+                    </div>
+                    <div>
+                      <label style={lbl}>Behaves Like *</label>
+                      <select style={inp} value={form.role_type || 'team_member'} onChange={e => handleRoleChange(e.target.value)}>
+                        {CUSTOM_ROLE_BASE_OPTIONS.map(r => (
+                          <option key={r.value} value={r.value}>{r.label}</option>
+                        ))}
+                      </select>
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                        Determines this custom role&apos;s real permissions/behavior — the name above is just what&apos;s shown.
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -225,20 +368,68 @@ function EditUserPageContent() {
               </div>
 
               <div style={{ padding: 24 }}>
-                {assignedIds.length === 0 ? (
-                  <div style={{ color: '#94a3b8', fontSize: 13 }}>This user has no company assignments.</div>
-                ) : (
+                {assignedIds.length === 0 && (
+                  <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 16 }}>
+                    This user has no company assignments — add one below to restore their access.
+                  </div>
+                )}
+
+                {/* Assign Multiple Companies to User — always available, even
+                    (especially) when the user currently has zero companies,
+                    so an admin who unassigned someone's last company can
+                    give them a new one right here instead of the account
+                    being stuck with no way back in. Hidden once the user is
+                    already on every company the admin owns. */}
+                {unassignedCompanies.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20 }}>
+                    <select value={pickCompanyId} onChange={e => setPickCompanyId(e.target.value)} style={{ ...inp, width: 'auto', flex: '0 1 260px' }}>
+                      <option value="">+ Add another company…</option>
+                      {unassignedCompanies.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={addCompany}
+                      disabled={!pickCompanyId}
+                      style={{
+                        padding: '10px 18px', borderRadius: 8, border: 'none',
+                        background: pickCompanyId ? '#2563eb' : '#cbd5e1', color: '#fff',
+                        fontWeight: 600, fontSize: 13, cursor: pickCompanyId ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                )}
+
+                {assignedIds.length > 0 && (
                   <>
                     {/* Role default-permissions helper text + selected count */}
                     {activeCompanyId !== null && (() => {
-                      const totalSelected = Object.values(perms[activeCompanyId] ?? {}).reduce((sum, arr) => sum + arr.length, 0);
+                      const totalSelected = visibleSelectedCount(activeCompanyId, perms, companies);
                       return (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, padding: '10px 14px', background: '#f8fafc', borderRadius: 8 }}>
                           <span style={{ fontSize: 12, color: '#64748b' }}>
                             Default permissions are selected based on role. You can customize them before saving.
                           </span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', whiteSpace: 'nowrap', marginLeft: 12 }}>
-                            {totalSelected} permission{totalSelected === 1 ? '' : 's'} selected
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 12 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', whiteSpace: 'nowrap' }}>
+                              {totalSelected} permission{totalSelected === 1 ? '' : 's'} selected
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeCompany(activeCompanyId)}
+                              disabled={removingCompanyId === activeCompanyId}
+                              title="Remove this company from this user"
+                              style={{
+                                border: 'none', background: 'transparent', color: '#dc2626',
+                                fontSize: 12, fontWeight: 600, cursor: removingCompanyId === activeCompanyId ? 'not-allowed' : 'pointer',
+                                opacity: removingCompanyId === activeCompanyId ? 0.5 : 1, whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {removingCompanyId === activeCompanyId ? 'Removing…' : '✕ Remove company'}
+                            </button>
                           </span>
                         </div>
                       );

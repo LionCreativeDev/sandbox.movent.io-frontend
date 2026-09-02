@@ -1,19 +1,32 @@
 import Cookies from 'js-cookie';
 import { User, Admin, SuperAdmin, CompanyAssignment } from '@/types';
 
+const AUTH_USER_STORAGE_KEY = 'auth_user';
+
 export const setAuthData = (
   token: string,
   user: User | Admin | SuperAdmin,
   type: 'user' | 'admin' | 'super_admin'
 ) => {
   Cookies.set('auth_token', token, { expires: 7 });
-  Cookies.set('auth_user', JSON.stringify(user), { expires: 7 });
   Cookies.set('auth_type', type, { expires: 7 });
+  Cookies.remove('auth_user');
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(user));
+  }
 };
 
 export const getAuthUser = (): User | Admin | null => {
-  const user = Cookies.get('auth_user');
-  return user ? JSON.parse(user) : null;
+  const user = typeof window !== 'undefined'
+    ? window.localStorage.getItem(AUTH_USER_STORAGE_KEY) ?? Cookies.get('auth_user')
+    : Cookies.get('auth_user');
+
+  if (!user) return null;
+  try {
+    return JSON.parse(user);
+  } catch {
+    return null;
+  }
 };
 
 export const getAuthType = () => Cookies.get('auth_type') || null;
@@ -21,14 +34,21 @@ export const getToken    = () => Cookies.get('auth_token') || null;
 export const isAuthenticated = () => !!Cookies.get('auth_token');
 
 // ── Active company (Rule 8: sidebar and permissions based on selected company) ──
+// 'all' is the Company Admin-only "All Companies" sentinel (set exclusively
+// by CompanySelector.tsx) — staff/user sessions never write it, since their
+// equivalent picker (/select-company) only ever calls setActiveCompany with
+// a real company id.
 
-export const setActiveCompany = (id: number) => {
+export const setActiveCompany = (id: number | 'all') => {
   Cookies.set('active_company_id', String(id), { expires: 7 });
 };
 
-export const getActiveCompany = (): number | null => {
+export const getActiveCompany = (): number | 'all' | null => {
   const id = Cookies.get('active_company_id');
-  return id ? parseInt(id, 10) : null;
+  if (!id) return null;
+  if (id === 'all') return 'all';
+  const parsed = parseInt(id, 10);
+  return Number.isNaN(parsed) ? null : parsed;
 };
 
 export const clearActiveCompany = () => {
@@ -47,8 +67,9 @@ export const getUserModulePermissions = (moduleKey: string): string[] => {
   const activeId   = getActiveCompany();
   const all        = u?.company_assignments ?? [];
 
-  // Filter by active company if one is selected
-  const assignments = activeId ? all.filter(a => a.company_id === activeId) : all;
+  // Filter by active company if one is selected — 'all' is the Admin-only
+  // sentinel and never applies to a staff/user session's own assignments.
+  const assignments = typeof activeId === 'number' ? all.filter(a => a.company_id === activeId) : all;
 
   for (const a of assignments) {
     if (a.permissions?.[moduleKey]) return a.permissions[moduleKey] as string[];
@@ -83,8 +104,8 @@ export const can = (moduleKey: string, permKey: string): boolean => {
 // Viewer) fall through to '/dashboard', which already adapts its content to
 // whatever modules the user has.
 const STAFF_REDIRECT_RULES: { module: string; permAny: string[]; path: string }[] = [
-  { module: 'project_management', permAny: ['canViewProjectDashboard', 'canViewProjects', 'canCreateTasks', 'canAssignTasks', 'canViewProductionDashboard'], path: '/projects/dashboard' },
-  { module: 'project_management', permAny: ['canViewTasks', 'canViewProductionTasks', 'canStartProductionTasks', 'canSubmitProductionTasks'], path: '/tasks' },
+  { module: 'project_management', permAny: ['canViewProjectDashboard', 'canViewProjects', 'canCreateTasks', 'canAssignTasks'], path: '/projects/dashboard' },
+  { module: 'project_management', permAny: ['canViewTasks'], path: '/tasks' },
   { module: 'sales',   permAny: ['canViewSalesDashboard', 'canViewLeads'], path: '/sales' },
   { module: 'invoice', permAny: ['canViewInvoiceDashboard', 'canViewInvoices'], path: '/invoices' },
   { module: 'finance', permAny: ['canViewFinanceDashboard', 'canViewRevenueDashboard'], path: '/invoices' },
@@ -104,4 +125,7 @@ export const logout = () => {
   Cookies.remove('auth_user');
   Cookies.remove('auth_type');
   Cookies.remove('active_company_id');
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(AUTH_USER_STORAGE_KEY);
+  }
 };

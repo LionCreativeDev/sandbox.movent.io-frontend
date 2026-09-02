@@ -19,17 +19,30 @@ export default function UserProjectReportsPage() {
   const [loading, setLoading]               = useState(true);
 
   useEffect(() => {
-    if (!can('project_management', 'canViewProjectReports')) {
+    // canViewTaskReports alone (no canViewProjectReports) is a real, narrower
+    // grant — taskStatusReport() on the backend already accepts either
+    // permission on its own. Reject only when the user holds neither.
+    if (!can('project_management', 'canViewProjectReports') && !can('project_management', 'canViewTaskReports')) {
       router.replace('/dashboard');
       return;
     }
-    Promise.all([
+    // Each report is fetched independently (not Promise.all) so a
+    // canViewTaskReports-only holder still sees Tasks by Status even though
+    // statusReport()/overdueReport() 403 for them (those two still require
+    // canViewProjectReports specifically) — one missing section shouldn't
+    // blank out the whole page.
+    Promise.allSettled([
       userProjectService.reports.status(),
       userProjectService.reports.taskStatus(),
       userProjectService.reports.overdue(),
-    ]).then(([s, t, o]) => { setStatusCounts(s); setTaskCounts(t); setOverdue(o); })
-      .catch(() => toast.error('Failed to load reports'))
-      .finally(() => setLoading(false));
+    ]).then(([s, t, o]) => {
+      if (s.status === 'fulfilled') setStatusCounts(s.value);
+      if (t.status === 'fulfilled') setTaskCounts(t.value);
+      if (o.status === 'fulfilled') setOverdue(o.value);
+      if (s.status === 'rejected' && t.status === 'rejected' && o.status === 'rejected') {
+        toast.error('Failed to load reports');
+      }
+    }).finally(() => setLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <DashboardLayout title="Project Reports"><div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Loading…</div></DashboardLayout>;

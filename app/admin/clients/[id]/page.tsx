@@ -4,13 +4,17 @@ import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
+import { handleNotFound } from '@/lib/notFound';
 import { adminSalesChatService } from '@/lib/services/salesChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
 import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
+import PhoneInput from '@/components/ui/PhoneInput';
+import { ALL_COUNTRIES } from '@/lib/countries';
+import { chatSenderName } from '@/lib/chatSender';
 
 interface ClientData {
   id: number; name: string; email: string | null; phone: string | null;
-  company_name: string | null; address: string | null; notes: string | null;
+  company_name: string | null; address: string | null; country: string | null; notes: string | null;
   portal_access: boolean; status: string; created_at: string;
   user: { id: number; email: string; is_active: boolean } | null;
   company: { id: number; name: string } | null;
@@ -23,7 +27,6 @@ const MODULES = [
   { key: 'invoices',  label: 'Invoices',         desc: 'View invoices and request payments' },
   { key: 'payments',  label: 'Payment History',  desc: 'Read-only payment record' },
   { key: 'documents', label: 'Documents',        desc: 'Download shared files' },
-  { key: 'chat',      label: 'Chat',             desc: 'Message with your team' },
   { key: 'support',   label: 'Support Tickets',  desc: 'Raise and track issues' },
   { key: 'reports',   label: 'Reports',          desc: 'Project and invoice reports' },
 ];
@@ -49,6 +52,15 @@ export default function ClientDetailPage() {
   const [seat,   setSeat]     = useState<Seat | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab,     setTab]     = useState<'info' | 'portal' | 'permissions' | 'chat' | 'messages'>('info');
+  // Deep-link support (e.g. /admin/clients/21?tab=messages from the Project
+  // Chat page's "Chat with Client" button). Read via window.location instead
+  // of useSearchParams so this page doesn't need a Suspense boundary.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    if (requested && ['info', 'portal', 'permissions', 'chat', 'messages'].includes(requested)) {
+      setTab(requested as typeof tab);
+    }
+  }, []);
 
   // Sales Chat
   const [chat, setChat]         = useState<ChatMessage[]>([]);
@@ -65,7 +77,7 @@ export default function ClientDetailPage() {
 
   // Edit form
   const [form, setForm] = useState({
-    name: '', email: '', phone: '', company_name: '', address: '', notes: '', status: 'active',
+    name: '', email: '', phone: '', company_name: '', address: '', country: '', notes: '', status: 'active',
   });
   const [savingInfo,  setSavingInfo]  = useState(false);
   const [savingPerms, setSavingPerms] = useState(false);
@@ -102,13 +114,14 @@ export default function ClientDetailPage() {
         phone:        c.phone ?? '',
         company_name: c.company_name ?? '',
         address:      c.address ?? '',
+        country:      c.country ?? '',
         notes:        c.notes ?? '',
         status:       c.status,
       });
       setPortalEmail(c.user?.email ?? c.email ?? '');
       setPerms(permissions as Record<string, ModulePerm>);
-    } catch {
-      toast.error('Failed to load client');
+    } catch (err) {
+      if (!handleNotFound(err, router)) toast.error('Failed to load client');
     } finally {
       setLoading(false);
     }
@@ -265,8 +278,14 @@ export default function ClientDetailPage() {
   );
 
   const sc = STATUS_C[client.status] || { bg: '#f1f5f9', color: '#64748b' };
-  const enabledCount = Object.values(perms).filter(p => p.purchased && p.is_enabled).length;
-  const purchasedCount = Object.values(perms).filter(p => p.purchased).length;
+  // Only ever counts keys still in MODULES — perms can carry stray entries
+  // (e.g. the retired 'chat' toggle) the backend still returns but this page
+  // no longer renders a row for, which previously inflated these counts
+  // past the number of toggles actually shown.
+  const moduleKeys = new Set(MODULES.map(m => m.key));
+  const visiblePerms = Object.entries(perms).filter(([k]) => moduleKeys.has(k)).map(([, v]) => v);
+  const enabledCount = visiblePerms.filter(p => p.purchased && p.is_enabled).length;
+  const purchasedCount = visiblePerms.filter(p => p.purchased).length;
 
   return (
     <DashboardLayout title={client.name}>
@@ -293,20 +312,16 @@ export default function ClientDetailPage() {
           </p>
         </div>
 
-        {/* Seat info */}
-        {seat && seat.limit && (
-          <div style={{ textAlign: 'right', fontSize: 12 }}>
-            <div style={{ color: '#64748b' }}>Seats used</div>
-            <div style={{ fontWeight: 700, color: seat.can_add ? '#1e293b' : '#dc2626', fontSize: 16 }}>
-              {seat.users_used} / {seat.limit}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 2, marginBottom: 20, background: '#f1f5f9', borderRadius: 10, padding: 4, width: 'fit-content' }}>
-        {(['info', 'portal', 'permissions', 'chat', 'messages'] as const).map(t => (
+        {/* 'messages' (Client Messages) is deliberately not a clickable tab
+            here — not needed as a general-purpose tab on this page. Still
+            reachable via the deep link from the Project Chat page's "Chat
+            with Client" button (?tab=messages), which sets `tab` state
+            directly — the content block below still renders for that case. */}
+        {(['info', 'portal', 'permissions', 'chat'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '7px 20px', borderRadius: 8, border: 'none', cursor: 'pointer',
             fontSize: 13, fontWeight: tab === t ? 600 : 400,
@@ -314,7 +329,7 @@ export default function ClientDetailPage() {
             color: tab === t ? '#1e293b' : '#64748b',
             boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,.08)' : 'none',
             textTransform: 'capitalize',
-          }}>{t === 'permissions' ? `Permissions (${enabledCount}/${MODULES.length})` : t === 'portal' ? 'Portal Login' : t === 'chat' ? 'Sales Chat' : t === 'messages' ? 'Client Messages' : 'Details'}</button>
+          }}>{t === 'permissions' ? `Permissions (${enabledCount}/${MODULES.length})` : t === 'portal' ? 'Portal Login' : t === 'chat' ? 'Sales Chat' : 'Details'}</button>
         ))}
       </div>
 
@@ -346,7 +361,7 @@ export default function ClientDetailPage() {
               </div>
               <div>
                 <label style={lbl}>Phone</label>
-                <input value={form.phone} onChange={e => setF('phone', e.target.value)} style={inp} />
+                <PhoneInput value={form.phone} onChange={v => setF('phone', v)} />
               </div>
             </div>
 
@@ -355,9 +370,18 @@ export default function ClientDetailPage() {
               <input value={form.company_name} onChange={e => setF('company_name', e.target.value)} placeholder="Client's company / business name" style={inp} />
             </div>
 
-            <div style={{ marginBottom: 14 }}>
-              <label style={lbl}>Address</label>
-              <input value={form.address} onChange={e => setF('address', e.target.value)} style={inp} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+              <div>
+                <label style={lbl}>Address</label>
+                <input value={form.address} onChange={e => setF('address', e.target.value)} style={inp} />
+              </div>
+              <div>
+                <label style={lbl}>Country</label>
+                <select value={form.country} onChange={e => setF('country', e.target.value)} style={inp}>
+                  <option value="">— Select —</option>
+                  {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                </select>
+              </div>
             </div>
 
             <div>
@@ -560,7 +584,7 @@ export default function ClientDetailPage() {
               {chat.map(m => (
                 <div key={m.id}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
-                    {m.sender_admin ? `${m.sender_admin.name} (Admin)` : m.sender?.name ?? 'Unknown'}
+                    {chatSenderName(m, { adminSuffix: true, guestSuffix: true })}
                   </div>
                   {m.content && <div style={{ fontSize: 13, color: '#475569' }}>{m.content}</div>}
                   {m.attachment_name && (
@@ -631,7 +655,7 @@ export default function ClientDetailPage() {
                     {dmMessages.map((m: any) => (
                       <div key={m.id}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
-                          {m.sender_admin ? `${m.sender_admin.name} (Admin)` : m.sender?.name ?? 'Client'}
+                          {chatSenderName(m, { adminSuffix: true, guestSuffix: true })}
                         </div>
                         {m.content && <div style={{ fontSize: 13, color: '#475569' }}>{m.content}</div>}
                       </div>

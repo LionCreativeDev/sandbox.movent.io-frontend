@@ -1,7 +1,9 @@
 import api from '@/lib/axios';
 import type { SupportTicket, SupportTicketReply } from './adminSupportService';
+import { TICKET_CATEGORIES, TICKET_STATUSES, TICKET_PRIORITIES } from './adminSupportService';
 
 export type { SupportTicket, SupportTicketReply };
+export { TICKET_CATEGORIES, TICKET_STATUSES, TICKET_PRIORITIES };
 
 export const userSupportService = {
   list: async (params?: Record<string, string>): Promise<SupportTicket[]> => {

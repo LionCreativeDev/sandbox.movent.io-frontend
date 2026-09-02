@@ -1,11 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { clientService } from '@/lib/services/clientService';
+import { TICKET_CATEGORIES } from '@/lib/services/adminSupportService';
 import Link from 'next/link';
+import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
+
+const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(TICKET_CATEGORIES.map(c => [c.value, c.label]));
 
 const SC: Record<string, { bg: string; color: string }> = {
   open:        { bg: '#eff6ff', color: '#2563eb' },
   in_progress: { bg: '#fffbeb', color: '#d97706' },
+  on_hold:     { bg: '#fef3c7', color: '#92400e' },
   resolved:    { bg: '#ecfdf5', color: '#059669' },
   closed:      { bg: '#f1f5f9', color: '#64748b' },
 };
@@ -17,24 +22,32 @@ const PRIORITY_C: Record<string, string> = {
 export default function ClientSupportPage() {
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notEnabled, setNotEnabled] = useState(false);
 
   useEffect(() => {
-    clientService.support().then(setTickets).finally(() => setLoading(false));
+    clientService.support()
+      .then(setTickets)
+      .catch((err: any) => { if (err?.response?.status === 403) setNotEnabled(true); })
+      .finally(() => setLoading(false));
   }, []);
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1e293b', margin: 0 }}>Support Tickets</h1>
-        <Link href="/client/support/create" style={{
-          padding: '8px 18px', background: '#10b981', color: '#fff',
-          borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: 'none',
-        }}>+ Raise Ticket</Link>
+        {!notEnabled && (
+          <Link href="/client/support/create" style={{
+            padding: '8px 18px', background: '#10b981', color: '#fff',
+            borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: 'none',
+          }}>+ Raise Ticket</Link>
+        )}
       </div>
 
       <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>Loading...</div>
+        ) : notEnabled ? (
+          <PortalModuleDisabled feature="Support Tickets" />
         ) : tickets.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
             No tickets yet. <Link href="/client/support/create" style={{ color: '#10b981' }}>Raise one</Link>
@@ -43,7 +56,7 @@ export default function ClientSupportPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['Ticket #', 'Subject', 'Category', 'Priority', 'Status', 'Created'].map(h => (
+                {['Ticket #', 'Subject', 'Category', 'Project', 'Priority', 'Status', 'Created'].map(h => (
                   <th key={h} style={{ padding: '10px 20px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
                 ))}
                 <th style={{ padding: '10px 20px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>Action</th>
@@ -56,7 +69,8 @@ export default function ClientSupportPage() {
                   <tr key={t.id} style={{ borderBottom: '1px solid #f8fafc' }}>
                     <td style={{ padding: '12px 20px', fontSize: 13, color: '#94a3b8', fontWeight: 500 }}>#{t.id}</td>
                     <td style={{ padding: '12px 20px', fontSize: 13, fontWeight: 500, color: '#1e293b', maxWidth: 200 }}>{t.subject}</td>
-                    <td style={{ padding: '12px 20px', fontSize: 12, color: '#64748b', textTransform: 'capitalize' }}>{t.category}</td>
+                    <td style={{ padding: '12px 20px', fontSize: 12, color: '#64748b' }}>{CATEGORY_LABEL[t.category] || t.category}</td>
+                    <td style={{ padding: '12px 20px', fontSize: 12, color: '#64748b' }}>{t.project?.name || '—'}</td>
                     <td style={{ padding: '12px 20px' }}>
                       <span style={{ fontSize: 12, fontWeight: 600, color: PRIORITY_C[t.priority] || '#64748b', textTransform: 'capitalize' }}>{t.priority}</span>
                     </td>

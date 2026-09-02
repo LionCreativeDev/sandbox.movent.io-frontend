@@ -5,6 +5,7 @@ import SuperAdminLayout from '@/components/super-admin/SuperAdminLayout';
 import { packageService, PackagePayload } from '@/lib/services/packageService';
 import { moduleService, ModuleItem } from '@/lib/services/moduleService';
 import { Package } from '@/types';
+import { handleNotFound } from '@/lib/notFound';
 import { HiArrowLeft } from 'react-icons/hi2';
 
 const inp: React.CSSProperties = {
@@ -29,7 +30,7 @@ export default function EditPackagePage() {
   const [availableModules, setAvailableModules] = useState<ModuleItem[]>([]);
   const [form, setForm] = useState({
     name: '', tier: 'basic' as Package['tier'], price: '',
-    price_pkr: '', price_usd: '', trial_days: '',
+    price_usd: '', trial_days: '',
     billing_cycle: 'monthly' as Package['billing_cycle'],
     max_companies: '', max_users_per_company: '',
     description: '', is_visible: true, is_popular: false,
@@ -43,7 +44,6 @@ export default function EditPackagePage() {
           name: pkg.name,
           tier: pkg.tier,
           price: String(pkg.price),
-          price_pkr: pkg.price_pkr != null ? String(pkg.price_pkr) : '',
           price_usd: pkg.price_usd != null ? String(pkg.price_usd) : '',
           trial_days: pkg.trial_days != null ? String(pkg.trial_days) : '',
           billing_cycle: pkg.billing_cycle,
@@ -55,7 +55,7 @@ export default function EditPackagePage() {
           modules: pkg.modules.map(m => m.module_key),
         });
       })
-      .catch(() => setError('Failed to load package'))
+      .catch((err) => { if (!handleNotFound(err, router)) setError('Failed to load package'); })
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -82,7 +82,6 @@ export default function EditPackagePage() {
       const payload: PackagePayload = {
         name: form.name, tier: form.tier,
         price: Number(form.price),
-        price_pkr: form.price_pkr ? Number(form.price_pkr) : null,
         price_usd: form.price_usd ? Number(form.price_usd) : null,
         billing_cycle: form.billing_cycle,
         trial_days: form.trial_days ? Number(form.trial_days) : null,
@@ -161,14 +160,10 @@ export default function EditPackagePage() {
 
               <div style={{ marginBottom: 28 }}>
                 <h3 style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>Pricing</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <div>
                     <label style={lbl}>Base Price (USD) *</label>
                     <input style={inp} type="number" min="0" step="0.01" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} required placeholder="0.00" />
-                  </div>
-                  <div>
-                    <label style={lbl}>Price PKR</label>
-                    <input style={inp} type="number" min="0" value={form.price_pkr} onChange={e => setForm(f => ({ ...f, price_pkr: e.target.value }))} placeholder="0" />
                   </div>
                   <div>
                     <label style={lbl}>Trial Days</label>

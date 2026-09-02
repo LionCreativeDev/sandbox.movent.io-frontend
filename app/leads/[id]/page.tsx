@@ -3,18 +3,20 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { adminLeadService, userLeadService, Lead, FollowUp, LeadActivity, CompanyUser } from '@/lib/services/adminLeadService';
+import { adminLeadService, userLeadService, Lead, FollowUp, LeadActivity, CompanyUser, DealEligibility } from '@/lib/services/adminLeadService';
 import { adminSalesChatService, userSalesChatService } from '@/lib/services/salesChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
 import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
 import { getAuthType, getAuthUser, can, getUserModulePermissions } from '@/lib/auth';
 import { Admin } from '@/types';
+import { handleNotFound } from '@/lib/notFound';
 import toast from 'react-hot-toast';
+import { chatSenderName } from '@/lib/chatSender';
 import {
   HiArrowLeft, HiPencilSquare, HiTrash, HiArrowPath,
   HiPlus, HiCheckCircle, HiXCircle, HiClock, HiCalendarDays,
   HiPhone, HiEnvelope, HiUserGroup, HiChatBubbleLeft,
-  HiInformationCircle, HiArrowsRightLeft, HiFolderPlus, HiBanknotes,
+  HiArrowsRightLeft, HiFolderPlus, HiBanknotes,
 } from 'react-icons/hi2';
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
@@ -58,38 +60,91 @@ const ACTIVITY_COLOR: Record<string, string> = {
   followup_completed: '#10b981', converted: '#059669', won: '#059669', lost: '#dc2626', reopened: '#d97706',
 };
 
+const mergeLeadDetail = (current: Lead | null, updated: Lead): Lead => {
+  if (!current) return updated;
+  return {
+    ...current,
+    ...updated,
+    follow_ups: updated.follow_ups ?? current.follow_ups,
+    activities: updated.activities ?? current.activities,
+  };
+};
+
+const errorMessage = (err: unknown, fallback: string) => {
+  const response = (err as { response?: { data?: { message?: unknown } } })?.response;
+  return typeof response?.data?.message === 'string' ? response.data.message : fallback;
+};
+
+const invoiceStatusLabel = (invoiceStatus?: string | null, fulfillmentStatus?: string | null) => {
+  if (fulfillmentStatus === 'awaiting_payment') return 'Awaiting Payment';
+  if (fulfillmentStatus === 'partially_paid') return 'Partially Paid';
+  if (invoiceStatus === 'draft') return 'Pending Invoice';
+  if (invoiceStatus === 'sent') return 'Awaiting Payment';
+  if (invoiceStatus === 'overdue') return 'Invoice Overdue';
+  if (invoiceStatus === 'paid') return 'Invoice Paid';
+  return 'Invoice Pending';
+};
+
 export default function LeadDetailPage() {
   const router  = useRouter();
   const params  = useParams<{ id: string }>();
   const leadId  = Number(params.id);
   const authType = getAuthType();
   const isAdmin  = authType === 'admin';
+  const authUser = getAuthUser() as { role_type?: string } | Admin | null;
 
   // Module / permission gates
-  const admin          = isAdmin ? (getAuthUser() as Admin | null) : null;
-  const hasClientMod   = isAdmin && (admin?.modules?.includes('clients') ?? false);
+  const admin          = isAdmin ? (authUser as Admin | null) : null;
   const hasProjectMod  = isAdmin ? (admin?.modules?.includes('projects') ?? false) : getUserModulePermissions('project_management').length > 0;
   const canEditLead    = isAdmin || can('sales', 'canEditLeads');
-  const canDeleteLead  = isAdmin || can('sales', 'canDeleteLeads');
+  // Only Company Admin actually has a lead-delete endpoint (DELETE
+  // /admin/leads/{id}) — no staff-side route exists despite canDeleteLeads
+  // being a real, grantable permission (shown/used elsewhere, e.g. Edit
+  // User's checkboxes). Gating this button on that permission alone let a
+  // staff member with it click Delete and silently no-op (the old code
+  // never actually called a delete endpoint for them at all).
+  const canDeleteLead  = isAdmin;
   const canManagePipe  = isAdmin || can('sales', 'canManagePipeline');
-  const canTransferLead = isAdmin || can('sales', 'canTransferLeads') || can('sales', 'canAssignLeadOwner');
+  const canConvertLead = isAdmin || (can('sales', 'canManagePipeline') && can('sales', 'canCreateClients'));
   const canCreateProject = isAdmin
     || can('project_management', 'canCreateProjects')
     || can('project_management', 'canCreateProjectHandoff');
   const hasInvoiceMod    = isAdmin ? (admin?.modules?.includes('invoices') ?? false) : getUserModulePermissions('invoice').length > 0;
   const canCreateInvoice = isAdmin || can('invoice', 'canCreateInvoices');
   // Company Admin always sees Sales Chat, same as every other chat surface.
-  const canUseSalesChat = isAdmin || can('sales', 'canUseSalesChat');
+  // A Lead Manager may also reach it now, but only for a lead they
+  // themselves actually own — enforced server-side in Api\User\
+  // SalesChatController::lead() (never their canViewAllCompanyLeads
+  // company-wide bypass).
+  const canUseSalesChat = isAdmin || ((!authUser || 'role_type' in authUser) && (authUser?.role_type === 'seller' || authUser?.role_type === 'lead_manager') && can('sales', 'canUseSalesChat'));
 
   const svc = isAdmin ? adminLeadService : userLeadService;
   const chatSvc = isAdmin ? adminSalesChatService : userSalesChatService;
 
   const [lead, setLead]               = useState<Lead | null>(null);
+  // "Assign Lead Owner" only covers giving an unowned lead its first owner —
+  // reassigning a lead that already has an owner needs "Transfer Leads"
+  // specifically, matching the backend's split in Api\User\LeadController::transfer().
+  const canTransferLead = lead?.status !== 'won' && (isAdmin || can('sales', 'canTransferLeads')
+    || (!lead?.assigned_to && can('sales', 'canAssignLeadOwner')));
   const [loading, setLoading]         = useState(true);
   const [converting, setConverting]   = useState(false);
   const [deleting, setDeleting]       = useState(false);
   const [error, setError]             = useState('');
   const [tab, setTab]                 = useState<'details' | 'followups' | 'activity' | 'chat'>('details');
+  // Deep-link support (e.g. /leads/8?tab=chat from a Sales Chat notification
+  // — see PublicInvoiceChatController/SalesChatController's notifyAndLog()).
+  // Mirrors frontend/app/clients/[id]/page.tsx's identical pattern; reads via
+  // window.location instead of useSearchParams so this page doesn't need a
+  // Suspense boundary. Before this, every Sales Chat notification linked
+  // straight to /leads/{id}, which always landed on the Details tab —
+  // the new message was one click away on "Sales Chat" but easy to miss.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab') as 'details' | 'followups' | 'activity' | 'chat' | null;
+    if (requested && ['details', 'followups', 'activity', 'chat'].includes(requested)) {
+      setTab(requested);
+    }
+  }, []);
 
   // Sales Chat
   const [chat, setChat]         = useState<ChatMessage[]>([]);
@@ -105,6 +160,10 @@ export default function LeadDetailPage() {
   const [transferring, setTransferring]         = useState(false);
   const [transferError, setTransferError]       = useState('');
 
+
+  // Deal financial/eligibility summary — App\Services\DealEligibilityService
+  const [dealEligibility, setDealEligibility] = useState<DealEligibility | null>(null);
+
   // Follow-up modal
   const [fuModal, setFuModal]   = useState(false);
   const [fuType, setFuType]     = useState('call');
@@ -117,7 +176,7 @@ export default function LeadDetailPage() {
   const load = () => {
     svc.getOne(leadId)
       .then(setLead)
-      .catch(() => setError('Lead not found'))
+      .catch((err) => { if (!handleNotFound(err, router)) setError('Lead not found'); })
       .finally(() => setLoading(false));
   };
 
@@ -126,17 +185,33 @@ export default function LeadDetailPage() {
     load();
   }, [leadId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadEligibility = () => {
+    if (!lead || lead.status === 'lost') { setDealEligibility(null); return; }
+    svc.projectEligibility(lead.id).then(setDealEligibility).catch(() => {});
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadEligibility();
+  }, [lead?.id, lead?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Once this lead has a Project (chat_project_id set), its conversation
+  // moved there — see App\Services\PaymentProjectStartService::
+  // migrateChatHistory() — so this tab must stop reading/polling the old,
+  // now-abandoned Lead-anchored thread entirely, not just hide the UI.
+  const chatMovedToProject = !!lead?.chat_project_id;
+
   const loadChat = () => {
-    if (!canUseSalesChat) return;
+    if (!canUseSalesChat || chatMovedToProject) return;
     chatSvc.leadMessages(leadId).then(setChat).catch(() => {});
   };
 
   useEffect(() => {
     loadChat();
-    if (!canUseSalesChat) return;
+    if (!canUseSalesChat || chatMovedToProject) return;
     const interval = setInterval(loadChat, 8000);
     return () => clearInterval(interval);
-  }, [leadId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [leadId, chatMovedToProject]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendChat = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,8 +227,8 @@ export default function LeadDetailPage() {
       setChatText('');
       setChatFile(null);
       loadChat();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to send message');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to send message'));
     } finally { setSendingChat(false); }
   };
 
@@ -166,18 +241,35 @@ export default function LeadDetailPage() {
   const handleStatusChange = async (newStatus: string) => {
     if (!lead || !canManagePipe) return;
     try {
+      // Marking Won still creates a Deal server-side (deal_reference,
+      // won_at, fulfillment_status) — proposed_project_title just defaults
+      // to "{name} — Project" when not supplied, no confirmation modal
+      // needed up front. Flow is Won -> Create Invoice -> paid/eligible ->
+      // Convert to Client / project handoff.
       const updated = await svc.updateStatus(lead.id, newStatus);
-      setLead(updated);
-    } catch { setError('Failed to update status'); }
+      setLead(current => mergeLeadDetail(current, updated));
+    } catch (err: unknown) {
+      const ex = err as { response?: { data?: { message?: string } } };
+      setError(ex.response?.data?.message ?? 'Failed to update status');
+    }
   };
 
   const handleConvert = async () => {
-    if (!lead || lead.client_id || !isAdmin) return;
+    if (!lead || lead.client_id || !canConvertLead) return;
     if (!confirm('Convert this lead to a client?')) return;
     setConverting(true); setError('');
     try {
-      const { client_id } = await adminLeadService.convert(lead.id);
-      router.push(`/clients/${client_id}`);
+      const { client_id } = await svc.convert(lead.id);
+      // Update local state before navigating away — if the navigation is
+      // ever interrupted (back button, a cached page load), the button here
+      // must already reflect the conversion instead of still offering
+      // "Convert to Client" on an already-converted lead.
+      setLead(l => l ? { ...l, client_id } : l);
+      // Admin and Seller share this page (app/admin/leads/[id]/page.tsx
+      // re-exports it), so the destination must follow the caller's own
+      // guard — an Admin sent to a Seller-guard route gets 401'd out to the
+      // login screen.
+      router.push(isAdmin ? `/admin/clients/${client_id}` : `/clients/${client_id}`);
     } catch (err: unknown) {
       const ex = err as { response?: { data?: { message?: string } } };
       setError(ex.response?.data?.message ?? 'Conversion failed');
@@ -190,19 +282,21 @@ export default function LeadDetailPage() {
     if (!confirm('Delete this lead? This cannot be undone.')) return;
     setDeleting(true);
     try {
-      await svc.update(lead.id, {}); // placeholder — only admin has delete
-      if (isAdmin) await adminLeadService.remove(lead.id);
+      await adminLeadService.remove(lead.id);
       router.push(isAdmin ? '/admin/leads' : '/leads');
-    } catch { setError('Failed to delete lead'); setDeleting(false); }
+    } catch (err: unknown) {
+      const ex = err as { response?: { data?: { message?: string } } };
+      setError(ex.response?.data?.message ?? 'Failed to delete lead');
+      setDeleting(false);
+    }
   };
 
   const handleAddFollowUp = async () => {
     if (!lead || !fuDate) { setFuError('Date is required'); return; }
-    if (!isAdmin) { setFuError('Add follow-ups from admin panel'); return; }
     setFuSaving(true); setFuError('');
     const scheduledAt = fuTime ? `${fuDate} ${fuTime}` : `${fuDate} 09:00`;
     try {
-      await adminLeadService.addFollowUp(lead.id, { type: fuType, scheduled_at: scheduledAt, notes: fuNotes || null });
+      await svc.addFollowUp(lead.id, { type: fuType, scheduled_at: scheduledAt, notes: fuNotes || null });
       setFuModal(false); setFuDate(''); setFuTime(''); setFuNotes(''); setFuType('call');
       load();
     } catch (err: unknown) {
@@ -234,7 +328,7 @@ export default function LeadDetailPage() {
     setTransferring(true); setTransferError('');
     try {
       const updated = await svc.transfer(lead.id, Number(transferToUserId), transferReason.trim() || undefined);
-      setLead(updated);
+      setLead(current => mergeLeadDetail(current, updated));
       toast.success('Lead transferred');
       setTransferModal(false);
       setTransferToUserId(''); setTransferReason('');
@@ -269,10 +363,37 @@ export default function LeadDetailPage() {
   const activities  = lead.activities ?? [];
   const pendingFUs  = followUps.filter(f => f.status === 'pending');
   const leadsRoot   = isAdmin ? '/admin/leads' : '/leads';
+  const isWonDeal = lead.status === 'won';
+  const hasProject = !!dealEligibility?.has_project;
+  const projectCreationEligible = !!dealEligibility?.project_creation_eligible;
+  const latestInvoice = dealEligibility?.latest_invoice ?? null;
+  const hasLeadInvoice = (dealEligibility?.invoice_count ?? 0) > 0;
+  const awaitingProjectPayment = !hasProject && !projectCreationEligible;
+  const notLost = lead.status !== 'lost';
+  // Once an invoice exists, the pipeline is driven only by
+  // LeadDealService::markWonFromPayment() on the backend — no more manual
+  // status clicks (Won, Lost, or Reopen) from this page.
+  const hasInvoice = !!lead.has_invoice;
+  // Invoice can be raised as soon as the lead exists — it no longer waits on
+  // Won first. Paying it in full is what marks the lead Won automatically
+  // (see App\Services\LeadDealService::markWonFromPayment()); Lost is the
+  // only status that hides this button.
+  const canShowCreateInvoice = hasInvoiceMod && canCreateInvoice && notLost && !!dealEligibility && !hasLeadInvoice && awaitingProjectPayment;
+  const canShowInvoiceStatus = notLost && !!latestInvoice && awaitingProjectPayment;
+  // Convert to Client only requires the Deal to be Won (i.e. its invoice was
+  // paid in full — see LeadDealService::markWonFromPayment()) and not
+  // already converted — Api\{Admin,User}\LeadController::convert() itself
+  // never checks project_creation_eligible either, it just creates a plain
+  // Client row. Requiring that flag here too was stricter than the backend
+  // actually enforces, and since project_creation_eligible depends on
+  // required_kickoff_amount/estimated_value — fields nothing in the UI ever
+  // sets — it was effectively always false, permanently hiding this button
+  // even once the lead was genuinely Won.
+  const canShowConvert = isWonDeal && !lead.client_id && (isAdmin || canConvertLead);
 
   return (
     <DashboardLayout title={lead.name}>
-      <div style={{ maxWidth: 900 }}>
+      <div style={{ width: '100%', maxWidth: 'none' }}>
         <button onClick={() => router.push(leadsRoot)} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 20, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
           <HiArrowLeft size={16} /> Back to Leads
         </button>
@@ -281,7 +402,7 @@ export default function LeadDetailPage() {
 
         {/* Header card */}
         <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '22px 28px', marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
                 <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: '#0f172a' }}>{lead.name}</h1>
@@ -299,38 +420,61 @@ export default function LeadDetailPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              {/* Convert to Client — admin only + client module required */}
-              {isAdmin && lead.status !== 'won' && lead.status !== 'lost' && !lead.client_id && (
-                hasClientMod ? (
-                  <button onClick={handleConvert} disabled={converting}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: 'none', background: converting ? '#a7f3d0' : 'linear-gradient(135deg, #059669, #10b981)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: converting ? 'not-allowed' : 'pointer' }}>
-                    <HiArrowPath size={15} /> {converting ? 'Converting…' : 'Convert to Client'}
-                  </button>
-                ) : (
-                  <div title="Client module is required to convert leads into clients"
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#f8fafc', color: '#94a3b8', fontSize: 13, cursor: 'not-allowed' }}>
-                    <HiInformationCircle size={15} /> Convert to Client
-                  </div>
-                )
+              {/* Convert to Client — as soon as the Deal is Won (its invoice
+                  paid in full auto-flips lead.status, see
+                  LeadDealService::markWonFromPayment()) and not already
+                  converted. A basic Client record, same for everyone.
+                  Api\Admin\LeadController::convert() has never required the
+                  Client module (it just creates a plain Client row, same as
+                  the sub-user path's Sales-bundled canManagePipeline +
+                  canCreateClients access) — Admin gets it unconditionally,
+                  same as Admin's unrestricted access everywhere else. */}
+              {canShowConvert && (
+                <button onClick={handleConvert} disabled={converting}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: 'none', background: converting ? '#a7f3d0' : 'linear-gradient(135deg, #059669, #10b981)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: converting ? 'not-allowed' : 'pointer' }}>
+                  <HiArrowPath size={15} /> {converting ? 'Converting…' : 'Convert to Client'}
+                </button>
               )}
               {lead.client_id && (
                 <Link href={`/clients/${lead.client_id}`} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, background: '#ecfdf5', color: '#059669', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
                   View Client →
                 </Link>
               )}
-              {/* Project/Task Handoff — only when Project Management is active, user has permission, and lead is won */}
-              {hasProjectMod && canCreateProject && lead.status === 'won' && (
-                <button onClick={handleCreateProjectHandoff}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #7c3aed, #a78bfa)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                  <HiFolderPlus size={15} /> Create Project
-                </button>
+              {/* Project handoff — only when Project Management is active,
+                  user has permission, lead is won, AND the Deal has cleared
+                  its kickoff-payment requirement (core rule: Won alone never
+                  makes a project eligible). */}
+              {hasProjectMod && canCreateProject && isWonDeal && (
+                dealEligibility?.has_project ? (
+                  <button onClick={() => dealEligibility.project_id && router.push(isAdmin ? `/admin/projects/${dealEligibility.project_id}` : `/projects/${dealEligibility.project_id}`)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #7c3aed, #a78bfa)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    <HiFolderPlus size={15} /> View Project {dealEligibility.project_reference}
+                  </button>
+                ) : dealEligibility?.project_creation_eligible ? (
+                  <button onClick={handleCreateProjectHandoff}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #7c3aed, #a78bfa)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    <HiFolderPlus size={15} /> Create Project
+                  </button>
+                ) : null
               )}
-              {/* Invoice handoff — only when Invoice is active, user has permission, and lead is won */}
-              {hasInvoiceMod && canCreateInvoice && lead.status === 'won' && (
+              {/* Invoice handoff — available as soon as the lead is created,
+                  any stage before Lost. The invoice form supports lead-only/
+                  guest invoices, so conversion to Client is intentionally not
+                  required here. Paying it in full auto-marks the lead Won
+                  (LeadDealService::markWonFromPayment()); once the Deal is
+                  paid enough to become project-eligible, this hides and
+                  Convert/Project actions take over. */}
+              {canShowCreateInvoice && (
                 <button onClick={handleCreateInvoice}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   <HiBanknotes size={15} /> Create Invoice
                 </button>
+              )}
+              {canShowInvoiceStatus && latestInvoice && (
+                <Link href={isAdmin ? `/admin/invoices/${latestInvoice.id}` : `/invoices/${latestInvoice.id}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, background: '#fff7ed', border: '1.5px solid #fed7aa', color: '#c2410c', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
+                  <HiClock size={15} /> {invoiceStatusLabel(latestInvoice.status, dealEligibility?.fulfillment_status)}
+                </Link>
               )}
               {canTransferLead && (
                 <button onClick={openTransferModal}
@@ -338,7 +482,7 @@ export default function LeadDetailPage() {
                   <HiArrowsRightLeft size={15} /> Transfer
                 </button>
               )}
-              {canEditLead && (
+              {canEditLead && lead.status !== 'won' && (
                 <button onClick={() => router.push(`${leadsRoot}/${lead.id}/edit`)}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   <HiPencilSquare size={15} /> Edit
@@ -356,35 +500,102 @@ export default function LeadDetailPage() {
           {/* Pipeline bar */}
           {lead.status !== 'lost' && canManagePipe && (
             <div style={{ marginTop: 22 }}>
+              {hasInvoice && (
+                <div style={{ marginBottom: 8, fontSize: 11.5, color: '#94a3b8' }}>
+                  🔒 Status is locked — an invoice has been raised on this lead. It moves to Won automatically once paid in full.
+                </div>
+              )}
               <div style={{ display: 'flex' }}>
                 {PIPELINE_STEPS.map((step, idx) => {
                   const isActive = step === lead.status;
                   const isPast   = pipelineIdx >= 0 && idx < pipelineIdx;
                   const isWon    = step === 'won' && lead.status === 'won';
+                  // Won is never a manual click — it only ever comes from
+                  // LeadDealService::markWonFromPayment() (an invoice paid in
+                  // full), enforced server-side too. Once Won, every earlier
+                  // stage is also locked — a deal can't be walked back to New/
+                  // Contacted/Qualified/Proposal/Negotiation from here
+                  // (mirrors the existing Lost lock, which hides the whole
+                  // bar). Once an invoice exists, every step locks.
+                  const locked   = step === 'won' || (lead.status === 'won' && step !== 'won') || hasInvoice;
                   const bg       = isWon ? '#059669' : isActive ? '#2563eb' : isPast ? '#93c5fd' : '#e2e8f0';
                   const col      = (isActive || isPast || isWon) ? '#fff' : '#94a3b8';
+                  // A reached step (current, past, or genuinely Won) stays at
+                  // full opacity even though it's `locked` against further
+                  // clicks — `locked` alone would otherwise fade out Won's
+                  // green background the moment it's actually achieved, which
+                  // reads as "still disabled" even though the deal IS won.
+                  const reached  = isActive || isPast || isWon;
                   return (
-                    <button key={step} onClick={() => handleStatusChange(step)}
-                      style={{ flex: 1, padding: '7px 0', background: bg, color: col, border: 'none', borderRadius: idx === 0 ? '8px 0 0 8px' : idx === PIPELINE_STEPS.length - 1 ? '0 8px 8px 0' : 0, fontSize: 11, fontWeight: isActive ? 700 : 500, cursor: 'pointer' }}>
+                    <button key={step} onClick={() => !locked && handleStatusChange(step)} disabled={locked}
+                      title={step === 'won' && !isWon ? 'Won happens automatically once an invoice on this lead is paid in full' : undefined}
+                      style={{ flex: 1, padding: '7px 0', background: bg, color: col, border: 'none', borderRadius: idx === 0 ? '8px 0 0 8px' : idx === PIPELINE_STEPS.length - 1 ? '0 8px 8px 0' : 0, fontSize: 11, fontWeight: isActive ? 700 : 500, cursor: locked ? 'not-allowed' : 'pointer', opacity: reached || !locked ? 1 : 0.6 }}>
                       {cap(step)}
                     </button>
                   );
                 })}
               </div>
-              <div style={{ marginTop: 6, display: 'flex', justifyContent: 'flex-end' }}>
-                <button onClick={() => handleStatusChange('lost')} style={{ fontSize: 11, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Mark as Lost ✕</button>
-              </div>
+              {!hasInvoice && (
+                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'flex-end' }}>
+                  <button onClick={() => handleStatusChange('lost')} style={{ fontSize: 11, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Mark as Lost ✕</button>
+                </div>
+              )}
             </div>
           )}
           {lead.status === 'lost' && (
             <div style={{ marginTop: 14, padding: '10px 16px', background: '#fef2f2', borderRadius: 8, color: '#dc2626', fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>This lead was marked as lost.{lead.lost_reason ? ` Reason: ${lead.lost_reason}` : ''}</span>
-              {canManagePipe && (
+              {canManagePipe && !hasInvoice && (
                 <button onClick={() => handleStatusChange('new')} style={{ background: 'none', border: '1.5px solid #fecaca', borderRadius: 7, padding: '5px 12px', color: '#dc2626', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Reopen</button>
               )}
             </div>
           )}
         </div>
+
+        {/* Deal panel — proposed project, kickoff payment progress, project
+            eligibility. Only shown once the lead is Won (i.e. is a Deal). */}
+        {lead.status === 'won' && dealEligibility && (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '18px 22px', marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+                  Deal {dealEligibility.deal_reference}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>{dealEligibility.proposed_project_title}</div>
+              </div>
+              <span style={{
+                padding: '4px 12px', borderRadius: 50, fontSize: 11, fontWeight: 700,
+                background: dealEligibility.has_project ? '#ecfdf5' : dealEligibility.project_creation_eligible ? '#eff6ff' : '#fff7ed',
+                color: dealEligibility.has_project ? '#059669' : dealEligibility.project_creation_eligible ? '#2563eb' : '#d97706',
+              }}>
+                {cap((dealEligibility.fulfillment_status ?? '').replace(/_/g, ' '))}
+              </span>
+            </div>
+            <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Required Kickoff</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{dealEligibility.required_kickoff_amount.toLocaleString()}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Received</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#059669' }}>
+                  {dealEligibility.net_paid_amount.toLocaleString()} of {dealEligibility.required_kickoff_amount.toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>Remaining</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: dealEligibility.remaining_amount > 0 ? '#ea580c' : '#059669' }}>
+                  {dealEligibility.remaining_amount.toLocaleString()}
+                </div>
+              </div>
+            </div>
+            {dealEligibility.project_creation_eligible && !dealEligibility.has_project && (
+              <div style={{ marginTop: 12, padding: '9px 14px', background: '#ecfdf5', borderRadius: 8, color: '#059669', fontSize: 12.5, fontWeight: 600 }}>
+                ✓ Required payment received. This Deal is now eligible for project creation.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 16, background: '#f1f5f9', borderRadius: 10, padding: 4 }}>
@@ -398,7 +609,7 @@ export default function LeadDetailPage() {
 
         {/* Tab: Details */}
         {tab === 'details' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 }}>
             <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '20px 24px' }}>
               <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 700 }}>Contact Details</h3>
               {[
@@ -419,9 +630,10 @@ export default function LeadDetailPage() {
               {[
                 { label: 'Est. Value',     value: PKR(lead.estimated_value) },
                 { label: 'Assigned To',    value: lead.assigned_user?.name },
-                { label: 'Next Follow-up', value: lead.next_followup_date ? fmtDate(lead.next_followup_date) : null },
+                { label: 'Next Follow-up', value: lead.next_followup_date ? `${fmtDate(lead.next_followup_date)}${lead.next_followup_time ? ` at ${lead.next_followup_time}` : ''}` : null },
                 { label: 'Converted',      value: lead.converted_at ? fmtDate(lead.converted_at) : null },
                 { label: 'Created',        value: fmtDate(lead.created_at) },
+                { label: 'Created By',     value: lead.creator?.name },
               ].map(({ label, value }) => (
                 <div key={label} style={{ display: 'flex', gap: 12, marginBottom: 12, borderBottom: '1px solid #f8fafc', paddingBottom: 10 }}>
                   <div style={{ width: 100, flexShrink: 0, fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' }}>{label}</div>
@@ -443,7 +655,7 @@ export default function LeadDetailPage() {
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Follow-ups</h3>
-              {isAdmin && (
+              {lead.status !== 'won' && (isAdmin || can('sales', 'canEditLeads')) && (
                 <button onClick={() => setFuModal(true)}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   <HiPlus size={15} /> Add Follow-up
@@ -519,9 +731,24 @@ export default function LeadDetailPage() {
           </div>
         )}
 
-        {/* Tab: Sales Chat — Seller<->Lead conversation, separate from any
-            Project chat this lead may later hand off to. */}
-        {tab === 'chat' && canUseSalesChat && (
+        {/* Tab: Sales Chat — Seller<->Lead conversation. Once this lead has
+            a Project, the conversation has already moved there (see
+            App\Services\PaymentProjectStartService::migrateChatHistory()) —
+            point here instead of showing the old, now-empty thread. */}
+        {tab === 'chat' && canUseSalesChat && chatMovedToProject && (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '20px 24px', textAlign: 'center' }}>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: '#64748b' }}>
+              This conversation moved to the project once it was created — Sales Chat here is no longer active.
+            </p>
+            <button
+              onClick={() => router.push(`${isAdmin ? '/admin' : ''}/projects/${lead!.chat_project_id}/chat`)}
+              style={{ padding: '9px 20px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Go to Project Chat →
+            </button>
+          </div>
+        )}
+        {tab === 'chat' && canUseSalesChat && !chatMovedToProject && (
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '20px 24px' }}>
             <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 700 }}>Sales Chat</h3>
             {chat.length === 0 ? (
@@ -531,7 +758,7 @@ export default function LeadDetailPage() {
                 {chat.map(m => (
                   <div key={m.id}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
-                      {m.sender_admin ? `${m.sender_admin.name} (Admin)` : m.sender?.name ?? 'Unknown'}
+                      {chatSenderName(m, { adminSuffix: true, guestSuffix: true })}
                     </div>
                     {m.content && <div style={{ fontSize: 13, color: '#475569' }}>{m.content}</div>}
                     {m.attachment_name && (
@@ -573,7 +800,7 @@ export default function LeadDetailPage() {
         )}
       </div>
 
-      {/* Add Follow-up Modal (admin only) */}
+      {/* Add Follow-up Modal */}
       {fuModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: 420, maxWidth: '95vw' }}>
@@ -638,6 +865,7 @@ export default function LeadDetailPage() {
           </div>
         </div>
       )}
+
     </DashboardLayout>
   );
 }

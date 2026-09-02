@@ -5,13 +5,17 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminClientService } from '@/lib/services/adminClientService';
 import { adminInvoiceService, ClientInvoiceStats } from '@/lib/services/adminInvoiceService';
 import { userClientService } from '@/lib/services/userClientService';
+import { adminProjectService, Project } from '@/lib/services/adminProjectService';
+import { userProjectService } from '@/lib/services/userProjectService';
 import { adminSalesChatService, userSalesChatService } from '@/lib/services/salesChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
-import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize, inp } from '@/components/admin/projects/shared';
+import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize, inp, Badge, STATUS_SC, PRIORITY_SC, fmtDate } from '@/components/admin/projects/shared';
 import api from '@/lib/axios';
-import { getAuthType, can } from '@/lib/auth';
+import { getAuthType, getAuthUser, can } from '@/lib/auth';
 import { Client, Invoice } from '@/types';
+import { handleNotFound } from '@/lib/notFound';
 import toast from 'react-hot-toast';
+import { chatSenderName } from '@/lib/chatSender';
 import {
   HiArrowLeft, HiPencilSquare, HiCheckCircle, HiXCircle,
   HiDocumentText, HiPlusCircle, HiTrash
@@ -32,25 +36,58 @@ const CLIENT_STATUS: Record<string, { bg: string; color: string }> = {
   blocked:  { bg: '#fef2f2', color: '#dc2626' },
 };
 
-type Tab = 'details' | 'invoices' | 'portal' | 'chat' | 'messages';
+type Tab = 'details' | 'invoices' | 'projects' | 'portal' | 'chat' | 'messages';
 
 export default function ClientProfilePage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const clientId = Number(params.id);
   const isSubUser = getAuthType() === 'user';
+  const authUser = getAuthUser() as { role_type?: string } | null;
+  // A Lead Manager may also reach Sales Chat now, but only for a thread they
+  // themselves actually own — enforced server-side in Api\User\
+  // SalesChatController::client() (never their canViewAllCompanyLeads
+  // company-wide bypass, which would otherwise expose every other Seller's
+  // client conversations too).
+  const isSeller = !isSubUser || authUser?.role_type === 'seller' || authUser?.role_type === 'lead_manager';
   const canEditClient = !isSubUser || can('client', 'canEditClients');
-  // Company Admin always sees Sales Chat, same as every other chat surface.
-  const canUseSalesChat = !isSubUser || can('sales', 'canUseSalesChat');
+  // Sales Chat is available only for portal-active clients.
+  const canUseSalesChat = !isSubUser || (isSeller && can('sales', 'canUseSalesChat'));
+  const canViewClientProjects = !isSubUser
+    || can('project_management', 'canViewProjects')
+    || can('project_management', 'canViewLinkedProjects');
+  const canManagePortalPerm = !isSubUser
+    || can('client', 'canEnableClientPortal')
+    || can('client', 'canDisableClientPortal');
   const chatSvc = isSubUser ? userSalesChatService : adminSalesChatService;
+  const clientSvc = isSubUser ? userClientService : adminClientService;
 
   const [tab, setTab] = useState<Tab>('details');
+  // Deep-link support (e.g. /clients/21?tab=messages from the Project Chat
+  // page's "Chat with Client" button). Read via window.location instead of
+  // useSearchParams so this page doesn't need a Suspense boundary.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab') as Tab | null;
+    if (requested && ['details', 'invoices', 'projects', 'portal', 'chat', 'messages'].includes(requested)) {
+      setTab(requested);
+    }
+  }, []);
   const [client, setClient]   = useState<Client | null>(null);
+  // A company without the real Client Portal module only ever gets a Basic
+  // Client record — portal login is never offerable, regardless of the
+  // canEnableClientPortal/canDisableClientPortal permission (see
+  // Api\User\ClientController::enablePortal()'s matching backend check).
+  // Defaults true while `client` hasn't loaded yet, to avoid a flash of
+  // "no Portal tab" that then appears once the response comes back.
+  const canManagePortal = canManagePortalPerm && (client?.has_portal_module ?? true);
+  const canUseClientSalesChat = canUseSalesChat && !!client?.portal_access;
   const [perms, setPerms]     = useState<Record<string, { label: string; is_enabled: boolean }>>({});
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [stats, setStats]     = useState<ClientInvoiceStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [invLoading, setInvLoading] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projLoading, setProjLoading] = useState(false);
 
   // Sales Chat
   const [chat, setChat]         = useState<ChatMessage[]>([]);
@@ -65,6 +102,14 @@ export default function ClientProfilePage() {
   const [dmMessages, setDmMessages]       = useState<any[]>([]);
   const [dmText, setDmText]               = useState('');
   const [sendingDm, setSendingDm]         = useState(false);
+  const [startingDm, setStartingDm]       = useState(false);
+  // Looping a Project Manager into the active thread, and optionally hiding
+  // a specific reply from them — see Api\User\ClientChatController's
+  // addParticipant()/reply() (hidden_from_user_ids).
+  const [pmOptions, setPmOptions]         = useState<{ id: number; name: string }[]>([]);
+  const [selectedPmId, setSelectedPmId]   = useState('');
+  const [addingPm, setAddingPm]           = useState(false);
+  const [hideFromPm, setHideFromPm]       = useState(false);
 
   // portal form state
   const [portalEmail, setPortalEmail]     = useState('');
@@ -75,15 +120,22 @@ export default function ClientProfilePage() {
 
   useEffect(() => {
     if (isSubUser) {
-      userClientService.getOne(clientId).then(c => setClient(c))
-        .catch(() => {}).finally(() => setLoading(false));
+      userClientService.getOne(clientId).then(c => {
+        setClient(c);
+        if (c.portal_permissions) setPerms(c.portal_permissions);
+        setPortalEmail(c.user?.email ?? c.email ?? '');
+      }).catch((err) => { handleNotFound(err, router); }).finally(() => setLoading(false));
       return;
     }
-    adminClientService.getOne(clientId).then(({ client: c, permissions: p }) => {
-      setClient(c);
+    adminClientService.getOne(clientId).then(({ client: c, permissions: p, has_portal_module }) => {
+      // has_portal_module is a sibling of `client` in this endpoint's
+      // response shape (unlike the sub-user endpoint, which merges it onto
+      // the Client object directly) — merge it on here too, since
+      // canManagePortal reads client.has_portal_module for both paths.
+      setClient({ ...c, has_portal_module });
       setPerms(p);
-      if (c.user?.email) setPortalEmail(c.user.email);
-    }).catch(() => {}).finally(() => setLoading(false));
+      setPortalEmail(c.user?.email ?? c.email ?? '');
+    }).catch((err) => { handleNotFound(err, router); }).finally(() => setLoading(false));
   }, [clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -95,17 +147,30 @@ export default function ClientProfilePage() {
     }).catch(() => {}).finally(() => setInvLoading(false));
   }, [tab, clientId]);
 
+  useEffect(() => {
+    if (tab !== 'projects' || !canViewClientProjects) return;
+    setProjLoading(true);
+    const svc = isSubUser ? userProjectService : adminProjectService;
+    svc.list({ client_id: String(clientId) }).then(setProjects).catch(() => {}).finally(() => setProjLoading(false));
+  }, [tab, clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Once this client has a Project (chat_project_id set), its conversation
+  // moved there — see App\Services\PaymentProjectStartService::
+  // migrateChatHistory() — so this tab must stop reading/polling the old,
+  // now-abandoned Client-anchored thread entirely, not just hide the UI.
+  const chatMovedToProject = !!client?.chat_project_id;
+
   const loadChat = () => {
-    if (!canUseSalesChat) return;
+    if (!canUseClientSalesChat || chatMovedToProject) return;
     chatSvc.clientMessages(clientId).then(setChat).catch(() => {});
   };
 
   useEffect(() => {
+    if (!canUseClientSalesChat || chatMovedToProject) return;
     loadChat();
-    if (!canUseSalesChat) return;
     const interval = setInterval(loadChat, 8000);
     return () => clearInterval(interval);
-  }, [clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, canUseClientSalesChat, chatMovedToProject]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendChat = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,12 +203,69 @@ export default function ClientProfilePage() {
       const data = res.data.data;
       setDmThreads(data);
       if (data.length > 0 && !dmActiveThread) selectDmThread(data[0]);
+      // Keep the open thread's participants list current after an add/remove.
+      setDmActiveThread((prev: any) => prev ? (data.find((t: any) => t.id === prev.id) ?? prev) : prev);
     }).catch(() => {});
   };
 
   const selectDmThread = (thread: any) => {
     setDmActiveThread(thread);
     api.get(`${dmBase}/clients/${clientId}/direct-chat/${thread.id}/messages`).then(res => setDmMessages(res.data.data)).catch(() => {});
+  };
+
+  const pmParticipant = dmActiveThread?.participants?.find((p: any) => p.role_type === 'project_manager') ?? null;
+
+  useEffect(() => {
+    if (tab !== 'messages') return;
+    const url = isSubUser ? '/user/projects/company-users' : '/admin/users';
+    api.get(url).then(res => {
+      const users = isSubUser ? res.data.data : res.data.data.users;
+      setPmOptions((users as any[]).filter(u => u.role_type === 'project_manager').map(u => ({ id: u.id, name: u.name })));
+    }).catch(() => {});
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const addPmToThread = async () => {
+    if (!dmActiveThread || !selectedPmId) return;
+    setAddingPm(true);
+    try {
+      await api.post(`${dmBase}/clients/${clientId}/direct-chat/${dmActiveThread.id}/participants`, { user_id: Number(selectedPmId) });
+      toast.success('Project Manager added to the chat');
+      setSelectedPmId('');
+      loadDmThreads();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to add Project Manager');
+    } finally { setAddingPm(false); }
+  };
+
+  const removePmFromThread = async (userId: number) => {
+    if (!dmActiveThread) return;
+    if (!confirm('Remove this Project Manager from the chat?')) return;
+    try {
+      await api.delete(`${dmBase}/clients/${clientId}/direct-chat/${dmActiveThread.id}/participants/${userId}`);
+      loadDmThreads();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to remove');
+    }
+  };
+
+  // Starts (or resolves the already-existing) direct-chat thread with this
+  // client — previously this tab could only ever show/reply to a thread the
+  // CLIENT had started; there was no way for staff to initiate one.
+  const startDmChat = async () => {
+    setStartingDm(true);
+    try {
+      const res = await api.post(`${dmBase}/clients/${clientId}/direct-chat/start`);
+      const threadId = res.data.data.thread_id;
+      const existing = dmThreads.find((t: any) => t.id === threadId);
+      if (existing) {
+        selectDmThread(existing);
+      } else {
+        loadDmThreads();
+        selectDmThread({ id: threadId, title: null });
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to start chat');
+    } finally { setStartingDm(false); }
   };
 
   useEffect(() => {
@@ -158,8 +280,12 @@ export default function ClientProfilePage() {
     if (!dmText.trim() || !dmActiveThread) return;
     setSendingDm(true);
     try {
-      await api.post(`${dmBase}/clients/${clientId}/direct-chat/${dmActiveThread.id}/reply`, { content: dmText.trim() });
+      await api.post(`${dmBase}/clients/${clientId}/direct-chat/${dmActiveThread.id}/reply`, {
+        content: dmText.trim(),
+        ...(hideFromPm && pmParticipant ? { hidden_from_user_ids: [pmParticipant.user_id] } : {}),
+      });
       setDmText('');
+      setHideFromPm(false);
       const res = await api.get(`${dmBase}/clients/${clientId}/direct-chat/${dmActiveThread.id}/messages`);
       setDmMessages(res.data.data);
     } catch (err: any) {
@@ -167,14 +293,30 @@ export default function ClientProfilePage() {
     } finally { setSendingDm(false); }
   };
 
+  // Admin's getOne() returns {client, permissions}; the sub-user version
+  // returns the Client directly — this branches once so the two portal
+  // handlers below don't need to duplicate it.
+  const reloadClientAfterPortalChange = () => {
+    if (isSubUser) {
+      userClientService.getOne(clientId).then(c => {
+        setClient(c);
+        if (c.portal_permissions) setPerms(c.portal_permissions);
+      }).catch(() => {});
+    } else {
+      adminClientService.getOne(clientId).then(({ client: c, permissions: p }) => {
+        setClient(c);
+        setPerms(p);
+      }).catch(() => {});
+    }
+  };
+
   const handleEnablePortal = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setPortalSaving(true); setPortalError(''); setPortalSuccess('');
     try {
-      await adminClientService.enablePortal(clientId, portalEmail, portalPass);
+      await clientSvc.enablePortal(clientId, portalEmail, portalPass);
       setPortalSuccess('Portal access enabled.');
-      const { client: c } = await adminClientService.getOne(clientId);
-      setClient(c);
+      reloadClientAfterPortalChange();
     } catch (err: unknown) {
       const ex = err as { response?: { data?: { message?: string } } };
       setPortalError(ex.response?.data?.message ?? 'Failed to enable portal');
@@ -185,10 +327,9 @@ export default function ClientProfilePage() {
     if (!confirm('Disable portal access for this client?')) return;
     setPortalSaving(true); setPortalError(''); setPortalSuccess('');
     try {
-      await adminClientService.disablePortal(clientId);
+      await clientSvc.disablePortal(clientId);
       setPortalSuccess('Portal access disabled.');
-      const { client: c } = await adminClientService.getOne(clientId);
-      setClient(c);
+      reloadClientAfterPortalChange();
     } catch { setPortalError('Failed to disable portal'); }
     finally { setPortalSaving(false); }
   };
@@ -198,7 +339,7 @@ export default function ClientProfilePage() {
     setPerms(updated);
     const mapped: Record<string, boolean> = {};
     Object.entries(updated).forEach(([k, v]) => { mapped[k] = v.is_enabled; });
-    await adminClientService.updatePermissions(clientId, mapped).catch(() => {});
+    await clientSvc.updatePermissions(clientId, mapped).catch(() => {});
   };
 
   const fmt = (n: number, cur = 'USD') => `${cur} ${n.toLocaleString('en-US', { minimumFractionDigits: 0 })}`;
@@ -206,23 +347,29 @@ export default function ClientProfilePage() {
   if (loading) return <DashboardLayout title="Client"><div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Loading…</div></DashboardLayout>;
   if (!client) return <DashboardLayout title="Client"><div style={{ padding: 48, textAlign: 'center', color: '#dc2626' }}>Client not found.</div></DashboardLayout>;
 
+  // 'messages' (Client Messages) is deliberately not a clickable tab here —
+  // not needed as a general-purpose tab on this page. Still reachable via
+  // the deep link from the Project Chat page's "Chat with Client" button
+  // (?tab=messages), which sets `tab` state directly — the content block
+  // below still renders for that case.
   const tabs: { key: Tab; label: string }[] = isSubUser
     ? [
         { key: 'details', label: 'Details' },
-        ...(canUseSalesChat ? [{ key: 'chat' as const, label: 'Sales Chat' }] : []),
-        { key: 'messages', label: 'Client Messages' },
+        ...(canViewClientProjects ? [{ key: 'projects' as const, label: 'Projects' }] : []),
+        ...(canManagePortal ? [{ key: 'portal' as const, label: 'Portal' }] : []),
+        ...(canUseClientSalesChat ? [{ key: 'chat' as const, label: 'Sales Chat' }] : []),
       ]
     : [
         { key: 'details', label: 'Details' },
         { key: 'invoices', label: 'Invoices' },
-        { key: 'portal', label: 'Portal' },
-        ...(canUseSalesChat ? [{ key: 'chat' as const, label: 'Sales Chat' }] : []),
-        { key: 'messages', label: 'Client Messages' },
+        { key: 'projects', label: 'Projects' },
+        ...(canManagePortal ? [{ key: 'portal' as const, label: 'Portal' }] : []),
+        ...(canUseClientSalesChat ? [{ key: 'chat' as const, label: 'Sales Chat' }] : []),
       ];
 
   return (
     <DashboardLayout title={client.name}>
-      <div style={{ maxWidth: 900 }}>
+      <div style={{ width: '100%' }}>
         {/* Back + Header */}
         <button onClick={() => router.push('/clients')} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 20, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
           <HiArrowLeft size={16} /> Back to Clients
@@ -345,8 +492,43 @@ export default function ClientProfilePage() {
           </div>
         )}
 
+        {/* ── Projects Tab ── */}
+        {tab === 'projects' && (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden' }}>
+            {projLoading ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>Loading projects…</div>
+            ) : projects.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>No projects linked to this client yet.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+                    {['Project', 'Status', 'Priority', 'Progress', 'Deadline', ''].map(h => (
+                      <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {projects.map((p, i) => (
+                    <tr key={p.id} style={{ borderBottom: i < projects.length - 1 ? '1px solid #f8fafc' : 'none' }}>
+                      <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0f172a', fontSize: 13 }}>{p.name}</td>
+                      <td style={{ padding: '12px 14px' }}><Badge label={p.status} sc={STATUS_SC[p.status]} /></td>
+                      <td style={{ padding: '12px 14px' }}><Badge label={p.priority} sc={PRIORITY_SC[p.priority]} /></td>
+                      <td style={{ padding: '12px 14px', color: '#64748b', fontSize: 12 }}>{p.progress ?? 0}%</td>
+                      <td style={{ padding: '12px 14px', color: '#64748b', fontSize: 12 }}>{fmtDate(p.deadline)}</td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <button onClick={() => router.push(isSubUser ? `/projects/${p.id}` : `/admin/projects/${p.id}`)} style={{ padding: '5px 12px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff', color: '#4f46e5', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>View</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
         {/* ── Portal Tab ── */}
-        {tab === 'portal' && (
+        {tab === 'portal' && canManagePortal && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
             {/* Enable/disable card */}
             <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden' }}>
@@ -365,25 +547,31 @@ export default function ClientProfilePage() {
                 {portalSuccess && <div style={{ marginBottom: 14, padding: '8px 12px', background: '#f0fdf4', borderRadius: 7, color: '#16a34a', fontSize: 13 }}>{portalSuccess}</div>}
 
                 {!client.portal_access ? (
-                  <form onSubmit={handleEnablePortal}>
-                    <div style={{ marginBottom: 12 }}>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 5 }}>Portal Email *</label>
-                      <input type="email" value={portalEmail} onChange={e => setPortalEmail(e.target.value)} required style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }} />
-                    </div>
-                    <div style={{ marginBottom: 16 }}>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 5 }}>Password *</label>
-                      <input type="password" value={portalPass} onChange={e => setPortalPass(e.target.value)} required minLength={6} style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }} />
-                    </div>
-                    <button type="submit" disabled={portalSaving} style={{ width: '100%', padding: '10px 0', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: portalSaving ? 'not-allowed' : 'pointer' }}>
-                      {portalSaving ? 'Enabling…' : 'Enable Portal'}
-                    </button>
-                  </form>
+                  !isSubUser || can('client', 'canEnableClientPortal') ? (
+                    <form onSubmit={handleEnablePortal}>
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 5 }}>Portal Email *</label>
+                        <input type="email" value={portalEmail} onChange={e => setPortalEmail(e.target.value)} required style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }} />
+                      </div>
+                      <div style={{ marginBottom: 16 }}>
+                        <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 5 }}>Password *</label>
+                        <input type="password" value={portalPass} onChange={e => setPortalPass(e.target.value)} required minLength={6} style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }} />
+                      </div>
+                      <button type="submit" disabled={portalSaving} style={{ width: '100%', padding: '10px 0', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: portalSaving ? 'not-allowed' : 'pointer' }}>
+                        {portalSaving ? 'Enabling…' : 'Enable Portal'}
+                      </button>
+                    </form>
+                  ) : (
+                    <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>You don&apos;t have permission to enable portal access.</p>
+                  )
                 ) : (
                   <div>
                     {client.user?.email && <p style={{ margin: '0 0 14px', fontSize: 13, color: '#475569' }}>Login: <strong>{client.user.email}</strong></p>}
-                    <button onClick={handleDisablePortal} disabled={portalSaving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 8, border: '1.5px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontSize: 13, fontWeight: 600, cursor: portalSaving ? 'not-allowed' : 'pointer' }}>
-                      <HiTrash size={14} /> {portalSaving ? 'Disabling…' : 'Disable Portal'}
-                    </button>
+                    {(!isSubUser || can('client', 'canDisableClientPortal')) && (
+                      <button onClick={handleDisablePortal} disabled={portalSaving} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 8, border: '1.5px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontSize: 13, fontWeight: 600, cursor: portalSaving ? 'not-allowed' : 'pointer' }}>
+                        <HiTrash size={14} /> {portalSaving ? 'Disabling…' : 'Disable Portal'}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -409,8 +597,24 @@ export default function ClientProfilePage() {
           </div>
         )}
 
-        {/* ── Sales Chat Tab ── */}
-        {tab === 'chat' && canUseSalesChat && (
+        {/* ── Sales Chat Tab — once this client has a Project, the
+            conversation has already moved there (see App\Services\
+            PaymentProjectStartService::migrateChatHistory()) — point here
+            instead of showing the old, now-empty thread. ── */}
+        {tab === 'chat' && canUseClientSalesChat && chatMovedToProject && (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: 28, textAlign: 'center' }}>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: '#64748b' }}>
+              This conversation moved to the project once it was created — Sales Chat here is no longer active.
+            </p>
+            <button
+              onClick={() => router.push(`${!isSubUser ? '/admin' : ''}/projects/${client!.chat_project_id}/chat`)}
+              style={{ padding: '9px 20px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Go to Project Chat →
+            </button>
+          </div>
+        )}
+        {tab === 'chat' && canUseClientSalesChat && !chatMovedToProject && (
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: 28 }}>
             <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Sales Chat</h3>
             {chat.length === 0 ? (
@@ -420,7 +624,7 @@ export default function ClientProfilePage() {
                 {chat.map(m => (
                   <div key={m.id}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
-                      {m.sender_admin ? `${m.sender_admin.name} (Admin)` : m.sender?.name ?? 'Unknown'}
+                      {chatSenderName(m, { adminSuffix: true, guestSuffix: true })}
                     </div>
                     {m.content && <div style={{ fontSize: 13, color: '#475569' }}>{m.content}</div>}
                     {m.attachment_name && (
@@ -465,7 +669,13 @@ export default function ClientProfilePage() {
         {tab === 'messages' && (
           <div style={{ display: 'flex', gap: 16 }}>
             <div style={{ width: 200, background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden', flexShrink: 0 }}>
-              <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', fontSize: 12, fontWeight: 600, color: '#64748b' }}>Conversations</div>
+              <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>Conversations</span>
+                <button onClick={startDmChat} disabled={startingDm} title="Start a chat with this client" style={{
+                  border: 'none', background: 'none', color: '#2563eb', fontSize: 16, fontWeight: 700,
+                  cursor: startingDm ? 'wait' : 'pointer', padding: 0, lineHeight: 1,
+                }}>+</button>
+              </div>
               {dmThreads.length === 0 ? (
                 <div style={{ padding: 16, fontSize: 12, color: '#94a3b8' }}>No messages yet.</div>
               ) : dmThreads.map((t: any) => (
@@ -484,6 +694,32 @@ export default function ClientProfilePage() {
                 <div style={{ fontSize: 13, color: '#94a3b8' }}>No conversation selected.</div>
               ) : (
                 <>
+                  {/* Loop a PM into this conversation — "have the PM contact
+                      this client too" — and see who's currently in it. */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 14, paddingBottom: 14, borderBottom: '1px solid #f1f5f9' }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' }}>Participants:</span>
+                    {(dmActiveThread.participants ?? []).map((p: any) => (
+                      <span key={p.user_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14, padding: '3px 10px', color: '#334155' }}>
+                        {p.name}{p.role_type === 'project_manager' && ' (PM)'}
+                        {p.role_type === 'project_manager' && (
+                          <button onClick={() => removePmFromThread(p.user_id)} title="Remove from chat" style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
+                        )}
+                      </span>
+                    ))}
+                    {!pmParticipant && (
+                      <>
+                        <select value={selectedPmId} onChange={e => setSelectedPmId(e.target.value)} style={{ ...inp, width: 160, padding: '5px 8px', fontSize: 12 }}>
+                          <option value="">Add a PM…</option>
+                          {pmOptions.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                        <button onClick={addPmToThread} disabled={!selectedPmId || addingPm} style={{
+                          padding: '5px 12px', borderRadius: 6, border: 'none', background: '#2563eb', color: '#fff',
+                          fontSize: 12, fontWeight: 600, cursor: !selectedPmId || addingPm ? 'not-allowed' : 'pointer', opacity: !selectedPmId || addingPm ? 0.6 : 1,
+                        }}>Add</button>
+                      </>
+                    )}
+                  </div>
+
                   {dmMessages.length === 0 ? (
                     <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>No messages yet.</div>
                   ) : (
@@ -491,22 +727,35 @@ export default function ClientProfilePage() {
                       {dmMessages.map((m: any) => (
                         <div key={m.id}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
-                            {m.sender_admin ? `${m.sender_admin.name} (Admin)` : m.sender?.name ?? 'Client'}
+                            {chatSenderName(m, { adminSuffix: true, guestSuffix: true })}
+                            {m.hidden_from_user_ids?.length > 0 && (
+                              <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '1px 7px' }}>
+                                🔒 hidden from PM
+                              </span>
+                            )}
                           </div>
                           {m.content && <div style={{ fontSize: 13, color: '#475569' }}>{m.content}</div>}
                         </div>
                       ))}
                     </div>
                   )}
-                  <form onSubmit={sendDm} style={{ display: 'flex', gap: 8 }}>
-                    <input
-                      value={dmText} onChange={e => setDmText(e.target.value)}
-                      placeholder="Reply to client…" style={{ ...inp, flex: 1 }}
-                    />
-                    <button type="submit" disabled={sendingDm} style={{
-                      padding: '9px 16px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff',
-                      fontSize: 13, fontWeight: 600, cursor: sendingDm ? 'wait' : 'pointer', opacity: sendingDm ? 0.7 : 1,
-                    }}>Send</button>
+                  <form onSubmit={sendDm}>
+                    {pmParticipant && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#475569', cursor: 'pointer', marginBottom: 8 }}>
+                        <input type="checkbox" checked={hideFromPm} onChange={e => setHideFromPm(e.target.checked)} />
+                        Hide this message from {pmParticipant.name} (PM)
+                      </label>
+                    )}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        value={dmText} onChange={e => setDmText(e.target.value)}
+                        placeholder="Reply to client…" style={{ ...inp, flex: 1 }}
+                      />
+                      <button type="submit" disabled={sendingDm} style={{
+                        padding: '9px 16px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff',
+                        fontSize: 13, fontWeight: 600, cursor: sendingDm ? 'wait' : 'pointer', opacity: sendingDm ? 0.7 : 1,
+                      }}>Send</button>
+                    </div>
                   </form>
                 </>
               )}

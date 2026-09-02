@@ -518,11 +518,14 @@ import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { userService } from '@/lib/services/userService';
 import { getAvailableModules } from '@/lib/moduleCatalog';
-import { SIMPLE_PROJECT_PERMISSIONS } from '@/lib/simplifiedProjectPermissions';
-import { USER_ROLE_TYPE_OPTIONS, getRoleDefaultPermissions } from '@/lib/roleUtils';
+import { SIMPLE_PROJECT_PERMISSIONS, collapseProjectPermissions } from '@/lib/simplifiedProjectPermissions';
+import { USER_ROLE_TYPE_OPTIONS, CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, getRoleDefaultPermissions } from '@/lib/roleUtils';
 import { CompanyOption } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
+import { getAuthType } from '@/lib/auth';
 import { HiArrowLeft, HiArrowRight, HiCheckCircle, HiClipboard, HiUserGroup, HiCheck } from 'react-icons/hi2';
+import SubmitButton from '@/components/ui/SubmitButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
 
 // availMods (from getAvailableModules) -> { moduleKey: visible permission keys[] },
 // respecting the same requiresDb/hideIfCatalogKey filtering the checkbox UI uses —
@@ -537,6 +540,45 @@ function visiblePermsByModule(availMods: ReturnType<typeof getAvailableModules>,
   }
   return out;
 }
+
+// The "N permissions selected" badge must count what's actually checked on
+// screen, not raw granular permission keys — two things the old count got
+// wrong: (1) Project Management shows simplified bundle checkboxes, each
+// expanding into several granular keys (e.g. "Manage Projects" = 7 keys) —
+// one checked box must count as 1, not 7, so this uses
+// collapseProjectPermissions() same as the checkbox `checked` state does;
+// (2) a granted key that isn't currently visible (module not purchased, or
+// hidden by hideIfCatalogKey) has no checkbox for the admin to see or
+// uncheck, so it's excluded via the same visiblePermsByModule() filtering
+// the checkboxes themselves use.
+function visibleSelectedCount(
+  companyId: number,
+  perms: Record<number, Record<string, string[]>>,
+  companies: CompanyOption[],
+): number {
+  const modPermsFor = perms[companyId] ?? {};
+  let total = 0;
+
+  const accountPerms = modPermsFor['account'] ?? [];
+  if (accountPerms.includes('canAddUsers')) total += 1;
+  if (accountPerms.includes('canUseGeneralChat')) total += 1;
+
+  const co = companies.find(c => c.id === companyId);
+  const rawDb = co?.modules ?? [];
+  const availMods = getAvailableModules(rawDb);
+  const visible = visiblePermsByModule(availMods, rawDb);
+
+  for (const mod of availMods) {
+    if (mod.key === 'project_management') {
+      total += collapseProjectPermissions(modPermsFor.project_management ?? []).length;
+      continue;
+    }
+    const granted = modPermsFor[mod.key] ?? [];
+    total += (visible[mod.key] ?? []).filter(k => granted.includes(k)).length;
+  }
+
+  return total;
+}
 const inp: React.CSSProperties = {
   width: '100%', padding: '10px 13px', border: '1.5px solid #e2e8f0', borderRadius: 8,
   fontSize: 14, outline: 'none', background: '#fafafa', color: '#0f172a', boxSizing: 'border-box',
@@ -549,6 +591,12 @@ interface CreatedInfo { email: string; password: string; loginUrl: string; isLin
 export default function NewUserPage() {
   useAdminGuard();
   const router = useRouter();
+  // This page is reachable both as an actual Company Admin (auto-redirected
+  // to /admin/users/new by useAdminGuard) and as a staff sub-user with
+  // permission to create users, landing directly on /users/new with no
+  // /admin prefix — /admin/users would be the wrong, inapplicable route for
+  // that second case.
+  const usersRoot = getAuthType() === 'admin' ? '/admin/users' : '/users';
 
   // Steps 1-3
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -558,6 +606,14 @@ export default function NewUserPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('');
+  // "+ Custom Role…" mode — role holds CUSTOM_ROLE_SENTINEL, customRoleLabel
+  // is the free-text name shown everywhere instead, and customRoleBase is
+  // the real structural role_type this custom role behaves like (defaults
+  // to the generic/least-privilege Team Member bucket).
+  const [customRoleLabel, setCustomRoleLabel] = useState('');
+  const [customRoleBase, setCustomRoleBase] = useState('team_member');
+  const isCustomRole = role === CUSTOM_ROLE_SENTINEL;
+  const effectiveRole = isCustomRole ? customRoleBase : role;
 
   // Step 2
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
@@ -581,6 +637,7 @@ export default function NewUserPage() {
 
   // Load companies on mount so we know whether to skip step 2
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingCos(true);
     userService.listCompanyOptions()
       .then(data => {
@@ -589,19 +646,26 @@ export default function NewUserPage() {
         if (data.length === 1) setSelectedIds([data[0].id]);
       })
       .finally(() => setLoadingCos(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Set first company tab when entering step 3
   useEffect(() => {
     if (step === 3 && selectedIds.length > 0 && !activeCompanyId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveCompanyId(selectedIds[0]);
     }
-  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step, selectedIds, activeCompanyId]);
 
   // true when step 2 can be skipped (single company, already selected)
   const singleCompany = companies.length === 1;
 
-  const selectCompany = (id: number) => setSelectedIds([id]);
+  // Assign Multiple Companies to User — toggles one company in/out of the
+  // selection rather than replacing it, so an admin can pick several.
+  // Everything downstream (step 3's per-company tabs, handleSubmit's
+  // company_assignments mapping) already iterates selectedIds and needs no
+  // change for N > 1.
+  const toggleCompany = (id: number) =>
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const togglePerm = (companyId: number, moduleKey: string, permKey: string) => {
     setPerms(prev => {
@@ -620,6 +684,7 @@ export default function NewUserPage() {
   };
 
   const handleSubmit = async () => {
+    if (saving) return; // Guards a double-click re-submit before the disabled prop re-renders.
     setSaving(true); setError('');
     try {
       const assignments = selectedIds.map(cid => ({
@@ -629,7 +694,8 @@ export default function NewUserPage() {
 
       await userService.create({
         name: name.trim(), email: email.trim(),
-        role_type: role || undefined,
+        role_type: effectiveRole || undefined,
+        custom_role_label: isCustomRole ? (customRoleLabel.trim() || undefined) : undefined,
         ...(existingUser ? {} : { password }),
         company_assignments: assignments,
       });
@@ -673,7 +739,7 @@ export default function NewUserPage() {
 
     return (
       <DashboardLayout title={created.isLinked ? 'User Linked' : 'User Created'}>
-        <div style={{ maxWidth: 480 }}>
+        <div style={{ width: '100%' }}>
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden' }}>
             <div style={{ padding: '22px 28px', borderBottom: '1px solid #f1f5f9', background: created.isLinked ? '#eff6ff' : '#f0fdf4', display: 'flex', alignItems: 'center', gap: 12 }}>
               <HiCheckCircle size={26} color={created.isLinked ? '#2563eb' : '#059669'} />
@@ -700,11 +766,11 @@ export default function NewUserPage() {
                   </div>
                 </div>
               ))}
-              <button onClick={() => copy(allText, 'all')} style={{ width: '100%', padding: '12px 0', borderRadius: 9, border: 'none', background: copied === 'all' ? '#059669' : 'linear-gradient(135deg,#2563eb,#3b82f6)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4 }}>
-                <HiClipboard size={17} /> {copied === 'all' ? 'Copied!' : 'Copy Details'}
+              <button onClick={() => copy(allText, 'all')} style={{ width: '100%', padding: '9px 0', borderRadius: 9, border: 'none', background: copied === 'all' ? '#059669' : 'linear-gradient(135deg,#2563eb,#3b82f6)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 4 }}>
+                <HiClipboard size={15} /> {copied === 'all' ? 'Copied!' : 'Copy Details'}
               </button>
-              <button onClick={() => router.push('/admin/users')} style={{ width: '100%', padding: '11px 0', borderRadius: 9, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontWeight: 600, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
-                <HiUserGroup size={16} /> View All Users
+              <button onClick={() => router.push(usersRoot)} style={{ width: '100%', padding: '8px 0', borderRadius: 9, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
+                <HiUserGroup size={14} /> View All Users
               </button>
             </div>
           </div>
@@ -717,11 +783,12 @@ export default function NewUserPage() {
 
   return (
     <DashboardLayout title="Add User">
+      <LoadingOverlay show={saving} message="Creating Account…" />
       <div style={{ width: "100%" }}>
         <button
           onClick={() => {
             if (step > 1) { setError(''); setStep((step === 3 && singleCompany ? 1 : step - 1) as 1 | 2 | 3); }
-            else { router.push('/admin/users'); }
+            else { router.push(usersRoot); }
           }}
           style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
           <HiArrowLeft size={16} /> {step > 1 ? 'Back' : 'Back to Users'}
@@ -813,15 +880,36 @@ export default function NewUserPage() {
                 {existingUser && <div style={{ marginBottom: 12 }} />}
 
                 {/* Select Role — default permissions for this role are auto-checked in the next step */}
-                <div style={{ marginBottom: 28 }}>
+                <div style={{ marginBottom: isCustomRole ? 16 : 28 }}>
                   <label style={lbl}>Role *</label>
                   <select style={inp} value={role} onChange={e => setRole(e.target.value)}>
                     <option value="">Select a role…</option>
                     {USER_ROLE_TYPE_OPTIONS.map(r => (
                       <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
+                    <option value={CUSTOM_ROLE_SENTINEL}>+ Custom Role…</option>
                   </select>
                 </div>
+
+                {isCustomRole && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 28 }}>
+                    <div>
+                      <label style={lbl}>Custom Role Name *</label>
+                      <input style={inp} value={customRoleLabel} onChange={e => setCustomRoleLabel(e.target.value)} placeholder="e.g. Marketing Lead" maxLength={100} />
+                    </div>
+                    <div>
+                      <label style={lbl}>Behaves Like *</label>
+                      <select style={inp} value={customRoleBase} onChange={e => setCustomRoleBase(e.target.value)}>
+                        {CUSTOM_ROLE_BASE_OPTIONS.map(r => (
+                          <option key={r.value} value={r.value}>{r.label}</option>
+                        ))}
+                      </select>
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                        Determines this custom role&apos;s real permissions/behavior — the name above is just what&apos;s shown.
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <button
                   disabled={!!existingUser}
@@ -833,6 +921,7 @@ export default function NewUserPage() {
                       return;
                     }
                     if (!role) { setError('Please select a role.'); return; }
+                    if (isCustomRole && !customRoleLabel.trim()) { setError('Please enter a name for this custom role.'); return; }
                     setError('');
                     if (singleCompany) {
                       // Auto-assign the only company and pre-fill this role's default permissions
@@ -840,7 +929,7 @@ export default function NewUserPage() {
                       const rawDb = companies[0].modules ?? [];
                       const mods = getAvailableModules(rawDb);
                       const allPerms = visiblePermsByModule(mods, rawDb);
-                      const auto = getRoleDefaultPermissions(role, mods.map(m => m.key), allPerms);
+                      const auto = getRoleDefaultPermissions(effectiveRole, mods.map(m => m.key), allPerms);
                       setPerms({ [cid]: auto });
                       setActiveCompanyId(cid);
                       setStep(3);
@@ -849,13 +938,13 @@ export default function NewUserPage() {
                     }
                   }}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '12px 28px', borderRadius: 9, border: 'none',
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px', borderRadius: 9, border: 'none',
                     background: existingUser ? '#cbd5e1' : 'linear-gradient(135deg,#2563eb,#3b82f6)',
-                    color: '#fff', fontWeight: 700, fontSize: 14,
+                    color: '#fff', fontWeight: 700, fontSize: 12,
                     cursor: existingUser ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  Next <HiArrowRight size={16} />
+                  Next <HiArrowRight size={14} />
                 </button>
               </div>
             )}
@@ -865,24 +954,35 @@ export default function NewUserPage() {
                 {loadingCos ? (
                   <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading companies…</div>
                 ) : companies.length === 0 ? (
-                  <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No active companies found.</div>
+                  <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No companies found.</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
                     {companies.map(c => {
                       const sel = selectedIds.includes(c.id);
                       return (
                         <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 10, border: `1.5px solid ${sel ? '#bfdbfe' : '#e2e8f0'}`, background: sel ? '#eff6ff' : '#fafafa', cursor: 'pointer' }}>
-                          <input type="radio" name="company" checked={sel} onChange={() => selectCompany(c.id)} style={{ accentColor: '#2563eb', width: 16, height: 16, flexShrink: 0 }} />
+                          <input type="checkbox" checked={sel} onChange={() => toggleCompany(c.id)} style={{ accentColor: '#2563eb', width: 16, height: 16, flexShrink: 0 }} />
                           <span style={{ fontWeight: sel ? 700 : 500, color: sel ? '#1d4ed8' : '#0f172a', fontSize: 14 }}>{c.name}</span>
                         </label>
                       );
                     })}
                   </div>
                 )}
+                {companies.length > 0 && selectedIds.length === 0 && (
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 18 }}>
+                    Leaving this unchecked creates the user with no company — they&apos;ll see a &quot;not assigned&quot; message until you assign one via Edit User.
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button
+                    disabled={saving}
                     onClick={() => {
-                      if (selectedIds.length === 0) { setError('Select at least one company.'); return; }
+                      // No company selected — nothing to configure permissions
+                      // for, so create the user directly with zero
+                      // company_assignments rather than blocking. They'll
+                      // land in the "not assigned to any company" empty
+                      // state until an admin assigns one via Edit User.
+                      if (selectedIds.length === 0) { handleSubmit(); return; }
                       setError('');
 
                       // Pre-select this role's default permissions for companies that have none yet
@@ -894,18 +994,18 @@ export default function NewUserPage() {
                         const rawDb = co?.modules ?? [];
                         const mods = getAvailableModules(rawDb);
                         const allPerms = visiblePermsByModule(mods, rawDb);
-                        nextPerms[cid] = getRoleDefaultPermissions(role, mods.map(m => m.key), allPerms);
+                        nextPerms[cid] = getRoleDefaultPermissions(effectiveRole, mods.map(m => m.key), allPerms);
                       }
                       setPerms(nextPerms);
 
                       setActiveCompanyId(selectedIds[0]);
                       setStep(3);
                     }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 28px', borderRadius: 9, border: 'none', background: 'linear-gradient(135deg,#2563eb,#3b82f6)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px', borderRadius: 9, border: 'none', background: 'linear-gradient(135deg,#2563eb,#3b82f6)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}
                   >
-                    Next <HiArrowRight size={16} />
+                    {selectedIds.length === 0 ? (saving ? 'Creating…' : 'Create User (no company)') : <>Next <HiArrowRight size={14} /></>}
                   </button>
-                  <button onClick={() => { setError(''); setStep(1); }} style={{ padding: '12px 20px', borderRadius: 9, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>Back</button>
+                  <button onClick={() => { setError(''); setStep(1); }} style={{ padding: '7px 14px', borderRadius: 9, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>Back</button>
                 </div>
               </div>
             )}
@@ -930,7 +1030,7 @@ export default function NewUserPage() {
 
                 {/* Role default-permissions helper text + selected count */}
                 {activeCompanyId !== null && (() => {
-                  const totalSelected = Object.values(perms[activeCompanyId] ?? {}).reduce((sum, arr) => sum + arr.length, 0);
+                  const totalSelected = visibleSelectedCount(activeCompanyId, perms, companies);
                   return (
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, padding: '10px 14px', background: '#f8fafc', borderRadius: 8 }}>
                       <span style={{ fontSize: 12, color: '#64748b' }}>
@@ -956,7 +1056,7 @@ export default function NewUserPage() {
                       />
                       <div>
                         <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13.5 }}>User Management Permission</div>
-                        <div style={{ fontSize: 12, color: '#64748b' }}>Lets this user create/invite other staff users for this company, from their own "User Management" page.</div>
+                        <div style={{ fontSize: 12, color: '#64748b' }}>Lets this user create/invite other staff users for this company, from their own &quot;User Management&quot; page.</div>
                       </div>
                     </label>
                   );
@@ -1163,14 +1263,16 @@ export default function NewUserPage() {
                 })()}
 
                 <div style={{ display: 'flex', gap: 10 }}>
-                  <button
+                  <SubmitButton
+                    type="button"
                     onClick={handleSubmit}
-                    disabled={saving}
-                    style={{ flex: 1, padding: '12px 0', borderRadius: 9, border: 'none', background: saving ? '#93c5fd' : 'linear-gradient(135deg,#2563eb,#3b82f6)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: saving ? 'not-allowed' : 'pointer' }}
+                    loading={saving}
+                    loadingText="Creating Account…"
+                    style={{ flex: 1, padding: '7px 0', borderRadius: 9, border: 'none', background: saving ? '#93c5fd' : 'linear-gradient(135deg,#2563eb,#3b82f6)', color: '#fff', fontWeight: 700, fontSize: 12 }}
                   >
-                    {saving ? 'Creating…' : 'Create User'}
-                  </button>
-                  <button onClick={() => { setError(''); setStep(singleCompany ? 1 : 2); }} style={{ padding: '12px 20px', borderRadius: 9, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>Back</button>
+                    Create User
+                  </SubmitButton>
+                  <button onClick={() => { setError(''); setStep(singleCompany ? 1 : 2); }} disabled={saving} style={{ padding: '7px 14px', borderRadius: 9, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontWeight: 600, fontSize: 12, cursor: saving ? 'not-allowed' : 'pointer' }}>Back</button>
                 </div>
               </div>
             )}

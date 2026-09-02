@@ -183,8 +183,15 @@ export default function PlanPage() {
               </div>
               <UsageBar used={usage?.staff_seats_used ?? 0} limit={usage?.staff_seats_limit ?? null} />
               {usage?.staff_seats_remaining !== null && usage?.staff_seats_remaining !== undefined && (
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
-                  {usage.staff_seats_remaining} seat{usage.staff_seats_remaining === 1 ? '' : 's'} remaining
+                <div style={{ fontSize: 11, color: usage.staff_seats_remaining === 0 ? '#dc2626' : '#94a3b8', marginTop: 6, fontWeight: usage.staff_seats_remaining === 0 ? 600 : 400 }}>
+                  {usage.staff_seats_remaining === 0
+                    ? 'No seats left'
+                    : `${usage.staff_seats_remaining} seat${usage.staff_seats_remaining === 1 ? '' : 's'} remaining`}
+                  {usage.staff_seats_remaining === 0 && (
+                    <Link href="/admin/upgrade-seats?type=seats" style={{ color: '#2563eb', fontWeight: 600, marginLeft: 6 }}>
+                      Upgrade →
+                    </Link>
+                  )}
                 </div>
               )}
             </div>
@@ -253,17 +260,17 @@ export default function PlanPage() {
                     + Add Company
                   </Link>
                 )}
-                <Link href="/admin/upgrade-seats?type=seats" style={{
-                  fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
-                  padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
-                }}>
-                  Upgrade Seats →
-                </Link>
                 <Link href="/admin/upgrade-seats?type=companies" style={{
                   fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
                   padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
                 }}>
                   Upgrade Company Slots →
+                </Link>
+                <Link href="/admin/upgrade-seats?type=seats" style={{
+                  fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
+                  padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
+                }}>
+                  Upgrade Seats →
                 </Link>
                 <Link href="/admin/upgrade-modules" style={{
                   fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
@@ -292,7 +299,7 @@ export default function PlanPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc' }}>
-                    {['Company', 'Status', 'Staff Users', 'Portal Seat Limit', 'Total Clients', 'Portal Active', 'Portal Seat Usage', 'Actions'].map(h => (
+                    {['Company', 'Status', 'Staff Users', 'Total Seats', 'Total Clients', 'Portal Seat Usage', 'Actions'].map(h => (
                       <th key={h} style={{
                         padding: '10px 20px', textAlign: 'left', fontSize: 11,
                         fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0',
@@ -305,7 +312,6 @@ export default function PlanPage() {
                     const maxU = pkg?.max_users_per_company ?? null;
                     const pct  = maxU ? Math.min(Math.round((c.portal_clients_count / maxU) * 100), 100) : 0;
                     const bc   = pct >= 90 ? '#dc2626' : pct >= 70 ? '#d97706' : '#059669';
-                    const remaining = maxU != null ? Math.max(maxU - c.portal_clients_count, 0) : null;
                     return (
                       <tr key={c.id} style={{ borderBottom: '1px solid #f8fafc' }}>
                         <td style={{ padding: '14px 20px' }}>
@@ -327,24 +333,11 @@ export default function PlanPage() {
                           <span style={{ fontSize: 18, fontWeight: 800, color: '#2563eb' }}>
                             {maxU ?? '∞'}
                           </span>
-                          {remaining !== null && (
-                            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-                              {remaining} remaining
-                            </div>
-                          )}
                         </td>
                         <td style={{ padding: '14px 20px' }}>
                           <span style={{ fontSize: 18, fontWeight: 700, color: '#1e293b' }}>
                             {c.clients_count}
                           </span>
-                        </td>
-                        <td style={{ padding: '14px 20px' }}>
-                          <span style={{ fontSize: 18, fontWeight: 700, color: '#059669' }}>
-                            {c.portal_clients_count}
-                          </span>
-                          {maxU && (
-                            <span style={{ fontSize: 11, color: '#94a3b8' }}> / {maxU}</span>
-                          )}
                         </td>
                         <td style={{ padding: '14px 20px', minWidth: 160 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

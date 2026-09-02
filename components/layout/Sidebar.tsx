@@ -7,8 +7,7 @@ import {
   HiFolderOpen, HiCheckCircle, HiBriefcase, HiClock,
   HiDocumentText, HiShieldCheck, HiChatBubbleLeftRight,
   HiCog6Tooth, HiArrowRightOnRectangle, HiChartBar,
-  HiCurrencyDollar, HiWrenchScrewdriver, HiCalendarDays,
-  HiDocumentCheck,
+  HiCurrencyDollar, HiCalendarDays, HiFlag,
 } from 'react-icons/hi2';
 import { useAuth } from '@/hooks/useAuth';
 import { getAuthType, getAuthUser, getActiveCompany, can } from '@/lib/auth';
@@ -31,15 +30,26 @@ const ADMIN_NAV_GROUPS = [
       { href: '/admin/pipeline',   icon: HiSquares2X2,   label: 'Pipeline',        module: 'leads' },
       { href: '/admin/leads',      icon: HiUserGroup,    label: 'Leads',           module: 'leads' },
       { href: '/admin/follow-ups', icon: HiCalendarDays, label: 'Follow-ups',      module: 'leads' },
-      // Visible only when Sales is purchased but full Client module is NOT
-      { href: '/admin/clients', icon: HiUsers, label: 'Basic Clients', module: 'leads', hideIfModule: 'clients' },
+      { href: '/admin/sales/reports', icon: HiChartBar,  label: 'Sales Reports',   module: 'leads' },
+      // Deliberately ungated (no `module` key) — always visible for Company
+      // Admin, independent of whether the Sales module is purchased (see
+      // Api\Admin\SalesTargetController, itself registered outside any
+      // `module:` route middleware for the same reason).
+      { href: '/admin/sales/targets', icon: HiFlag, label: 'Target' },
+      // A "Basic Clients" admin nav item pointing at /admin/clients used to
+      // live here, but every AdminClientController route requires the real
+      // Client module (routes/api.php's `module:client_portal` gate) — it
+      // would 403 for a Sales-only company, so removed rather than left dead.
+      // Company Admin sub-users still get the equivalent, permission-gated
+      // "Basic Clients" access via the User-guard routes (ungated by module —
+      // see routes/api.php's client management comment).
     ],
   },
   {
     label: 'Client Module',
     items: [
-      { href: '/admin/clients', icon: HiUsers, label: 'Clients', module: 'clients' },
-      { href: '/admin/support', icon: HiChatBubbleLeftRight, label: 'Support Tickets', module: 'clients' },
+      { href: '/admin/clients', icon: HiUsers, label: 'Clients', module: 'client_portal' },
+      { href: '/admin/support', icon: HiChatBubbleLeftRight, label: 'Support Tickets', module: 'client_portal' },
     ],
   },
   {
@@ -57,10 +67,6 @@ const ADMIN_NAV_GROUPS = [
       { href: '/admin/tasks',              icon: HiCheckCircle,       label: 'Tasks',              module: 'tasks', badgeKey: 'tasks' },
       { href: '/admin/timesheets',         icon: HiClock,             label: 'Timesheets',         module: 'timesheets' },
       { href: '/admin/projects/team',      icon: HiUserGroup,         label: 'Team / Resources',   module: 'projects' },
-      // Production/Deliverables are a section INSIDE Project Management, not
-      // a separate module — gated on 'projects' only, never a standalone key.
-      { href: '/admin/projects/production',  icon: HiWrenchScrewdriver, label: 'Production',    module: 'projects' },
-      { href: '/admin/projects/deliverables', icon: HiDocumentCheck,   label: 'Deliverables',  module: 'projects' },
       { href: '/admin/projects/reports',   icon: HiChartBar,          label: 'Project Reports',    module: 'projects' },
     ],
   },
@@ -116,7 +122,7 @@ const ADMIN_NAV_GROUPS = [
     label: 'Admin',
     items: [
       { href: '/admin/plan',             icon: HiSquares2X2, label: 'My Plan' },
-      { href: '/admin/companies/create', icon: HiBriefcase,  label: 'Add Company' },
+      { href: '/admin/companies',        icon: HiBriefcase,  label: 'Companies' },
     ],
   },
 ];
@@ -137,8 +143,12 @@ const USER_NAV_GROUPS = [
       { href: '/leads',            icon: HiUserGroup,    label: 'Leads',        module: 'leads', permAny: ['canViewLeads'] },
       { href: '/leads/follow-ups', icon: HiCalendarDays, label: 'Follow-ups',   module: 'leads', permAny: ['canViewLeads'] },
       // Visible only when Sales is purchased but full Client module is NOT
-      { href: '/clients', icon: HiUsers, label: 'Basic Clients', module: 'leads', hideIfModule: 'clients', permAny: ['canViewClients'] },
-      { href: '/invoices', icon: HiBanknotes, label: 'Sales Invoices', module: 'invoices', permAny: ['canViewInvoices'] },
+      { href: '/clients', icon: HiUsers, label: 'Clients', module: 'leads', hideIfModule: 'clients', permAny: ['canViewClients'] },
+      // "Sales Invoices" used to be a second nav item here pointing at the
+      // exact same '/invoices' route as the Invoice group's "Invoices" below
+      // — same href, same module gate, same permission — so anyone with both
+      // (a Seller, most commonly) saw two identical tabs. Removed; "Invoices"
+      // in the Invoice group already covers it.
       { href: '/sales/targets', icon: HiCurrencyDollar, label: 'Targets', module: 'leads', permAny: ['canViewSalesTargets'] },
       { href: '/sales/reports', icon: HiChartBar, label: 'Sales Reports', module: 'leads', permAny: ['canViewSalesReports'] },
     ],
@@ -165,12 +175,16 @@ const USER_NAV_GROUPS = [
     items: [
       { href: '/projects/dashboard',     icon: HiSquares2X2,        label: 'Project Dashboard', permAny: ['canViewProjectDashboard'] },
       { href: '/projects',               icon: HiFolderOpen,        label: 'Projects',          permAny: ['canViewProjects', 'canViewLinkedProjects'], badgeKey: 'projects' },
-      { href: '/tasks',                  icon: HiCheckCircle,       label: 'Tasks',              permAny: ['canViewTasks'], fallbackLabel: 'My Tasks', badgeKey: 'tasks' },
+      { href: '/tasks',                  icon: HiCheckCircle,       label: 'Tasks',              permAny: ['canViewTasks'], fallbackLabel: 'My Tasks', badgeKey: 'tasks', hideForSeller: true },
       { href: '/timesheets',             icon: HiClock,             label: 'Timesheets',         permAny: ['canViewTimesheets'] },
       { href: '/projects/team',          icon: HiUserGroup,         label: 'Team / Resources',   permAny: ['canViewTeamResources', 'canAssignTeamResources', 'canAddUsers'] },
-      { href: '/projects/production',    icon: HiWrenchScrewdriver, label: 'Production Queue',   permAny: ['canViewProductionQueue', 'canViewProductionDashboard', 'canStartProductionTasks', 'canSubmitProductionTasks'] },
-      { href: '/projects/deliverables',  icon: HiDocumentCheck,     label: 'Deliverables',      permAny: ['canViewDeliverables', 'canUploadDeliverables', 'canApproveDeliverables'] },
       { href: '/projects/reports',       icon: HiChartBar,          label: 'Project Reports',    permAny: ['canViewProjectReports', 'canViewTaskReports'] },
+    ],
+  },
+  {
+    label: 'Compliance',
+    items: [
+      { href: '/compliance', icon: HiShieldCheck, label: 'Compliance', module: 'compliance', permAny: ['canViewComplianceCases'] },
     ],
   },
   {
@@ -260,7 +274,7 @@ export default function Sidebar() {
           sales:              ['leads'],
           invoice:            ['invoices'],
           hr:                 ['hr'],
-          project_management: ['projects', 'tasks', 'timesheets', 'production'],
+          project_management: ['projects', 'tasks', 'timesheets'],
           compliance:         ['compliance'],
           finance:            ['reports'],
         };
@@ -290,17 +304,22 @@ export default function Sidebar() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshModules();
     window.addEventListener('auth_refreshed', refreshModules);
     return () => window.removeEventListener('auth_refreshed', refreshModules);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Red dots on Tasks/Projects — mirrors Navbar's own 30s notification poll,
   // kept independent since the badge counts (per-category, uncapped) come
   // from a different endpoint than the bell's top-30 feed.
   useEffect(() => {
     const type = getAuthType() as 'user' | 'admin' | null;
-    if (!type) { setNavBadges({ tasks: 0, projects: 0 }); return; }
+    if (!type) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setNavBadges({ tasks: 0, projects: 0 });
+      return;
+    }
 
     const loadBadges = () => {
       const svc = type === 'admin' ? adminNotificationService : notificationService;
@@ -338,7 +357,7 @@ export default function Sidebar() {
   type NavItem = {
     href: string; icon: (typeof HiSquares2X2); label: string;
     module?: string; moduleAny?: string[]; hideIfModule?: string; permAny?: string[]; fallbackLabel?: string;
-    badgeKey?: 'tasks' | 'projects';
+    badgeKey?: 'tasks' | 'projects'; hideForSeller?: boolean;
   };
 
   const visibleGroups = NAV_GROUPS.map(group => ({
@@ -347,6 +366,11 @@ export default function Sidebar() {
       if (item.module && !isModuleEnabled(item.module)) return acc;
       if (item.moduleAny && !item.moduleAny.some(m => isModuleEnabled(m))) return acc;
       if (item.hideIfModule && isModuleEnabled(item.hideIfModule)) return acc;
+      // The Task feature is retired for Seller entirely (Api\User\
+      // TaskController hard-blocks role_type='seller' regardless of any
+      // canViewTasks permission held) — never show this link to them, even
+      // via a direct permAny match, not just the "My Tasks" fallback below.
+      if (item.hideForSeller && isSeller) return acc;
       if (item.permAny) {
         if (hasPermAny(item.permAny)) {
           acc.push(item);
@@ -359,6 +383,22 @@ export default function Sidebar() {
       return acc;
     }, []),
   })).filter(group => group.items.length > 0);
+
+  // Exactly one nav item is ever "active" at a time. A naive per-item check
+  // (pathname === href || pathname.startsWith(href + '/')) lets a parent
+  // item (e.g. '/admin/projects') and a sibling whose own href happens to
+  // start with it (e.g. '/admin/projects/dashboard') both match at once —
+  // same issue recurs for HR Dashboard/Documents/Reports, Sales Dashboard/
+  // Targets/Reports, and Leads/Pipeline/Follow-ups. Resolve it by picking a
+  // single winner across every visible href: an exact match always wins
+  // outright; otherwise the longest (most specific) href whose pathname is
+  // one of its sub-paths wins.
+  const allHrefs = visibleGroups.flatMap(g => g.items.map(i => i.href));
+  const activeHref = allHrefs.includes(pathname)
+    ? pathname
+    : allHrefs
+        .filter(href => pathname.startsWith(href + '/'))
+        .sort((a, b) => b.length - a.length)[0];
 
   return (
     <div className="sidebar">
@@ -380,7 +420,7 @@ export default function Sidebar() {
             <span className="nav-section-label">{group.label}</span>
             {group.items.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+              const isActive = item.href === activeHref;
               const badgeCount = item.badgeKey ? navBadges[item.badgeKey] : 0;
               return (
                 <Link key={item.href} href={item.href} className={`nav-item ${isActive ? 'active' : ''}`} style={{ position: 'relative' }}>

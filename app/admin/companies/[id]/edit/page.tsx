@@ -4,6 +4,9 @@ import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
+import PhoneInput from '@/components/ui/PhoneInput';
+import { ALL_COUNTRIES } from '@/lib/countries';
+import { handleNotFound } from '@/lib/notFound';
 
 interface FormState {
   name: string;
@@ -13,15 +16,18 @@ interface FormState {
   phone: string;
   address: string;
   timezone: string;
+  country: string;
 }
 
 const TIMEZONES = [
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'Europe/London',
+  'Asia/Dubai',
   'Asia/Karachi',
   'Asia/Kolkata',
-  'Asia/Dubai',
-  'Europe/London',
-  'America/New_York',
-  'America/Los_Angeles',
   'UTC',
 ];
 
@@ -38,7 +44,7 @@ export default function EditCompanyPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>({
-    name: '', currency: 'PKR', industry: '', email: '', phone: '', address: '', timezone: 'Asia/Karachi',
+    name: '', currency: 'USD', industry: '', email: '', phone: '', address: '', timezone: 'America/New_York', country: '',
   });
 
   useEffect(() => {
@@ -46,18 +52,21 @@ export default function EditCompanyPage() {
       const c = res.data.data;
       setForm({
         name:     c.name ?? '',
-        currency: c.currency ?? 'PKR',
+        currency: c.currency ?? 'USD',
         industry: c.industry ?? '',
         email:    c.email ?? '',
         phone:    c.phone ?? '',
         address:  c.address ?? '',
         timezone: c.timezone ?? 'Asia/Karachi',
+        country:  c.country ?? '',
       });
-    }).catch(() => toast.error('Failed to load company')).finally(() => setLoading(false));
+    }).catch((err) => { if (!handleNotFound(err, router)) toast.error('Failed to load company'); }).finally(() => setLoading(false));
   }, [companyId]);
 
   const set = (k: keyof FormState) => (e: { target: { value: string } }) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
+  const setCompanyName = (e: { target: { value: string } }) =>
+    setForm(f => ({ ...f, name: e.target.value }));
 
   const submit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
@@ -113,7 +122,7 @@ export default function EditCompanyPage() {
               <label style={labelStyle}>Company Name *</label>
               <input
                 value={form.name}
-                onChange={set('name')}
+                onChange={setCompanyName}
                 placeholder="e.g. Acme Corp"
                 style={inputStyle}
                 required
@@ -122,11 +131,12 @@ export default function EditCompanyPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
               <div>
-                <label style={labelStyle}>Currency *</label>
-                <select value={form.currency} onChange={set('currency')} style={inputStyle}>
-                  <option value="PKR">PKR — Pakistani Rupee</option>
-                  <option value="USD">USD — US Dollar</option>
-                </select>
+                {/* USD is the system's only supported currency now — no
+                    longer editable. Shown read-only rather than hidden so an
+                    older company still on a legacy currency (e.g. PKR) isn't
+                    silently misrepresented as USD here. */}
+                <label style={labelStyle}>Currency</label>
+                <input value={form.currency} disabled style={{ ...inputStyle, background: '#f1f5f9', color: '#94a3b8', cursor: 'not-allowed' }} />
               </div>
               <div>
                 <label style={labelStyle}>Industry</label>
@@ -150,12 +160,7 @@ export default function EditCompanyPage() {
               </div>
               <div>
                 <label style={labelStyle}>Phone</label>
-                <input
-                  value={form.phone}
-                  onChange={set('phone')}
-                  placeholder="+92 300 0000000"
-                  style={inputStyle}
-                />
+                <PhoneInput value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
               </div>
             </div>
 
@@ -170,11 +175,20 @@ export default function EditCompanyPage() {
               />
             </div>
 
-            <div>
-              <label style={labelStyle}>Timezone</label>
-              <select value={form.timezone} onChange={set('timezone')} style={inputStyle}>
-                {TIMEZONES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div>
+                <label style={labelStyle}>Country</label>
+                <select value={form.country} onChange={set('country')} style={inputStyle}>
+                  <option value="">— Select —</option>
+                  {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Timezone</label>
+                <select value={form.timezone} onChange={set('timezone')} style={inputStyle}>
+                  {TIMEZONES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
             </div>
           </div>
 

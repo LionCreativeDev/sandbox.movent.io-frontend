@@ -8,7 +8,7 @@ import { getAuthType, can } from '@/lib/auth';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
 import { Invoice } from '@/types';
-import { HiPlusCircle, HiMagnifyingGlass, HiFunnel, HiPaperAirplane, HiLink, HiClipboard, HiClipboardDocumentCheck, HiXMark } from 'react-icons/hi2';
+import { HiPlusCircle, HiMagnifyingGlass, HiFunnel, HiPaperAirplane, HiLink, HiClipboard, HiClipboardDocumentCheck, HiXMark, HiTrash } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
 
 const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
@@ -34,6 +34,8 @@ export default function InvoicesPage() {
   const [generatingId, setGeneratingId] = useState<number | null>(null);
   const [sharedLinks, setSharedLinks]   = useState<Record<number, string>>({});
   const [copiedId, setCopiedId]         = useState<number | null>(null);
+  const [deletingId, setDeletingId]     = useState<number | null>(null);
+  const isAdmin = getAuthType() === 'admin';
 
   useEffect(() => { setCanCreate(can('invoice', 'canCreateInvoices')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -86,12 +88,24 @@ export default function InvoicesPage() {
     });
   };
 
+  const handleDelete = async (invId: number, invoiceNumber: string) => {
+    if (!confirm(`Delete draft invoice ${invoiceNumber}? This cannot be undone.`)) return;
+    setDeletingId(invId);
+    try {
+      await adminInvoiceService.remove(invId);
+      setInvoices(prev => prev.filter(i => i.id !== invId));
+      toast.success('Invoice deleted');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to delete invoice');
+    } finally { setDeletingId(null); }
+  };
+
   const closeLink = (invId: number) =>
     setSharedLinks(prev => { const n = { ...prev }; delete n[invId]; return n; });
 
   return (
     <DashboardLayout title="Invoices">
-      <div style={{ maxWidth: 1200 }}>
+      <div style={{ width: '100%', maxWidth: 'none' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Invoices</h1>
@@ -141,7 +155,7 @@ export default function InvoicesPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                  {['Invoice #', 'Client', 'Date', 'Due', 'Amount', 'Paid', 'Balance', 'Status', 'Actions'].map(h => (
+                  {['Invoice #', 'Client', 'Project', 'Date', 'Due', 'Amount', 'Paid', 'Balance', 'Status', 'Actions'].map(h => (
                     <th key={h} style={{ padding: '11px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
                   ))}
                 </tr>
@@ -158,6 +172,7 @@ export default function InvoicesPage() {
                       onClick={() => router.push(`/invoices/${inv.id}`)}>
                       <td style={{ padding: '13px 14px', fontWeight: 700, color: '#2563eb', fontSize: 13 }}>{inv.invoice_number}</td>
                       <td style={{ padding: '13px 14px', color: '#0f172a', fontSize: 13, fontWeight: 500 }}>{(inv as any).client?.name ?? '—'}</td>
+                      <td style={{ padding: '13px 14px', color: '#475569', fontSize: 13 }}>{inv.project?.name ?? inv.project_title ?? '—'}</td>
                       <td style={{ padding: '13px 14px', color: '#64748b', fontSize: 12 }}>{new Date(inv.created_at).toLocaleDateString('en-GB')}</td>
                       <td style={{ padding: '13px 14px', color: inv.due_date && new Date(inv.due_date) < new Date() && inv.status !== 'paid' ? '#dc2626' : '#64748b', fontSize: 12 }}>
                         {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB') : '—'}
@@ -191,6 +206,14 @@ export default function InvoicesPage() {
                                 disabled={generatingId === inv.id}
                                 style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 7, border: '1.5px solid #e0f2fe', background: '#f0f9ff', color: '#0284c7', fontSize: 12, fontWeight: 600, cursor: generatingId === inv.id ? 'wait' : 'pointer', whiteSpace: 'nowrap', opacity: generatingId === inv.id ? 0.6 : 1 }}>
                                 <HiLink size={12} /> {generatingId === inv.id ? '…' : 'Share Link'}
+                              </button>
+                            )}
+                            {isAdmin && inv.status === 'draft' && (
+                              <button
+                                onClick={() => handleDelete(inv.id, inv.invoice_number)}
+                                disabled={deletingId === inv.id}
+                                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 7, border: '1.5px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontSize: 12, fontWeight: 600, cursor: deletingId === inv.id ? 'wait' : 'pointer', whiteSpace: 'nowrap', opacity: deletingId === inv.id ? 0.6 : 1 }}>
+                                <HiTrash size={12} /> {deletingId === inv.id ? '…' : 'Delete'}
                               </button>
                             )}
                           </div>

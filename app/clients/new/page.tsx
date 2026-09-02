@@ -4,8 +4,12 @@ import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminClientService, ClientCompany, ClientPayload } from '@/lib/services/adminClientService';
 import { userClientService } from '@/lib/services/userClientService';
-import { getAuthType } from '@/lib/auth';
+import { getAuthType, getActiveCompany } from '@/lib/auth';
 import { HiArrowLeft } from 'react-icons/hi2';
+import SubmitButton from '@/components/ui/SubmitButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import PhoneInput from '@/components/ui/PhoneInput';
+import { ALL_COUNTRIES } from '@/lib/countries';
 
 const inp: React.CSSProperties = { width: '100%', padding: '10px 13px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none', background: '#fafafa', color: '#0f172a', boxSizing: 'border-box' };
 const lbl: React.CSSProperties = { display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' };
@@ -17,7 +21,7 @@ export default function NewClientPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
   const [form, setForm] = useState<ClientPayload & { portal_email: string; portal_password: string; enable_portal: boolean }>({
-    company_id: 0, name: '', email: '', phone: '', company_name: '', address: '', notes: '', status: 'active',
+    company_id: 0, name: '', email: '', phone: '', company_name: '', address: '', country: '', notes: '', status: 'active',
     enable_portal: false, portal_email: '', portal_password: '',
   });
 
@@ -28,7 +32,14 @@ export default function NewClientPage() {
     if (isSubUser) return;
     adminClientService.companies().then(cs => {
       setCompanies(cs);
-      if (cs.length) setForm(f => ({ ...f, company_id: cs[0].id }));
+      if (!cs.length) return;
+      // Whichever company is active (the CompanySelector dropdown) wins,
+      // same priority as ClientController::index() uses server-side —
+      // otherwise this always defaulted to the alphabetically-first
+      // company regardless of which one the admin actually had selected.
+      const active = getActiveCompany();
+      const companyId = typeof active === 'number' && cs.some(c => c.id === active) ? active : cs[0].id;
+      setForm(f => ({ ...f, company_id: companyId }));
     }).catch(() => {});
   }, [isSubUser]);
 
@@ -36,6 +47,7 @@ export default function NewClientPage() {
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (saving) return; // Guards a double-click/Enter re-submit before the disabled prop re-renders.
     if (!isSubUser && !form.company_id) { setError('Please select a company'); return; }
     setSaving(true); setError('');
     try {
@@ -46,6 +58,7 @@ export default function NewClientPage() {
           phone:        form.phone  || null,
           company_name: form.company_name || null,
           address:      form.address || null,
+          country:      form.country || null,
           notes:        form.notes   || null,
           status:       form.status,
         });
@@ -57,6 +70,7 @@ export default function NewClientPage() {
           phone:        form.phone  || null,
           company_name: form.company_name || null,
           address:      form.address || null,
+          country:      form.country || null,
           notes:        form.notes   || null,
           status:       form.status,
           ...(form.enable_portal ? {
@@ -79,7 +93,8 @@ export default function NewClientPage() {
 
   return (
     <DashboardLayout title="Add Client">
-      <div style={{ maxWidth: 720 }}>
+      <LoadingOverlay show={saving} message="Creating Client…" />
+      <div style={{ width: '100%' }}>
         <button onClick={() => router.push('/clients')} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
           <HiArrowLeft size={16} /> Back to Clients
         </button>
@@ -121,7 +136,7 @@ export default function NewClientPage() {
                 </div>
                 <div>
                   <label style={lbl}>Phone</label>
-                  <input style={inp} value={form.phone ?? ''} onChange={e => set('phone', e.target.value)} placeholder="+92 300 0000000" />
+                  <PhoneInput value={form.phone ?? ''} onChange={v => set('phone', v)} />
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
@@ -130,9 +145,16 @@ export default function NewClientPage() {
                   <textarea style={{ ...inp, minHeight: 70, resize: 'vertical' }} value={form.address ?? ''} onChange={e => set('address', e.target.value)} placeholder="Street, City, Country" />
                 </div>
                 <div>
-                  <label style={lbl}>Notes</label>
-                  <textarea style={{ ...inp, minHeight: 70, resize: 'vertical' }} value={form.notes ?? ''} onChange={e => set('notes', e.target.value)} placeholder="Internal notes…" />
+                  <label style={lbl}>Country</label>
+                  <select style={inp} value={form.country ?? ''} onChange={e => set('country', e.target.value)}>
+                    <option value="">— Select —</option>
+                    {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                  </select>
                 </div>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={lbl}>Notes</label>
+                <textarea style={{ ...inp, minHeight: 70, resize: 'vertical' }} value={form.notes ?? ''} onChange={e => set('notes', e.target.value)} placeholder="Internal notes…" />
               </div>
               <div>
                 <label style={lbl}>Status</label>
@@ -167,10 +189,10 @@ export default function NewClientPage() {
             )}
 
             <div style={{ display: 'flex', gap: 12, paddingTop: 20, borderTop: '1px solid #f1f5f9' }}>
-              <button type="button" onClick={() => router.push('/clients')} style={{ padding: '10px 24px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
-              <button type="submit" disabled={saving} style={{ padding: '10px 32px', borderRadius: 8, border: 'none', background: saving ? '#93c5fd' : 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
-                {saving ? 'Saving…' : 'Create Client'}
-              </button>
+              <button type="button" onClick={() => router.push('/clients')} disabled={saving} style={{ padding: '10px 24px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 14, fontWeight: 500, cursor: saving ? 'not-allowed' : 'pointer' }}>Cancel</button>
+              <SubmitButton loading={saving} loadingText="Creating Client…" style={{ padding: '10px 32px', borderRadius: 8, border: 'none', background: saving ? '#93c5fd' : 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 14, fontWeight: 600 }}>
+                Create Client
+              </SubmitButton>
             </div>
           </form>
         </div>

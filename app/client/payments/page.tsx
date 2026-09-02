@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { clientService } from '@/lib/services/clientService';
+import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
 
 const SC: Record<string, { bg: string; color: string }> = {
   confirmed:            { bg: '#ecfdf5', color: '#059669' },
@@ -11,9 +12,13 @@ const SC: Record<string, { bg: string; color: string }> = {
 export default function ClientPaymentsPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading]   = useState(true);
+  const [notEnabled, setNotEnabled] = useState(false);
 
   useEffect(() => {
-    clientService.payments().then(setPayments).finally(() => setLoading(false));
+    clientService.payments()
+      .then(setPayments)
+      .catch((err: any) => { if (err?.response?.status === 403) setNotEnabled(true); })
+      .finally(() => setLoading(false));
   }, []);
 
   return (
@@ -23,6 +28,8 @@ export default function ClientPaymentsPage() {
       <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>Loading...</div>
+        ) : notEnabled ? (
+          <PortalModuleDisabled feature="Payment History" />
         ) : payments.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>No payments yet.</div>
         ) : (

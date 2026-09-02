@@ -15,6 +15,15 @@ const METHOD_LABEL: Record<string, string> = {
   gateway:       'Online Gateway',
 };
 
+// Fallback when a gateway charge's company_gateway account has no
+// Admin-set label (or the account was later deleted) — mirrors
+// CompanyPaymentGateway::GATEWAYS on the backend.
+const GATEWAY_TYPE_LABEL: Record<string, string> = {
+  stripe:        'Stripe',
+  paypal:        'PayPal',
+  authorize_net: 'Authorize.net',
+};
+
 const METHOD_COLOR: Record<string, { bg: string; color: string }> = {
   bank_transfer: { bg: '#eff6ff', color: '#2563eb' },
   cash:          { bg: '#ecfdf5', color: '#059669' },
@@ -103,11 +112,9 @@ export default function PaymentsPage() {
     finally { setRejecting(null); }
   };
 
-  const currency = payments[0]?.invoice?.currency ?? 'USD';
-
   return (
     <DashboardLayout title="Payments">
-      <div style={{ maxWidth: 1200 }}>
+      <div style={{ width: '100%' }}>
 
         {/* Header */}
         <div style={{ marginBottom: 20 }}>
@@ -115,25 +122,30 @@ export default function PaymentsPage() {
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#94a3b8' }}>All payments received across invoices</p>
         </div>
 
-        {/* Summary Cards */}
-        {summary && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 20 }}>
-            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #f1f5f9', padding: '16px 20px' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total Received</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#059669', marginTop: 4 }}>{fmt(summary.total, currency)}</div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{summary.count} payments</div>
+        {/* Summary Cards — one group per currency, never blended into one number */}
+        {summary && summary.by_currency.map(cs => (
+          <div key={cs.currency} style={{ marginBottom: 20 }}>
+            {summary.by_currency.length > 1 && (
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 8 }}>{cs.currency}</div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #f1f5f9', padding: '16px 20px' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total Received</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#059669', marginTop: 4 }}>{fmt(cs.total, cs.currency)}</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{cs.count} payments</div>
+              </div>
+              {Object.entries(cs.by_method).map(([m, amt]) => {
+                const mc = METHOD_COLOR[m] ?? { bg: '#f8fafc', color: '#64748b' };
+                return (
+                  <div key={m} style={{ background: mc.bg, borderRadius: 12, border: `1px solid ${mc.color}20`, padding: '16px 20px' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: mc.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{METHOD_LABEL[m] ?? m}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: mc.color, marginTop: 4 }}>{fmt(amt, cs.currency)}</div>
+                  </div>
+                );
+              })}
             </div>
-            {Object.entries(summary.by_method).map(([m, amt]) => {
-              const mc = METHOD_COLOR[m] ?? { bg: '#f8fafc', color: '#64748b' };
-              return (
-                <div key={m} style={{ background: mc.bg, borderRadius: 12, border: `1px solid ${mc.color}20`, padding: '16px 20px' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: mc.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{METHOD_LABEL[m] ?? m}</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: mc.color, marginTop: 4 }}>{fmt(amt, currency)}</div>
-                </div>
-              );
-            })}
           </div>
-        )}
+        ))}
 
         {/* Filters */}
         <form onSubmit={handleSearch} style={{ background: '#fff', borderRadius: 12, border: '1px solid #f1f5f9', padding: '16px 20px', marginBottom: 16 }}>
@@ -181,7 +193,7 @@ export default function PaymentsPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                    {['Date', 'Invoice #', 'Client', 'Amount', 'Method', 'Status', 'Gateway Ref', 'Notes', ''].map(h => (
+                    {['Date', 'Invoice #', 'Customer', 'Amount', 'Method', 'Status', 'Gateway', 'Notes', ''].map(h => (
                       <th key={h} style={{ padding: '11px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -203,10 +215,15 @@ export default function PaymentsPage() {
                           </span>
                         </td>
                         <td style={{ padding: '13px 14px', color: '#0f172a', fontSize: 13 }}>
-                          {p.invoice?.client?.name ?? '—'}
+                          {p.invoice?.client?.name ?? p.invoice?.lead?.name ?? '—'}
                         </td>
                         <td style={{ padding: '13px 14px', fontWeight: 700, color: '#059669', fontSize: 13, whiteSpace: 'nowrap' }}>
                           {fmt(parseFloat(p.amount), p.invoice?.currency ?? 'USD')}
+                          {p.exchange_rate != null && p.converted_amount != null && (
+                            <div style={{ fontWeight: 600, color: '#92400e', fontSize: 10.5, marginTop: 2 }} title={`Gateway charged ${p.converted_currency} ${p.converted_amount}`}>
+                              🔄 → {p.converted_currency} {parseFloat(p.converted_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '13px 14px' }}>
                           {p.method ? (
@@ -226,11 +243,17 @@ export default function PaymentsPage() {
                           })()}
                         </td>
                         <td style={{ padding: '13px 14px', color: '#64748b', fontSize: 12 }}>
-                          {p.gateway_ref ? (
-                            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.gateway_ref}</span>
-                          ) : p.gateway ? (
-                            <span style={{ color: '#94a3b8' }}>{p.gateway}</span>
-                          ) : '—'}
+                          {(() => {
+                            const gatewayName = p.company_gateway?.label
+                              || (p.gateway ? (GATEWAY_TYPE_LABEL[p.gateway] ?? p.gateway) : null);
+                            if (!gatewayName && !p.gateway_ref) return '—';
+                            return (
+                              <>
+                                {gatewayName && <div style={{ color: '#0f172a', fontWeight: 600 }}>{gatewayName}</div>}
+                                {p.gateway_ref && <div style={{ fontFamily: 'monospace', fontSize: 11, marginTop: gatewayName ? 2 : 0 }}>{p.gateway_ref}</div>}
+                              </>
+                            );
+                          })()}
                         </td>
                         <td style={{ padding: '13px 14px', color: '#64748b', fontSize: 12, maxWidth: 200 }}>
                           <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

@@ -6,6 +6,9 @@ import { adminService, CreateAdminPayload } from '@/lib/services/adminService';
 import { packageService } from '@/lib/services/packageService';
 import { Package } from '@/types';
 import { HiArrowLeft } from 'react-icons/hi2';
+import SubmitButton from '@/components/ui/SubmitButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import PhoneInput from '@/components/ui/PhoneInput';
 
 const inp: React.CSSProperties = {
   width: '100%', padding: '10px 13px',
@@ -36,6 +39,7 @@ export default function NewAdminPage() {
 
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (saving) return; // Guards a double-click/Enter re-submit before the disabled prop re-renders.
     if (form.password !== form.confirm_password) { setPwdErr('Passwords do not match'); return; }
     setSaving(true); setError(''); setPwdErr('');
     try {
@@ -59,6 +63,7 @@ export default function NewAdminPage() {
 
   return (
     <SuperAdminLayout>
+      <LoadingOverlay show={saving} message="Creating Admin…" />
       <div style={{ maxWidth: 700, padding: '28px 32px' }}>
         <button
           onClick={() => router.push('/super-admin/admins')}
@@ -105,7 +110,7 @@ export default function NewAdminPage() {
               {pwdErr && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 16 }}>{pwdErr}</div>}
               <div>
                 <label style={lbl}>Phone Number</label>
-                <input style={inp} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+1 555 000 0000" />
+                <PhoneInput value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
               </div>
             </div>
 
@@ -143,12 +148,12 @@ export default function NewAdminPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 12, paddingTop: 20, borderTop: '1px solid #f1f5f9' }}>
-              <button type="button" onClick={() => router.push('/super-admin/admins')} style={{ padding: '10px 24px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+              <button type="button" onClick={() => router.push('/super-admin/admins')} disabled={saving} style={{ padding: '10px 24px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 14, fontWeight: 500, cursor: saving ? 'not-allowed' : 'pointer' }}>
                 Cancel
               </button>
-              <button type="submit" disabled={saving} style={{ padding: '10px 32px', borderRadius: 8, border: 'none', background: saving ? '#c4b5fd' : 'linear-gradient(135deg, #7c3aed, #a78bfa)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
-                {saving ? 'Creating…' : 'Create Admin'}
-              </button>
+              <SubmitButton loading={saving} loadingText="Creating Admin…" style={{ padding: '10px 32px', borderRadius: 8, border: 'none', background: saving ? '#c4b5fd' : 'linear-gradient(135deg, #7c3aed, #a78bfa)', color: '#fff', fontSize: 14, fontWeight: 600 }}>
+                Create Admin
+              </SubmitButton>
             </div>
           </form>
         </div>

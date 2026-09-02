@@ -14,6 +14,17 @@ export interface ChatThreadLastMessage {
   sent_at: string;
 }
 
+export interface EligibleChatUser {
+  id: number;
+  name: string;
+  role_type: string;
+  // True when a 1:1 General Chat thread with this person already exists —
+  // the "start new chat" picker hides them (only one direct thread per
+  // person, see findDirectThread()/createDirect()), but the New Group
+  // checklist still shows them since that restriction doesn't apply there.
+  has_direct_thread: boolean;
+}
+
 export interface ChatThreadSummary {
   id: number;
   company?: string | null;
@@ -44,6 +55,9 @@ function downloadBlob(blob: Blob, fileName: string): void {
 // not tied to any project/lead. See Api\User\GeneralChatController.
 export const userGeneralChatService = {
   list: async (): Promise<ChatThreadSummary[]> => (await api.get('/user/chat')).data.data,
+
+  eligibleUsers: async (): Promise<EligibleChatUser[]> =>
+    (await api.get('/user/chat/eligible-users')).data.data,
 
   createDirect: async (recipientUserId: number): Promise<{ thread_id: number }> =>
     (await api.post('/user/chat/direct', { recipient_user_id: recipientUserId })).data.data,
@@ -95,7 +109,7 @@ export const userGeneralChatService = {
 export const adminGeneralChatService = {
   list: async (): Promise<ChatThreadSummary[]> => (await api.get('/admin/chat')).data.data,
 
-  eligibleUsers: async (companyId: number): Promise<{ id: number; name: string; role_type: string }[]> =>
+  eligibleUsers: async (companyId: number): Promise<EligibleChatUser[]> =>
     (await api.get('/admin/chat/eligible-users', { params: { company_id: companyId } })).data.data,
 
   createDirect: async (companyId: number, userId: number): Promise<{ thread_id: number }> =>

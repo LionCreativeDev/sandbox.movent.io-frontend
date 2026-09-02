@@ -48,6 +48,27 @@ function buildSalesChatService(base: '/admin' | '/user') {
       const res = await api.get(`${base}/clients/${clientId}/chat/${messageId}/attachment`, { responseType: 'blob' });
       downloadBlob(res.data, fileName);
     },
+    invoiceMessages: async (invoiceId: number): Promise<ChatMessage[]> => {
+      const res = await api.get(`${base}/invoices/${invoiceId}/chat`);
+      return res.data.data.messages;
+    },
+    sendInvoiceMessage: async (invoiceId: number, content: string, file?: File | null): Promise<ChatMessage> => {
+      if (file) {
+        const form = new FormData();
+        if (content) form.append('content', content);
+        form.append('file', file);
+        const res = await api.post(`${base}/invoices/${invoiceId}/chat`, form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return res.data.data;
+      }
+      const res = await api.post(`${base}/invoices/${invoiceId}/chat`, { content });
+      return res.data.data;
+    },
+    downloadInvoiceAttachment: async (invoiceId: number, messageId: number, fileName: string): Promise<void> => {
+      const res = await api.get(`${base}/invoices/${invoiceId}/chat/${messageId}/attachment`, { responseType: 'blob' });
+      downloadBlob(res.data, fileName);
+    },
   };
 }
 

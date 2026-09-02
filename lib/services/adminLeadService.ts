@@ -13,16 +13,72 @@ export interface Lead {
   estimated_value: number;
   notes: string | null;
   next_followup_date: string | null;
+  next_followup_time: string | null;
   lost_reason: string | null;
   assigned_to: number | null;
   assigned_user: { id: number; name: string } | null;
+  created_by: number | null;
+  creator: { id: number; name: string } | null;
   converted_at: string | null;
   client_id: number | null;
   created_at: string;
   updated_at: string;
+  // Deal fields — a Won lead doubles as a lightweight "Deal"
+  deal_reference?: string | null;
+  proposed_project_title?: string | null;
+  service_category?: string | null;
+  scope_summary?: string | null;
+  detailed_scope?: string | null;
+  quotation_reference?: string | null;
+  required_kickoff_amount?: number | null;
+  required_kickoff_percentage?: number | null;
+  expected_start_date?: string | null;
+  expected_end_date?: string | null;
+  fulfillment_status?: string | null;
+  won_at?: string | null;
   // Detail view extras
+  has_invoice?: boolean;
+  // Set once this lead has a Project — its chat conversation has moved
+  // there (see App\Services\PaymentProjectStartService::
+  // migrateChatHistory()); the frontend uses this to point Sales Chat at
+  // Project Chat instead of the old, now-abandoned Lead-anchored thread.
+  chat_project_id?: number | null;
   follow_ups?: FollowUp[];
   activities?: LeadActivity[];
+}
+
+export interface DealConfirmationFields {
+  proposed_project_title: string;
+  service_category?: string;
+  scope_summary?: string;
+  detailed_scope?: string;
+  quotation_reference?: string;
+  required_kickoff_amount?: number;
+  required_kickoff_percentage?: number;
+  expected_start_date?: string;
+  expected_end_date?: string;
+}
+
+export interface DealEligibility {
+  deal_reference: string | null;
+  proposed_project_title: string | null;
+  required_kickoff_amount: number;
+  net_paid_amount: number;
+  remaining_amount: number;
+  fulfillment_status: string | null;
+  project_creation_eligible: boolean;
+  invoice_count: number;
+  latest_invoice: {
+    id: number;
+    invoice_number: string;
+    status: string;
+    total_amount: number;
+    paid_amount: number;
+    due_date: string | null;
+  } | null;
+  has_project: boolean;
+  project_id?: number | null;
+  project_reference?: string | null;
 }
 
 export interface FollowUp {
@@ -62,6 +118,7 @@ export interface LeadPayload {
   estimated_value?: number | null;
   notes?: string | null;
   next_followup_date?: string | null;
+  next_followup_time?: string | null;
   assigned_to?: number | null;
 }
 
@@ -91,12 +148,30 @@ export interface SalesDashboard {
     open_deals: number;
     pipeline_value: number;
     won_value: number;
+    // Outstanding amount still owed on a Won lead's non-cancelled invoices
+    // (see LeadRevenueService) — separate from won_value, which is only the
+    // amount actually paid so far.
+    pending_value: number;
+    // won ÷ (won + lost) as a percentage, 0-100 — decided leads only, not
+    // the whole pipeline (still-open leads don't count either way yet).
+    win_rate: number;
     today_followups: number;
     overdue_followups: number;
   };
   monthly: { month: number; total: number; won: number; lost: number; value: number }[];
   by_stage: Record<string, { count: number; value: number }>;
-  sellers: { id: number; name: string; total: number; won: number; lost: number; open: number; won_value: number }[];
+  sellers: { id: number; name: string; total: number; won: number; lost: number; open: number; won_value: number; pending_value: number; win_rate: number }[];
+  // Every invoice belonging to the currently-selected company (see the admin
+  // CompanySelector) — total_paid/total_outstanding already reflect real,
+  // successful (including partial) payments via InvoicePaymentService.
+  invoice_summary: {
+    total_count: number;
+    total_invoiced: number;
+    total_paid: number;
+    total_outstanding: number;
+    overdue_count: number;
+    partially_paid_count: number;
+  };
   year: number;
 }
 
@@ -121,13 +196,26 @@ export const adminLeadService = {
     return res.data.data;
   },
 
-  updateStatus: async (id: number, status: string, lostReason?: string): Promise<Lead> => {
-    const res = await api.patch(`/admin/leads/${id}/status`, { status, lost_reason: lostReason });
+  updateStatus: async (id: number, status: string, lostReason?: string, dealFields?: DealConfirmationFields): Promise<Lead> => {
+    const res = await api.patch(`/admin/leads/${id}/status`, { status, lost_reason: lostReason, ...dealFields });
+    return res.data.data;
+  },
+
+  projectEligibility: async (id: number): Promise<DealEligibility> => {
+    const res = await api.get(`/admin/leads/${id}/project-eligibility`);
     return res.data.data;
   },
 
   remove: async (id: number): Promise<void> => {
     await api.delete(`/admin/leads/${id}`);
+  },
+
+  // Moves a lead created under the wrong Company (see the Edit Lead page's
+  // Company dropdown, admin-only) — only possible before it has an
+  // invoice/project (see Api\Admin\LeadController::updateCompany()).
+  updateCompany: async (id: number, companyId: number): Promise<Lead> => {
+    const res = await api.patch(`/admin/leads/${id}/company`, { company_id: companyId });
+    return res.data.data;
   },
 
   convert: async (id: number): Promise<{ client_id: number }> => {
@@ -222,8 +310,18 @@ export const userLeadService = {
     return res.data.data;
   },
 
-  updateStatus: async (id: number, status: string, lostReason?: string): Promise<Lead> => {
-    const res = await api.patch(`/user/leads/${id}/status`, { status, lost_reason: lostReason });
+  updateStatus: async (id: number, status: string, lostReason?: string, dealFields?: DealConfirmationFields): Promise<Lead> => {
+    const res = await api.patch(`/user/leads/${id}/status`, { status, lost_reason: lostReason, ...dealFields });
+    return res.data.data;
+  },
+
+  projectEligibility: async (id: number): Promise<DealEligibility> => {
+    const res = await api.get(`/user/leads/${id}/project-eligibility`);
+    return res.data.data;
+  },
+
+  addFollowUp: async (leadId: number, payload: FollowUpPayload): Promise<FollowUp> => {
+    const res = await api.post(`/user/leads/${leadId}/follow-ups`, payload);
     return res.data.data;
   },
 
@@ -234,6 +332,11 @@ export const userLeadService = {
 
   transfer: async (id: number, toUserId: number, reason?: string): Promise<Lead> => {
     const res = await api.post(`/user/leads/${id}/transfer`, { to_user_id: toUserId, reason: reason || null });
+    return res.data.data;
+  },
+
+  convert: async (id: number): Promise<{ client_id: number }> => {
+    const res = await api.post(`/user/leads/${id}/convert`);
     return res.data.data;
   },
 

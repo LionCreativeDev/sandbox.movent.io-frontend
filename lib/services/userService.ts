@@ -12,6 +12,9 @@ export interface UserPayload {
   email: string;
   password?: string;
   role_type?: string;
+  // Display-only "Custom Role" name — role_type still carries the real
+  // permission/behavior bucket. See roleUtils.CUSTOM_ROLE_SENTINEL.
+  custom_role_label?: string | null;
   phone?: string | null;
   is_active?: boolean;
   company_id?: number;
@@ -22,6 +25,7 @@ export interface InvitePayload {
   name: string;
   email: string;
   role_type?: string;
+  custom_role_label?: string | null;
   phone?: string | null;
   company_id?: number;
   company_assignments?: CompanyAssignmentPayload[];
@@ -29,7 +33,6 @@ export interface InvitePayload {
 
 export interface ActivityTask { id: number; title: string; status: string; project_id: number }
 export interface ActivityProject { id: number; name: string; status: string }
-export interface ActivityProductionTask { id: number; task_id: number; status: string }
 export interface ActivityTimesheet { id: number; task_id: number; hours_logged: number; status: string; log_date: string }
 export interface ActivityDeliverable { id: number; title: string; status: string; project_id: number }
 export interface ActivityLog { id: number; action: string; module_key: string | null; entity_type: string | null; entity_id: number | null; created_at: string }
@@ -39,7 +42,6 @@ export interface UserActivity {
   assigned_tasks?: ActivityTask[];
   managed_projects?: ActivityProject[];
   member_projects?: ActivityProject[];
-  production_tasks?: ActivityProductionTask[];
   timesheets?: ActivityTimesheet[];
   deliverables?: ActivityDeliverable[];
   audit_logs: ActivityLog[];

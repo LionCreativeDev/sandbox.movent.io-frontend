@@ -5,12 +5,22 @@ import { clientService } from '@/lib/services/clientService';
 import clientApi from '@/lib/clientAxios';
 import InlineGatewayPayment, { InlineGatewayPaymentHandle } from '@/components/payments/InlineGatewayPayment';
 import toast from 'react-hot-toast';
+import { handleNotFound } from '@/lib/notFound';
 
 const GREEN = '#10b981';
 
+interface ConversionPreview {
+  amount: number;
+  currency: string;
+  rate: number;
+}
+
 interface Gateway {
-  key: string;
+  id: number | null;
+  type: string;
   label: string;
+  supports_invoice_currency?: boolean;
+  conversion_preview?: ConversionPreview | null;
 }
 
 interface BankDetails {
@@ -47,6 +57,7 @@ export default function ClientPaymentPage() {
   const [data, setData]               = useState<GatewayPageData | null>(null);
   const [loading, setLoading]         = useState(true);
   const [selectedMethod, setSelected] = useState<string>('');
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [ref, setRef]                 = useState('');
   const [notes, setNotes]             = useState('');
   const [paying, setPaying]           = useState(false);
@@ -58,14 +69,13 @@ export default function ClientPaymentPage() {
       .then((d: GatewayPageData) => {
         setData(d);
         if (d.gateways.length > 0) {
-          setSelected(d.gateways[0].key);
+          setSelected(d.gateways[0].type);
+          setSelectedAccountId(d.gateways[0].id);
         } else if (d.bank) {
           setSelected('bank_transfer');
-        } else {
-          setSelected('other');
         }
       })
-      .catch(() => router.push(`/client/invoices/${invoiceId}`))
+      .catch((err) => { if (!handleNotFound(err, router)) router.push(`/client/invoices/${invoiceId}`); })
       .finally(() => setLoading(false));
 
     if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('cancelled') === '1') {
@@ -73,7 +83,7 @@ export default function ClientPaymentPage() {
     }
   }, [invoiceId]);
 
-  const isRealGateway = (key: string) => data?.gateways.some(g => g.key === key) ?? false;
+  const isRealGateway = (type: string) => data?.gateways.some(g => g.type === type) ?? false;
 
   const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,7 +121,7 @@ export default function ClientPaymentPage() {
   if (!data)   return null;
 
   if (receipt) return (
-    <div style={{ maxWidth: 480 }}>
+    <div style={{ maxWidth: 480, marginLeft: 'auto', marginRight: 'auto' }}>
       <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 14, padding: '32px 28px', textAlign: 'center' }}>
         <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#dcfce7', border: '3px solid #86efac', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', fontSize: 28 }}>✅</div>
         <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#15803d' }}>
@@ -160,15 +170,24 @@ export default function ClientPaymentPage() {
   const isGateway    = ['paypal', 'stripe', 'authorize_net'].includes(selectedMethod);
   const isBankXfer   = selectedMethod === 'bank_transfer';
 
-  const allMethods: Array<{ key: string; label: string; icon: string }> = [
+  const allMethods: Array<{ optionKey: string | number; type: string; accountId: number | null; label: string; icon: string; conversionPreview?: ConversionPreview | null }> = [
     ...data.gateways.map(g => ({
-      key:   g.key,
-      label: g.label,
-      icon:  GATEWAY_ICONS[g.key] ?? '💳',
+      optionKey: g.id ?? g.type,
+      type:      g.type,
+      accountId: g.id,
+      label:     g.label,
+      icon:      GATEWAY_ICONS[g.type] ?? '💳',
+      conversionPreview: g.conversion_preview,
     })),
-    ...(data.bank ? [{ key: 'bank_transfer', label: 'Bank Transfer', icon: '🏦' }] : []),
-    { key: 'other', label: 'Other', icon: '💼' },
+    ...(data.bank ? [{ optionKey: 'bank_transfer', type: 'bank_transfer', accountId: null, label: 'Bank Transfer', icon: '🏦' }] : []),
   ];
+
+  const selectedMethodMeta = allMethods.find(m => (m.accountId !== null ? m.accountId === selectedAccountId : m.type === selectedMethod));
+  // PayPal's Buttons SDK loads with a `currency` query param that must match
+  // the order it's about to create — once the backend converts an
+  // unsupported invoice currency, that's the converted currency, not the
+  // invoice's own.
+  const chargeCurrency = selectedMethodMeta?.conversionPreview?.currency ?? data.invoice.currency;
 
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0',
@@ -218,27 +237,42 @@ export default function ClientPaymentPage() {
             Select Payment Method
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {allMethods.map(m => (
-              <label
-                key={m.key}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px',
-                  border: `2px solid ${selectedMethod === m.key ? GREEN : '#e2e8f0'}`,
-                  borderRadius: 10, cursor: 'pointer',
-                  background: selectedMethod === m.key ? '#f0fdf4' : '#fff',
-                }}>
-                <input
-                  type="radio"
-                  name="method"
-                  value={m.key}
-                  checked={selectedMethod === m.key}
-                  onChange={() => setSelected(m.key)}
-                  style={{ accentColor: GREEN, width: 16, height: 16 }}
-                />
-                <span style={{ fontSize: 20, lineHeight: 1 }}>{m.icon}</span>
-                <span style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>{m.label}</span>
-              </label>
-            ))}
+            {allMethods.map(m => {
+              const active = m.accountId !== null ? selectedAccountId === m.accountId : selectedMethod === m.type;
+              return (
+                <div key={m.optionKey}>
+                  <label
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px',
+                      border: `2px solid ${active ? GREEN : '#e2e8f0'}`,
+                      borderRadius: 10, cursor: 'pointer',
+                      background: active ? '#f0fdf4' : '#fff',
+                    }}>
+                    <input
+                      type="radio"
+                      name="method"
+                      value={m.optionKey}
+                      checked={active}
+                      onChange={() => { setSelected(m.type); setSelectedAccountId(m.accountId); }}
+                      style={{ accentColor: GREEN, width: 16, height: 16 }}
+                    />
+                    <span style={{ fontSize: 20, lineHeight: 1 }}>{m.icon}</span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>{m.label}</span>
+                  </label>
+                  {m.conversionPreview && (
+                    <div style={{
+                      fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a',
+                      borderRadius: 6, padding: '6px 10px', marginTop: 6,
+                    }}>
+                      {m.label} doesn&apos;t support {data.invoice.currency} — you&apos;ll be charged{' '}
+                      <strong>{m.conversionPreview.currency} {m.conversionPreview.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                      {' '}for {data.invoice.currency} {due.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {' '}(1 {data.invoice.currency} = {m.conversionPreview.rate.toFixed(4)} {m.conversionPreview.currency}).
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -270,14 +304,15 @@ export default function ClientPaymentPage() {
           }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 14 }}>Card Details</div>
             <InlineGatewayPayment
-              key={selectedMethod}
+              key={selectedAccountId ?? selectedMethod}
               ref={inlineRef}
               gateway={selectedMethod as 'stripe' | 'paypal' | 'authorize_net'}
               apiClient={clientApi}
-              initUrl={`/client/invoices/${invoiceId}/gateways/${selectedMethod}/init`}
+              initUrl={`/client/invoices/${invoiceId}/gateways/${selectedMethod}/init${selectedAccountId ? `?company_gateway_id=${selectedAccountId}` : ''}`}
               createOrderUrl={selectedMethod === 'paypal' ? `/client/invoices/${invoiceId}/gateways/paypal/create-order` : undefined}
               chargeUrl={`/client/invoices/${invoiceId}/gateways/${selectedMethod}/charge`}
-              currency={data.invoice.currency}
+              companyGatewayId={selectedAccountId}
+              currency={chargeCurrency}
               disabled={paying}
               onProcessingChange={setPaying}
               onSuccess={result => {

@@ -1,21 +1,23 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
 import { adminHrService, Payroll } from '@/lib/services/adminHrService';
 import toast from 'react-hot-toast';
+import { handleNotFound } from '@/lib/notFound';
 
 export default function PayslipPage() {
   useModuleGuard('payroll');
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [payroll, setPayroll] = useState<Payroll | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     adminHrService.payroll.payslip(Number(id))
       .then(setPayroll)
-      .catch(() => toast.error('Failed to load payslip'))
+      .catch((err) => { if (!handleNotFound(err, router)) toast.error('Failed to load payslip'); })
       .finally(() => setLoading(false));
   }, [id]);
 

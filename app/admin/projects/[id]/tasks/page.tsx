@@ -4,14 +4,17 @@ import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import toast from 'react-hot-toast';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
-import { adminProjectService, Task } from '@/lib/services/adminProjectService';
+import { adminProjectService, Task, ProjectTaskAttachment } from '@/lib/services/adminProjectService';
 import { userService } from '@/lib/services/userService';
 import ProjectTabs from '@/components/admin/projects/ProjectTabs';
 import Link from 'next/link';
-import { inp, lbl, card, Badge, TASK_SC, PRIORITY_SC, PRODUCTION_SC, PRODUCTION_LABEL, fmtDate, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize, asRelation } from '@/components/admin/projects/shared';
-import { TASK_STATUS_LABELS, taskStatusRequiresComment, promptForQaUser, promptForOptionalProductionUser } from '@/lib/taskStatusFlow';
-import { ROLE_LABELS } from '@/lib/roleUtils';
+import { inp, lbl, card, Badge, TASK_SC, PRIORITY_SC, fmtDate, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize, asRelation, DRAFT_HINT, DraftNotice } from '@/components/admin/projects/shared';
+import { TASK_STATUS_LABELS, promptForOptionalProductionUser } from '@/lib/taskStatusFlow';
+import { handleNotFound } from '@/lib/notFound';
+import { roleDisplayLabel } from '@/lib/roleUtils';
 import { User } from '@/types';
+import SubmitButton from '@/components/ui/SubmitButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
 
 const hasProjectManagementAccess = (u: User) =>
   (u.company_assignments ?? []).some(a => (a.permissions?.project_management ?? []).length > 0);
@@ -19,6 +22,9 @@ const hasProjectManagementAccess = (u: User) =>
 const TASK_TYPE_LABEL: Record<string, string> = {
   general: 'General', production: 'Production', client_request: 'Client Request', internal: 'Internal',
 };
+// A Project Manager genuinely on the project's team CAN be a task assignee,
+// per current policy — only Seller/Client are excluded, full stop.
+const NEVER_TASK_ASSIGNEE_ROLES = ['seller', 'client'];
 
 const EMPTY_FORM = {
   title: '', description: '', assigned_to: '', priority: 'medium', status: 'todo',
@@ -39,30 +45,44 @@ export default function ProjectTasksPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
+  // Existing (already-uploaded) attachments for the task currently being
+  // edited — populated by startEdit(), distinct from `attachments` above
+  // (which only ever holds locally-queued files for the CREATE flow, where
+  // the task doesn't have an id yet to upload against).
+  const [existingAttachments, setExistingAttachments] = useState<ProjectTaskAttachment[]>([]);
+  const [existingAttLoading, setExistingAttLoading] = useState(false);
+  const [uploadingExisting, setUploadingExisting] = useState(false);
   // Only fetched to know whether the project is closed (read-only) — hides
   // "+ Add Task"/row actions rather than letting the backend 422 on submit.
   const [projectClosed, setProjectClosed] = useState(false);
+  // A draft can't have tasks until it's activated — see the isDraft() guard
+  // in Api\Admin\TaskController::store().
+  const [projectDraft, setProjectDraft] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
       setTasks(await adminProjectService.tasks.list(projectId));
-    } catch { toast.error('Failed to load tasks'); }
+    } catch (err) { if (!handleNotFound(err, router)) toast.error('Failed to load tasks'); }
     finally { setLoading(false); }
   };
 
   useEffect(() => {
     load();
     adminProjectService.getOne(projectId).then(p => {
-      setProjectClosed(p.status === 'closed');
-      // Production tasks can only be assigned to an existing, active user of
-      // THIS project's own company — a Company Admin can own several
-      // companies, and userService.list() returns users across all of them,
-      // so it must be filtered down here. A Seller can never be a task
-      // assignee, full stop.
+      setProjectClosed(['closed', 'completed'].includes(p.status));
+      setProjectDraft(p.status === 'draft');
+      // Only this project's own team members are assignable — not every
+      // active user of the company (same fix already applied to the
+      // Projects listing's PM dropdown, the all-Tasks page, and
+      // Timesheets). Still sourced from userService.list() (not
+      // project.team_members directly) since the "no Project Management
+      // access" warning below needs each user's full company_assignments,
+      // which team_members' nested user object doesn't carry. Seller/client
+      // portal accounts can never be task assignees.
+      const teamMemberIds = new Set((p.team_members ?? []).map(tm => tm.user_id));
       userService.list().then(d => setUsers(d.users.filter(u =>
-        u.is_active && u.role_type !== 'seller'
-        && (u.company_assignments ?? []).some(a => a.company_id === p.company_id)
+        u.is_active && !NEVER_TASK_ASSIGNEE_ROLES.includes(u.role_type ?? '') && teamMemberIds.has(u.id)
       ))).catch(() => {});
     }).catch(() => {});
   }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -70,6 +90,13 @@ export default function ProjectTasksPage() {
   const assignedUser = users.find(u => String(u.id) === form.assigned_to) ?? null;
 
   const setF = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  const loadExistingAttachments = async (taskId: number) => {
+    setExistingAttLoading(true);
+    try { setExistingAttachments(await adminProjectService.taskAttachments.list(projectId, taskId)); }
+    catch { toast.error('Failed to load attachments'); }
+    finally { setExistingAttLoading(false); }
+  };
 
   const startEdit = (t: Task) => {
     setEditingId(t.id);
@@ -82,9 +109,13 @@ export default function ProjectTasksPage() {
       notes: t.notes ?? '', task_type: 'general',
     });
     setShowForm(true);
+    loadExistingAttachments(t.id);
   };
 
-  const cancelForm = () => { setShowForm(false); setEditingId(null); setForm(EMPTY_FORM); setAttachments([]); };
+  const cancelForm = () => {
+    setShowForm(false); setEditingId(null); setForm(EMPTY_FORM); setAttachments([]);
+    setExistingAttachments([]);
+  };
 
   const handleFilesSelected = (files: FileList | null) => {
     if (!files) return;
@@ -100,8 +131,44 @@ export default function ProjectTasksPage() {
 
   const removeAttachment = (index: number) => setAttachments(prev => prev.filter((_, i) => i !== index));
 
+  // Uploads straight to the task being edited (it already has an id, unlike
+  // the create flow's locally-queued `attachments` above) — one request per
+  // file, then refreshes the list so it reflects what's actually stored.
+  const uploadExistingAttachments = async (files: FileList | null) => {
+    if (!files || !editingId) return;
+    setUploadingExisting(true);
+    let failed = 0;
+    for (const file of Array.from(files)) {
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+      if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${file.name}: file type not allowed`); failed++; continue; }
+      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) { toast.error(`${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); failed++; continue; }
+      try { await adminProjectService.taskAttachments.upload(projectId, editingId, file); }
+      catch { failed++; toast.error(`${file.name}: upload failed`); }
+    }
+    if (failed < files.length) toast.success('Attachment(s) uploaded');
+    setUploadingExisting(false);
+    loadExistingAttachments(editingId);
+    load();
+  };
+
+  const downloadExistingAttachment = async (a: ProjectTaskAttachment) => {
+    try { await adminProjectService.taskAttachments.download(projectId, a.task_id, a.id, a.original_name); }
+    catch { toast.error('Download failed'); }
+  };
+
+  const deleteExistingAttachment = async (a: ProjectTaskAttachment) => {
+    if (!confirm(`Delete "${a.original_name}"?`)) return;
+    try {
+      await adminProjectService.taskAttachments.remove(projectId, a.task_id, a.id);
+      toast.success('Attachment deleted');
+      setExistingAttachments(prev => prev.filter(x => x.id !== a.id));
+      load();
+    } catch { toast.error('Failed to delete attachment'); }
+  };
+
   const submit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
+    if (saving) return; // Guards a double-click/Enter re-submit before the disabled prop re-renders.
     if (!form.title) { toast.error('Enter a task title'); return; }
     setSaving(true);
     try {
@@ -138,17 +205,12 @@ export default function ProjectTasksPage() {
   };
 
   const updateStatus = async (t: Task, status: string) => {
+    // Optional reason — never required (Jira-style free jump has no
+    // "requires comment" rule), but still worth capturing when offered.
     let comment: string | undefined;
-    if (taskStatusRequiresComment(status)) {
-      const input = window.prompt(status === 'blocked' ? 'Reason for marking this task Blocked:' : 'QA comment / reason for QA Failed:');
-      if (!input || !input.trim()) { toast.error('A comment is required for this status change.'); return; }
-      comment = input.trim();
-    }
-    let qaAssignedTo: number | undefined;
-    if (status === 'ready_for_qa') {
-      const picked = promptForQaUser(users.filter(u => u.role_type === 'qa'));
-      if (!picked) return;
-      qaAssignedTo = picked;
+    if (status === 'blocked') {
+      const input = window.prompt('Reason for marking this task Blocked (optional):');
+      if (input && input.trim()) comment = input.trim();
     }
     let productionAssignedTo: number | undefined;
     if (status === 'ready_for_production') {
@@ -158,7 +220,6 @@ export default function ProjectTasksPage() {
       await adminProjectService.tasks.update(projectId, t.id, {
         status: status as never,
         ...(comment ? { comment } : {}),
-        ...(qaAssignedTo ? { qa_assigned_to: qaAssignedTo } : {}),
         ...(productionAssignedTo ? { production_assigned_to: productionAssignedTo } : {}),
       });
       load();
@@ -176,6 +237,7 @@ export default function ProjectTasksPage() {
 
   return (
     <DashboardLayout title="Project Tasks">
+      <LoadingOverlay show={saving} message={editingId ? 'Updating Task…' : 'Creating Task…'} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <button onClick={() => router.push(`/admin/projects/${id}`)} style={{
           background: '#f1f5f9', border: 'none', borderRadius: 8,
@@ -183,14 +245,21 @@ export default function ProjectTasksPage() {
         }}>← Back</button>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1e293b', margin: 0, flex: 1 }}>Tasks</h2>
         {!projectClosed && (
-          <button onClick={() => (showForm ? cancelForm() : setShowForm(true))} style={{
-            padding: '9px 18px', background: '#2563eb', color: '#fff',
-            border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-          }}>{showForm ? 'Cancel' : '+ Add Task'}</button>
+          <button
+            onClick={() => (showForm ? cancelForm() : setShowForm(true))}
+            disabled={projectDraft}
+            title={projectDraft ? DRAFT_HINT : undefined}
+            style={{
+              padding: '9px 18px', background: projectDraft ? '#cbd5e1' : '#2563eb', color: '#fff',
+              border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
+              cursor: projectDraft ? 'not-allowed' : 'pointer',
+            }}>{showForm ? 'Cancel' : '+ Add Task'}</button>
         )}
       </div>
 
-      <ProjectTabs projectId={projectId} active="tasks" />
+      <ProjectTabs projectId={projectId} active="tasks" isDraft={projectDraft} />
+
+      {projectDraft && <DraftNotice style={{ marginBottom: 16 }} />}
 
       {showForm && (
         <form onSubmit={submit} style={card}>
@@ -205,7 +274,7 @@ export default function ProjectTasksPage() {
                 <option value="">Unassigned</option>
                 {users.map(u => (
                   <option key={u.id} value={u.id}>
-                    {u.name} — {ROLE_LABELS[u.role_type] ?? u.role_type}{hasProjectManagementAccess(u) ? '' : ' — no Project Management access'}
+                    {u.name} ({roleDisplayLabel(u)}){hasProjectManagementAccess(u) ? '' : ' — no Project Management access'}
                   </option>
                 ))}
               </select>
@@ -265,7 +334,7 @@ export default function ProjectTasksPage() {
             <label style={lbl}>Notes</label>
             <textarea value={form.notes} onChange={e => setF('notes', e.target.value)} rows={2} style={{ ...inp, resize: 'vertical' }} placeholder="Optional" />
           </div>
-          {!editingId && (
+          {!editingId ? (
             <div style={{ marginBottom: 18 }}>
               <label style={lbl}>File Attachments</label>
               <label style={{
@@ -298,11 +367,57 @@ export default function ProjectTasksPage() {
                 </div>
               )}
             </div>
+          ) : (
+            // Editing an existing task — it already has an id, so new files
+            // upload immediately (via uploadExistingAttachments) instead of
+            // being queued locally like the create flow above.
+            <div style={{ marginBottom: 18 }}>
+              <label style={lbl}>File Attachments</label>
+              <label style={{
+                display: 'inline-block', padding: '8px 16px', borderRadius: 8,
+                border: '1.5px dashed #cbd5e1', background: uploadingExisting ? '#f1f5f9' : '#f8fafc', color: '#475569',
+                fontSize: 12, fontWeight: 500, cursor: uploadingExisting ? 'not-allowed' : 'pointer', marginBottom: 10,
+              }}>
+                {uploadingExisting ? 'Uploading…' : '+ Add Files'}
+                <input
+                  type="file" multiple disabled={uploadingExisting} style={{ display: 'none' }}
+                  accept={ALLOWED_ATTACHMENT_TYPES.map(t => `.${t}`).join(',')}
+                  onChange={e => { uploadExistingAttachments(e.target.files); e.target.value = ''; }}
+                />
+              </label>
+              {existingAttLoading ? (
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>Loading…</div>
+              ) : existingAttachments.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>No attachments uploaded yet.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {existingAttachments.map(a => (
+                    <div key={a.id} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '6px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8,
+                    }}>
+                      <div style={{ fontSize: 12, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 10 }}>
+                        {a.original_name} <span style={{ color: '#94a3b8' }}>({fmtFileSize(a.file_size)})</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <button type="button" onClick={() => downloadExistingAttachment(a)} style={{
+                          padding: '3px 10px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                          background: '#2563eb', color: '#fff', border: 'none',
+                        }}>Download</button>
+                        <button type="button" onClick={() => deleteExistingAttachment(a)} style={{
+                          background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                        }}>Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
-          <button type="submit" disabled={saving} style={{
+          <SubmitButton loading={saving} loadingText={editingId ? 'Updating Task…' : 'Creating Task…'} style={{
             padding: '9px 20px', background: saving ? '#93c5fd' : '#2563eb', color: '#fff',
-            border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
-          }}>{saving ? 'Saving…' : editingId ? 'Update Task' : 'Add Task'}</button>
+            border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
+          }}>{editingId ? 'Update Task' : 'Add Task'}</SubmitButton>
         </form>
       )}
 
@@ -330,11 +445,7 @@ export default function ProjectTasksPage() {
                     </button>
                     <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
                       {t.task_type && t.task_type !== 'general' && <Badge label={TASK_TYPE_LABEL[t.task_type] ?? t.task_type} />}
-                      {t.production_queue && (
-                        <Link href={`/admin/projects/production?project_id=${t.project_id}`} style={{ textDecoration: 'none' }}>
-                          <Badge label={`🏭 ${PRODUCTION_LABEL[t.production_queue.status] ?? t.production_queue.status}`} sc={PRODUCTION_SC[t.production_queue.status]} />
-                        </Link>
-                      )}
+                      {!!t.attachments_count && <Badge label={`📎 ${t.attachments_count}`} />}
                     </div>
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{asRelation(t.assigned_to)?.name ?? '—'}</td>

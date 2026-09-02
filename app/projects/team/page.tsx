@@ -5,13 +5,20 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { userProjectService, CompanyUserOption } from '@/lib/services/userProjectService';
 import { Project, TeamMember, TeamRole } from '@/lib/services/adminProjectService';
-import { can, getUserModulePermissions } from '@/lib/auth';
+import { can, getUserModulePermissions, getAuthUser } from '@/lib/auth';
+import { User } from '@/types';
 import { MODULE_CATALOG } from '@/lib/moduleCatalog';
 import { inp, lbl, card, TEAM_ROLE_LABEL } from '@/components/admin/projects/shared';
 import { ROLE_LABELS } from '@/lib/roleUtils';
 import toast from 'react-hot-toast';
 
 const PROJECT_MODULE = MODULE_CATALOG.find(m => m.key === 'project_management');
+
+// Mirrors frontend/app/admin/projects/[id]/team/page.tsx's TEAM_ELIGIBLE_ROLES
+// — every role that can meaningfully sit on a project team, except Seller
+// (handled separately below, since adding one is gated further by who's
+// doing the adding) and Client.
+const TEAM_ELIGIBLE_ROLES = ['project_manager', 'production', 'developer', 'designer', 'qa', 'team_member'];
 
 // A team member's actual job (role_type, e.g. "Developer") is more useful
 // here than the generic 4-value project role_in_project — fall back to the
@@ -21,6 +28,7 @@ const memberRoleLabel = (m: TeamMember): string =>
 
 function UserTeamPageInner() {
   useAdminGuard();
+  const me = getAuthUser() as User | null;
   const router = useRouter();
   const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -70,7 +78,9 @@ function UserTeamPageInner() {
   const load = async () => {
     setLoading(true);
     try {
-      setProjects(await userProjectService.list());
+      // Only Active projects belong in this picker — Draft (and every other
+      // non-active status) isn't staffable work yet.
+      setProjects(await userProjectService.list({ status: 'active' }));
     } catch { toast.error('Failed to load team overview'); }
     finally { setLoading(false); }
   };
@@ -81,12 +91,82 @@ function UserTeamPageInner() {
       return;
     }
     load();
-    if (canAssign) userProjectService.team.companyUsers().then(setUsers).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selected = projects.find(p => String(p.id) === projectId) ?? null;
-  const members = selected?.team_members ?? [];
-  const selectedCandidate = users.find(u => String(u.id) === userId) ?? null;
+  // Refetch whenever the selected project changes — scoped to THAT
+  // project's own company (see companyUsers()'s projectId param), not
+  // whichever company happens to be generically active right now.
+  useEffect(() => {
+    if (!canAssign || !projectId) { setUsers([]); return; }
+    userProjectService.team.companyUsers(Number(projectId)).then(setUsers).catch(() => setUsers([]));
+  }, [canAssign, projectId]);
+
+  // A Seller adding team members may only ever hand the project to a Project
+  // Manager or bring in another Seller — never a Production/Developer/
+  // Designer/QA/Team Member directly, that's PM/Admin territory. Mirrors the
+  // server-side gate in Api\User\ProjectController::assignTeam(). Declared
+  // early (also used by the project picker filter below).
+  const isSellerActor = me?.role_type === 'seller';
+
+  // A Seller must only see, in this Team Resources project picker, projects
+  // they're CURRENTLY actually part of (as PM or team member) — not every
+  // project they've ever originated/created. Once a Seller hands a project
+  // off to a real Project Manager and is removed from its team, it moves
+  // entirely to that PM's side and should stop cluttering the Seller's own
+  // list here (the backend's visibleProjects() still returns it broadly for
+  // other purposes, like Sales handoff history — this narrows just this
+  // page's picker for a Seller specifically).
+  const pickerProjects = isSellerActor && me
+    ? projects.filter(p => p.project_manager_id === me.id || (p.team_members ?? []).some(m => m.user_id === me.id))
+    : projects;
+
+  const selected = pickerProjects.find(p => String(p.id) === projectId) ?? null;
+  const rawMembers = selected?.team_members ?? [];
+  // A project's Seller has no project_team_members row at all unless one was
+  // separately, manually added — assign()/reassign() (ProjectSellerAssignmentService::
+  // assign()) only ever updates projects.seller_id, never a team row — so
+  // without this the Seller is invisible here and addableUsers below would
+  // wrongly let a second Seller be added. Synthesized (id: -1), never backed
+  // by a real row, so it never gets a working Remove button below.
+  const sellerAlreadyOnTeam = !!selected?.seller_id && rawMembers.some(m => m.user_id === selected.seller_id);
+  const members = selected?.seller && !sellerAlreadyOnTeam
+    ? [{ id: -1, project_id: selected.id, user_id: selected.seller.id, role_in_project: 'team_member' as TeamRole, assigned_by: null, user: selected.seller }, ...rawMembers]
+    : rawMembers;
+  // companyUsers() is shared with the Support Ticket staff-assignment picker
+  // (frontend/app/support/[id]/page.tsx), which genuinely needs every role —
+  // so the eligible-roles restriction is applied here, client-side, rather
+  // than in that shared endpoint. role_type='client' (client-portal login
+  // accounts) is always excluded — never selectable from this list.
+  //
+  // A Seller is addable ONLY when the caller is literally this project's own
+  // Project Manager — mirrors the server-side gate in
+  // Api\User\ProjectController::assignTeam() exactly (Company Admin or the
+  // literal PM only; every other caller, including a Seller who isn't this
+  // project's PM, would just get a 403 back).
+  const isLiteralPm = !!selected && !!me && selected.project_manager_id === me.id;
+  // A Lead Manager may only ever hand the project to a Project Manager —
+  // never a Seller either (unlike the Seller-actor rule above), and never
+  // Production/Developer/Designer/QA/Team Member. Staffing the rest of the
+  // team is PM/Admin territory. Mirrors the server-side gate in
+  // Api\User\ProjectController::assignTeam().
+  const isLeadManagerActor = me?.role_type === 'lead_manager';
+  const eligibleRoles = (isSellerActor || isLeadManagerActor) ? ['project_manager'] : TEAM_ELIGIBLE_ROLES;
+  // A project can only ever have ONE Project Manager and ONE Seller on its
+  // team — once either role is already represented among the current
+  // members, that role drops out of the picker entirely so a second one
+  // can't be added alongside them (mirrors the server-side gate in
+  // Api\User\ProjectController::assignTeam()).
+  const memberUserIds = new Set(members.map(m => m.user_id));
+  const hasPmMember = members.some(m => m.user?.role_type === 'project_manager');
+  const hasSellerMember = members.some(m => m.user?.role_type === 'seller');
+  const addableUsers = users.filter(u => {
+    if (memberUserIds.has(u.id)) return false;
+    if (u.role_type === 'project_manager' && hasPmMember) return false;
+    if (u.role_type === 'seller' && hasSellerMember) return false;
+    if (isLeadManagerActor) return eligibleRoles.includes(u.role_type);
+    return eligibleRoles.includes(u.role_type) || (isLiteralPm && u.role_type === 'seller');
+  });
+  const selectedCandidate = addableUsers.find(u => String(u.id) === userId) ?? null;
 
   const addMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,6 +184,7 @@ function UserTeamPageInner() {
 
   const removeMember = async (memberId: number) => {
     if (!projectId) return;
+    if (!confirm('Remove this team member from the project?')) return;
     try {
       await userProjectService.team.remove(Number(projectId), memberId);
       toast.success('Team member removed');
@@ -115,15 +196,27 @@ function UserTeamPageInner() {
 
   return (
     <DashboardLayout title="Team / Resources">
-      <div style={{ maxWidth: 1000 }}>
+      <div style={{ width: '100%' }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 20px' }}>Team / Resources</h1>
 
         <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #f1f5f9', padding: '16px 20px', marginBottom: 16 }}>
           <label style={lbl}>Select Project</label>
-          <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...inp, maxWidth: 320 }}>
+          <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...inp, maxWidth: 480 }}>
             <option value="">Choose a project…</option>
-            {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+            {/* Company name inline — a multi-company staff member can other-
+                wise have two identically-named projects here with no way to
+                tell which company each belongs to. */}
+            {pickerProjects.map(p => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}{p.company?.name ? ` — ${p.company.name}` : ''}
+              </option>
+            ))}
           </select>
+          {selected && (
+            <div style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
+              Company: <strong style={{ color: '#0f172a' }}>{selected.company?.name ?? '—'}</strong>
+            </div>
+          )}
         </div>
 
         {projectId && canAssign && (
@@ -133,7 +226,7 @@ function UserTeamPageInner() {
                 <label style={lbl}>Add Team Member</label>
                 <select value={userId} onChange={e => setUserId(e.target.value)} style={inp}>
                   <option value="">Select user…</option>
-                  {users.map(u => (
+                  {addableUsers.map(u => (
                     <option key={u.id} value={u.id}>
                       {u.name} ({u.email})
                     </option>
@@ -222,7 +315,7 @@ function UserTeamPageInner() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc' }}>
-                  {['Member', canAssign ? 'Actions' : ''].map(h => (
+                  {['Member', 'Role', canAssign ? 'Actions' : ''].map(h => (
                     <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>{h}</th>
                   ))}
                 </tr>
@@ -232,10 +325,14 @@ function UserTeamPageInner() {
                   <tr key={m.id} style={{ borderBottom: '1px solid #f8fafc' }}>
                     <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#0f172a' }}>
                       {m.user?.name ?? '—'}
-                      <span style={{ fontWeight: 400, color: '#94a3b8' }}> ({memberRoleLabel(m)})</span>
+                    </td>
+                    <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b' }}>
+                      {memberRoleLabel(m)}
                     </td>
                     <td style={{ padding: '12px 16px' }}>
-                      {canAssign && (
+                      {m.id === -1 ? (
+                        <span style={{ fontSize: 11, color: '#94a3b8' }}>Reassign via Seller field</span>
+                      ) : canAssign && (
                         <button onClick={() => removeMember(m.id)} style={{ padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer', background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6 }}>Remove</button>
                       )}
                     </td>

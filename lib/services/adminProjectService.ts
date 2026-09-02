@@ -1,18 +1,46 @@
 import api from '@/lib/axios';
+import type { InvoicePayment } from '@/types';
 
-export type ProjectStatus = 'planning' | 'active' | 'on_hold' | 'blocked' | 'completed' | 'cancelled' | 'closed';
+// 'unpaid' and 'draft' are only ever reached automatically — 'unpaid' the
+// moment an invoice is raised in "New Project" mode, promoted to 'draft' once
+// a qualifying payment lands (App\Services\PaymentProjectStartService) — and
+// 'draft' is only ever left via the activate endpoint. Both are deliberately
+// absent from the create/update status whitelists.
+export type ProjectStatus = 'unpaid' | 'draft' | 'planning' | 'active' | 'on_hold' | 'blocked' | 'completed' | 'approved_locked' | 'cancelled' | 'closed';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskStatus =
-  | 'todo' | 'in_progress' | 'blocked' | 'ready_for_qa' | 'in_qa'
-  | 'qa_failed' | 'qa_passed' | 'ready_for_production' | 'in_production'
+  | 'todo' | 'in_progress' | 'blocked' | 'ready_for_production' | 'in_production'
   | 'review' | 'completed' | 'cancelled';
 export type TeamRole = 'project_manager' | 'production_user' | 'team_member' | 'reviewer';
 export type TimesheetStatus = 'pending' | 'approved' | 'rejected';
-export type ProductionQueueStatus =
-  | 'queued' | 'in_progress' | 'blocked' | 'submitted' | 'revision_requested'
-  | 'approved' | 'delivered' | 'completed' | 'rejected' | 'cancelled';
 export type DeliverableStatus = 'draft' | 'delivered' | 'approved' | 'revision_requested' | 'submitted' | 'rejected';
 export type RevisionStatus = 'open' | 'in_progress' | 'resolved';
+
+// One row per time a project's final package was delivered — see the
+// Delivery tab, distinct from the per-task Deliverable/DeliverableStatus above.
+export interface DeliverySubmission {
+  id: number;
+  file_name: string;
+  file_type?: string | null;
+  file_size?: number | null;
+  delivered_at: string;
+  delivered_by?: string | null;
+}
+
+export interface ProjectInvoice {
+  id: number;
+  project_id?: number | null;
+  invoice_number: string;
+  total_amount: number;
+  paid_amount: number;
+  status: string;
+  due_date: string | null;
+  currency: string;
+  // Billing tab's "Partial payment history" — every payment recorded
+  // against this invoice, same rows the invoice detail page's own Payments
+  // list shows.
+  payments?: InvoicePayment[];
+}
 
 export interface Project {
   id: number;
@@ -27,6 +55,8 @@ export interface Project {
   // marker ('sales_handoff' today), null for anything else.
   seller_id?: number | { id: number; name: string } | null;
   source?: string | null;
+  seller?: { id: number; name: string; email?: string; role_type?: string; custom_role_label?: string | null } | null;
+  seller_assigned_at?: string | null;
   // Eloquent serializes the `createdBy` relation to this same snake_case
   // key as the raw column — becomes an object once eager-loaded, else the
   // raw scalar id. created_by only FKs to `users` — for Admin-created
@@ -46,6 +76,23 @@ export interface Project {
   close_reason?: string | null;
   reopened_at?: string | null;
   reopen_reason?: string | null;
+  // Project Approval Lock — set by Api\Admin\ProjectController::
+  // approveCompletion() (status -> 'approved_locked') and requestReopen()/
+  // reopen() (see ProjectLifecycleActions.tsx's Approve & Lock / Request
+  // Reopen / Reopen Project buttons).
+  completion_approved_at?: string | null;
+  completion_approved_by_admin?: { id: number; name: string } | null;
+  reopen_requested_at?: string | null;
+  reopen_requested_by?: { id: number; name: string } | null;
+  reopen_request_reason?: string | null;
+  delivery_status?: 'pending_admin_review' | 'approved' | 'delivered_to_client' | null;
+  delivery_file_name?: string | null;
+  delivery_file_type?: string | null;
+  delivery_file_size?: number | null;
+  delivery_submitted_at?: string | null;
+  delivery_approved_at?: string | null;
+  delivery_submitted_by?: { id: number; name: string } | null;
+  delivery_approved_by_admin?: { id: number; name: string } | null;
   progress?: number;
   is_overdue?: boolean;
   // The logged-in staff member's own relationship to this project (Project
@@ -53,29 +100,28 @@ export interface Project {
   // Api\User\ProjectController::index(), not the Admin-side listing.
   my_role?: string;
   company?: { id: number; name: string } | null;
-  client?: { id: number; name: string; email?: string } | null;
-  invoice?: { id: number; invoice_number: string; total_amount: number; status: string } | null;
+  client?: { id: number; name: string; email?: string; portal_access?: boolean; user_id?: number | null } | null;
+  // Guest project fallback (no client_id at all) — the invoice's own
+  // customer_name, or failing that the originating Lead's name, since a
+  // guest project has no `client` relation to read a name from.
+  lead?: { id: number; name: string } | null;
+  invoice?: { id: number; invoice_number: string; total_amount: number; status: string; customer_email?: string | null; customer_name?: string | null } | null;
+  // Every invoice billed under this project (deposit/milestone/final/change
+  // request) — distinct from the single `invoice` above (this project's
+  // originating invoice). Only present when the viewer holds
+  // canManageProjectInvoices (Company Admin always sees it).
+  invoices?: ProjectInvoice[];
+  billing_summary?: { total_invoiced: number; total_paid: number; outstanding: number };
   // Relation keys — Eloquent snake_cases relation method names when
   // serializing (projectManager() -> project_manager, teamMembers() ->
   // team_members). The API never returns the camelCase form.
-  project_manager?: { id: number; name: string; role_type?: string } | null;
+  project_manager?: { id: number; name: string; role_type?: string; custom_role_label?: string | null } | null;
   tasks?: Task[];
   team_members?: TeamMember[];
   folders?: { id: number; name: string; folder_path: string }[];
   deliverables?: Deliverable[];
   created_at: string;
   updated_at: string;
-}
-
-export interface ProductionQueueItem {
-  id: number;
-  task_id: number;
-  assigned_to: number | { id: number; name: string } | null;
-  status: ProductionQueueStatus;
-  priority_order: number;
-  started_at: string | null;
-  submitted_at: string | null;
-  task?: { id: number; title: string; task_number?: string | null; project_id: number; due_date: string | null; priority?: Priority; progress?: number; project?: { id: number; name: string; company_id?: number }; deliverables?: Deliverable[] };
 }
 
 export interface Deliverable {
@@ -152,12 +198,9 @@ export interface Task {
   // it), raw scalar id otherwise — Eloquent serializes assignedTo()/
   // assignedBy() to these exact snake_case keys, same as the raw columns.
   assigned_to: number | { id: number; name: string; email?: string } | null;
-  // The QA user this task was handed off to when it entered "Ready for QA" —
-  // required by the backend at that transition (see TaskStatusService).
-  qa_assigned_to?: number | { id: number; name: string; email?: string } | null;
   // Optional Production/Deployment handoff when the task enters "Ready for
-  // Production" — unlike qa_assigned_to, null is a valid "not assigned to
-  // anyone specific" state, not a missing-field error.
+  // Production" — null is a valid "not assigned to anyone specific" state,
+  // not a missing-field error.
   production_assigned_to?: number | { id: number; name: string; email?: string } | null;
   assigned_by: number | { id: number; name: string } | null;
   created_by: number | null;
@@ -173,9 +216,9 @@ export interface Task {
   start_date: string | null;
   due_date: string | null;
   completed_at: string | null;
-  project?: { id: number; name: string; company_id: number };
-  production_queue?: ProductionQueueItem | null;
+  project?: { id: number; name: string; company_id: number; team_members?: TeamMember[] };
   deliverables?: Deliverable[];
+  attachments_count?: number;
   created_at: string;
 }
 
@@ -195,7 +238,7 @@ export interface TeamMember {
   user_id: number;
   role_in_project: TeamRole;
   assigned_by: number | null;
-  user?: { id: number; name: string; role_type?: string };
+  user?: { id: number; name: string; role_type?: string; custom_role_label?: string | null };
 }
 
 export interface Timesheet {
@@ -256,18 +299,40 @@ export interface ChatMessage {
   thread_id: number;
   content: string | null;
   message_type: 'text' | 'file' | 'image' | 'system';
-  // 'internal' = team-only (budget/costing/deliverable talk); 'client' = also
-  // visible to a Seller who only has "linked project chat" access.
+  // 'internal' = team-only; 'client' = also shown to the project's Client in
+  // their portal (Api\Client\ProjectChatController), if one is a participant
+  // of this thread (see ProjectChatService::addClient()). Only meaningful on
+  // the project-wise messenger (Api\*\ProjectMessengerController), where it's
+  // computed server-side, not chosen by the sender: a plain, untagged
+  // message from Company Admin or the project's own Seller is 'client';
+  // @mentioning someone (or being sent by anyone else) makes it 'internal'.
+  // Always 'client' on messages the Client themselves sends.
   visibility: 'internal' | 'client';
   attachment_path: string | null;
   attachment_name: string | null;
   sender_id: number | null;
   sender_admin_id: number | null;
-  sender?: { id: number; name: string } | null;
+  sender?: { id: number; name: string; role_type?: string | null } | null;
   sender_admin?: { id: number; name: string } | null;
+  // Set only on a message sent anonymously from the public, no-login invoice
+  // payment page (Api\PublicInvoiceChatController) — sender_id and
+  // sender_admin_id are both null for those. Sales Chat only.
+  guest_sender_name?: string | null;
   // Only populated by the project-wise messenger (Api\*\ProjectMessengerController)
   // — General Chat and the older single-thread ProjectChatController never set this.
   mentions?: number[] | null;
+  // Project-wise messenger only (Api\*\ProjectMessengerController) — staff
+  // participants in this list never receive the message at all, same
+  // convention as Api\User\ClientChatController.
+  hidden_from_user_ids?: number[] | null;
+  // When true, content/attachment have already been wiped server-side —
+  // render the "This message was deleted" placeholder instead.
+  is_deleted?: boolean;
+  // Client-chat only (Api\Admin|User\ProjectClientChatController's
+  // toggleHide()) — a staff-only view suppression, shared across every staff
+  // viewer, never sent to or seen by the client. Render a "hidden" placeholder
+  // in its place on the staff-facing pages only.
+  hidden_for_staff?: boolean;
   sent_at: string;
   edited_at?: string | null;
 }
@@ -276,6 +341,9 @@ export interface ActivityItem {
   type: 'log' | 'comment';
   action?: string;
   entity_type?: string;
+  description?: string;
+  causer_name?: string | null;
+  meta?: Record<string, unknown> | null;
   body?: string;
   task_id?: number | null;
   author?: string;
@@ -297,7 +365,6 @@ export interface CompletionStatus {
   ready: boolean;
   blockers: {
     pending_tasks: CompletionBlockerItem[];
-    pending_production: CompletionBlockerItem[];
     pending_deliverables: CompletionBlockerItem[];
     pending_revisions: CompletionBlockerItem[];
     overdue_tasks: CompletionBlockerItem[];
@@ -327,7 +394,8 @@ export interface ProjectPayload {
   status?: ProjectStatus;
   priority?: Priority;
   budget?: number | null;
-  start_date?: string | null;
+  // No start_date — a project's Start Date is fixed at creation time
+  // (see Api\Admin\ProjectController::store()) and is never editable.
   deadline?: string | null;
 }
 
@@ -338,13 +406,9 @@ export interface TaskPayload {
   description?: string | null;
   notes?: string | null;
   status?: TaskStatus;
-  // Required by the backend when status is 'blocked' or 'qa_failed' (see
-  // App\Services\TaskStatusService) — the reason/QA feedback, logged to the
-  // task's activity history.
+  // Optional context logged to the task's activity history alongside a
+  // status change (e.g. a Blocked reason) — never required.
   comment?: string;
-  // Required by the backend when status is being set to 'ready_for_qa' —
-  // which QA user this task is handed off to.
-  qa_assigned_to?: number | null;
   // Optional — Production/Deployment handoff when status is being set to
   // 'ready_for_production'.
   production_assigned_to?: number | null;
@@ -371,6 +435,8 @@ export interface ProjectUsersByRole {
   qa_users: ProjectUserOption[];
   team_members: ProjectUserOption[];
   all_assignable_users: ProjectUserOption[];
+  // Active Sellers of this company only — backs the "Assign Seller" dropdown.
+  sellers: ProjectUserOption[];
 }
 
 export const adminProjectService = {
@@ -399,6 +465,13 @@ export const adminProjectService = {
 
   update: async (id: number, payload: Partial<ProjectPayload>): Promise<Project> => {
     const res = await api.put(`/admin/projects/${id}`, payload);
+    return res.data.data;
+  },
+
+  // Assign or switch this project's Seller. reason is optional and only
+  // meaningful when switching from an already-assigned Seller.
+  assignSeller: async (id: number, sellerId: number, reason?: string): Promise<Project> => {
+    const res = await api.patch(`/admin/projects/${id}/seller`, { seller_id: sellerId, reason: reason || undefined });
     return res.data.data;
   },
 
@@ -435,9 +508,83 @@ export const adminProjectService = {
     return res.data.data;
   },
 
+  // Activate a payment-started draft project (status draft → active).
+  activate: async (id: number): Promise<Project> => {
+    const res = await api.post(`/admin/projects/${id}/activate`);
+    return res.data.data;
+  },
+
   complete: async (id: number): Promise<Project> => {
     const res = await api.post(`/admin/projects/${id}/complete`);
     return res.data.data;
+  },
+
+  // Project Approval Lock — moves a 'completed' project to
+  // 'approved_locked'. From here PM edits (details/tasks/timesheets/
+  // deliverables/attachments) are blocked; only reopen() below (or a PM's
+  // requestReopen(), see userProjectService) can lift it.
+  approveCompletion: async (id: number): Promise<Project> => {
+    const res = await api.post(`/admin/projects/${id}/approve-completion`);
+    return res.data.data;
+  },
+
+  // Step 1 of 2 — internal sign-off on the PM's submission. Moves
+  // delivery_status from 'pending_admin_review' to 'approved'; the client
+  // hears nothing yet. See deliverToClient() for step 2.
+  approveDelivery: async (id: number): Promise<Project> => {
+    const res = await api.post(`/admin/projects/${id}/approve-delivery`);
+    return res.data.data;
+  },
+
+  // Step 2 of 2 — actually sends the approved package to the client. email
+  // is required when the project has no client_id (a guest/payment-link
+  // project) — that's the only address it can deliver to.
+  deliverToClient: async (id: number, email?: string): Promise<Project> => {
+    const res = await api.post(`/admin/projects/${id}/deliver-to-client`, email ? { email } : {});
+    return res.data.data;
+  },
+
+  // Company Admin's own upload — no Project Manager to submit-for-review
+  // first, goes straight to delivered_to_client.
+  uploadAndDeliver: async (id: number, file: File, email?: string): Promise<Project> => {
+    const form = new FormData();
+    form.append('file', file);
+    if (email) form.append('email', email);
+    const res = await api.post(`/admin/projects/${id}/upload-and-deliver`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data.data;
+  },
+
+  downloadDelivery: async (id: number, fileName: string): Promise<void> => {
+    const res = await api.get(`/admin/projects/${id}/delivery/download`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  // Every time this project's final package was delivered — see the
+  // Delivery tab (frontend/app/admin/projects/[id]/delivery/page.tsx).
+  deliveryHistory: async (id: number): Promise<DeliverySubmission[]> => {
+    const res = await api.get(`/admin/projects/${id}/deliveries`);
+    return res.data.data;
+  },
+
+  downloadDeliverySubmission: async (id: number, deliveryId: number, fileName: string): Promise<void> => {
+    const res = await api.get(`/admin/projects/${id}/deliveries/${deliveryId}/download`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   },
 
   close: async (id: number, payload?: { force?: boolean; reason?: string; confirm_unpaid_invoice?: boolean }): Promise<Project> => {
@@ -448,6 +595,26 @@ export const adminProjectService = {
   reopen: async (id: number, reason: string): Promise<Project> => {
     const res = await api.post(`/admin/projects/${id}/reopen`, { reason });
     return res.data.data;
+  },
+
+  createInvoice: async (id: number, payload: {
+    due_date?: string | null; currency?: string; tax_rate?: number; discount_amount?: number;
+    notes?: string | null; items: { description: string; quantity: number; unit_price: number }[];
+    // Required only when the project has no linked client — the invoice is
+    // always emailed immediately once created (see
+    // Api\Admin\ProjectController::createInvoice()).
+    recipient_email?: string;
+  }): Promise<{ id: number; invoice_number: string; payment_url?: string }> => {
+    const res = await api.post(`/admin/projects/${id}/invoices`, payload);
+    return res.data.data;
+  },
+
+  linkInvoice: async (id: number, invoiceId: number): Promise<void> => {
+    await api.post(`/admin/projects/${id}/invoices/link`, { invoice_id: invoiceId });
+  },
+
+  unlinkInvoice: async (id: number, invoiceId: number): Promise<void> => {
+    await api.delete(`/admin/projects/${id}/invoices/${invoiceId}`);
   },
 
   comments: {
@@ -600,26 +767,6 @@ export const adminProjectService = {
     },
   },
 
-  // Production — a section inside Project Management, gated on the `projects`
-  // module key only (no separate `production` purchase/permission gate).
-  production: {
-    dashboard: async (): Promise<{
-      assigned: number; in_progress: number; blocked: number; submitted: number;
-      revision_requested: number; approved: number; delivered: number; completed: number;
-      cancelled: number; overdue: number;
-    }> => (await api.get('/admin/production/dashboard')).data.data,
-
-    queue: async (params?: Record<string, string>): Promise<ProductionQueueItem[]> => {
-      const res = await api.get('/admin/production/queue', { params });
-      return res.data.data;
-    },
-
-    updateItem: async (id: number, payload: { status?: ProductionQueueStatus; assigned_to?: number | null; priority_order?: number }): Promise<ProductionQueueItem> => {
-      const res = await api.patch(`/admin/production/queue/${id}`, payload);
-      return res.data.data;
-    },
-  },
-
   deliverables: {
     list: async (projectId: number): Promise<Deliverable[]> => {
       const res = await api.get(`/admin/projects/${projectId}/deliverables`);
@@ -664,10 +811,9 @@ export const adminProjectService = {
       return res.data.data;
     },
 
-    upload: async (projectId: number, file: File, isVisibleToClient: boolean = false): Promise<ProjectAttachment> => {
+    upload: async (projectId: number, file: File): Promise<ProjectAttachment> => {
       const form = new FormData();
       form.append('file', file);
-      form.append('is_visible_to_client', isVisibleToClient ? '1' : '0');
       const res = await api.post(`/admin/projects/${projectId}/attachments`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });

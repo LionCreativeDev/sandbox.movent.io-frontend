@@ -8,8 +8,12 @@ export interface ClientPayload {
   phone?: string | null;
   company_name?: string | null;
   address?: string | null;
+  country?: string | null;
   notes?: string | null;
   status?: 'active' | 'inactive' | 'blocked';
+  enable_portal?: boolean;
+  portal_email?: string | null;
+  portal_password?: string | null;
 }
 
 export interface ClientCompany { id: number; name: string; currency: string; }
@@ -29,6 +33,7 @@ export const adminClientService = {
     client: Client;
     permissions: Record<string, { label: string; is_enabled: boolean }>;
     seat: unknown;
+    has_portal_module: boolean;
   }> => {
     const res = await api.get(`/admin/clients/${id}`);
     return res.data.data;
@@ -42,6 +47,10 @@ export const adminClientService = {
   update: async (id: number, payload: Partial<ClientPayload>): Promise<Client> => {
     const res = await api.put(`/admin/clients/${id}`, payload);
     return res.data.data;
+  },
+
+  remove: async (id: number): Promise<void> => {
+    await api.delete(`/admin/clients/${id}`);
   },
 
   enablePortal: async (id: number, email: string, password: string): Promise<void> => {

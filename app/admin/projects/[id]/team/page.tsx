@@ -8,6 +8,7 @@ import { adminProjectService, TeamMember, TeamRole } from '@/lib/services/adminP
 import { userService } from '@/lib/services/userService';
 import ProjectTabs from '@/components/admin/projects/ProjectTabs';
 import { inp, lbl, card, TEAM_ROLE_LABEL } from '@/components/admin/projects/shared';
+import { handleNotFound } from '@/lib/notFound';
 import { ROLE_LABELS } from '@/lib/roleUtils';
 import { User } from '@/types';
 import Link from 'next/link';
@@ -47,6 +48,17 @@ export default function ProjectTeamPage() {
   const role: TeamRole = 'team_member';
   const [saving, setSaving]   = useState(false);
   const [projectClosed, setProjectClosed] = useState(false);
+  // Reached only by a typed URL while the project is a draft — the tab
+  // itself is disabled. Kept so the tab strip renders in the same locked
+  // state here as everywhere else.
+  const [projectDraft, setProjectDraft] = useState(false);
+  // The project's linked Seller (project.seller_id) — deliberately NOT part
+  // of `members`/TEAM_ELIGIBLE_ROLES below. A Seller is never a real
+  // project_team_members row (see Api\User\ProjectMessengerController/
+  // ProjectCommentController's Seller-isolation rules, which assume this);
+  // it's assigned/switched via its own control on the project detail page.
+  // Shown here read-only just so it's visible from the Team tab too.
+  const [seller, setSeller] = useState<{ id: number; name: string; email?: string } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -54,8 +66,12 @@ export default function ProjectTeamPage() {
       const p = await adminProjectService.getOne(projectId);
       setMembers(p.team_members ?? []);
       setProjectClosed(p.status === 'closed');
+      setProjectDraft(p.status === 'draft');
       setProjectCompanyId(p.company_id);
-    } catch { toast.error('Failed to load team'); }
+      setSeller(p.seller ?? null);
+    } catch (err) {
+      if (!handleNotFound(err, router)) toast.error('Failed to load team');
+    }
     finally { setLoading(false); }
   };
 
@@ -79,7 +95,9 @@ export default function ProjectTeamPage() {
       toast.success('Team member added');
       setUserId('');
       load();
-    } catch { toast.error('Failed to add team member'); }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to add team member');
+    }
     finally { setSaving(false); }
   };
 
@@ -89,7 +107,9 @@ export default function ProjectTeamPage() {
       await adminProjectService.removeTeamMember(projectId, memberId);
       toast.success('Team member removed');
       load();
-    } catch { toast.error('Failed to remove team member'); }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to remove team member');
+    }
   };
 
   return (
@@ -102,7 +122,18 @@ export default function ProjectTeamPage() {
         <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1e293b', margin: 0 }}>Team</h2>
       </div>
 
-      <ProjectTabs projectId={projectId} active="team" />
+      <ProjectTabs projectId={projectId} active="team" isDraft={projectDraft} />
+
+      <div style={{ ...card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <label style={lbl}>Seller</label>
+          <div style={{ fontSize: 13, color: seller ? '#1e293b' : '#94a3b8' }}>{seller?.name ?? 'Unassigned'}</div>
+        </div>
+        <Link href={`/admin/projects/${id}`} style={{
+          padding: '7px 14px', fontSize: 12, fontWeight: 600, borderRadius: 7,
+          border: '1px solid #bfdbfe', background: '#fff', color: '#2563eb', textDecoration: 'none',
+        }}>{seller ? 'Switch on Project Overview →' : 'Assign on Project Overview →'}</Link>
+      </div>
 
       {!projectClosed && (
       <form onSubmit={addMember} style={card}>

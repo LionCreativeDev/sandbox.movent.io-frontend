@@ -24,13 +24,16 @@ export const clientService = {
     const res = await clientApi.get(`/client/projects/${id}`);
     return res.data.data;
   },
-  approveDeliverable: async (id: number) => {
-    const res = await clientApi.post(`/client/deliverables/${id}/approve`);
-    return res.data;
-  },
-  requestRevision: async (id: number, notes?: string) => {
-    const res = await clientApi.post(`/client/deliverables/${id}/revision`, { notes });
-    return res.data;
+  downloadProjectDelivery: async (id: number, fileName: string) => {
+    const res = await clientApi.get(`/client/projects/${id}/delivery/download`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   },
   invoices: async (params?: Record<string, string>) => {
     const res = await clientApi.get('/client/invoices', { params });
@@ -68,30 +71,66 @@ export const clientService = {
     const base = process.env.NEXT_PUBLIC_API_URL || '';
     return `${base}/client/documents/${id}/download`;
   },
-  chatThreads: async () => {
-    const res = await clientApi.get('/client/chat/threads');
+  // Project "Files" tab — a document (Client\DocumentController), a project
+  // attachment (Client\AttachmentController), and a delivery submission
+  // (Client\ProjectController::downloadDeliverySubmission — one row per
+  // time the project's final package was delivered, see
+  // ProjectDeliverySubmission) live on different tables/routes but are
+  // merged into one `files` list by Client\ProjectController::show() /
+  // Client\DocumentController::index(), each tagged with which it is.
+  downloadProjectFile: async (source: 'document' | 'attachment' | 'delivery', id: number, fileName: string) => {
+    const path = source === 'document' ? `/client/documents/${id}/download`
+      : source === 'delivery' ? `/client/delivery-submissions/${id}/download`
+      : `/client/attachments/${id}/download`;
+    const res = await clientApi.get(path, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+  // One single Sales Chat conversation (Seller <-> Client <-> Company
+  // Admin) — no thread picker, matching Api\Client\ChatController.
+  chatMessages: async () => {
+    const res = await clientApi.get('/client/chat/messages');
     return res.data.data;
   },
-  chatEligibleContacts: async (): Promise<Array<{ type: 'admin' | 'user'; id: number; name: string; role: string }>> => {
-    const res = await clientApi.get('/client/chat/eligible-contacts');
-    return res.data.data;
-  },
-  chatStart: async (recipient: { type: 'admin' } | { type: 'user'; id: number }): Promise<{ thread_id: number }> => {
-    const res = await clientApi.post('/client/chat/start', {
-      recipient_type: recipient.type,
-      recipient_user_id: recipient.type === 'user' ? recipient.id : undefined,
-    });
-    return res.data.data;
-  },
-  chatMessages: async (threadId: number) => {
-    const res = await clientApi.get(`/client/chat/threads/${threadId}/messages`);
-    return res.data.data;
-  },
-  chatReply: async (threadId: number, data: FormData) => {
-    const res = await clientApi.post(`/client/chat/threads/${threadId}/reply`, data, {
+  chatReply: async (data: FormData) => {
+    const res = await clientApi.post('/client/chat/reply', data, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return res.data;
+  },
+  // Per-PROJECT chat — a separate conversation for each project, between the
+  // client, that project's own Seller and Company Admin (see
+  // Api\Client\ProjectChatController). Unrelated to the account-level Sales
+  // Chat above.
+  projectChat: async (projectId: number) => {
+    const res = await clientApi.get(`/client/projects/${projectId}/chat`);
+    return res.data.data;
+  },
+  // `data` carries content/file plus any mentions[] entries — see
+  // Api\Client\ProjectChatController::store().
+  projectChatSend: async (projectId: number, data: FormData) => {
+    const res = await clientApi.post(`/client/projects/${projectId}/chat`, data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data.data;
+  },
+  projectChatAttachment: async (projectId: number, messageId: number, fileName: string) => {
+    const res = await clientApi.get(`/client/projects/${projectId}/chat/${messageId}/attachment`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  },
+  // Own message only — enforced server-side too.
+  projectChatDelete: async (projectId: number, messageId: number) => {
+    await clientApi.delete(`/client/projects/${projectId}/chat/${messageId}`);
   },
   support: async () => {
     const res = await clientApi.get('/client/support');

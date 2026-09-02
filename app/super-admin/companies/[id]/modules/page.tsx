@@ -5,12 +5,14 @@ import SuperAdminLayout from '@/components/super-admin/SuperAdminLayout';
 import { companyService } from '@/lib/services/companyService';
 import { HiArrowLeft, HiCheckCircle } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
+import { handleNotFound } from '@/lib/notFound';
 
 const ALL_MODULES = [
   { key: 'leads',         label: 'Leads / Pipeline', group: 'Sales' },
 
-  // Client module — separate from Invoice
-  { key: 'clients',       label: 'Clients',          group: 'Client' },
+  // Client module — separate from Invoice. 'clients' is deliberately NOT
+  // offered here — it was never a real, checked module_key anywhere in the
+  // app (see ModuleSeeder.php's comment); toggling it did nothing.
   { key: 'client_portal', label: 'Client Portal',    group: 'Client' },
 
   // Invoice module — separate from Client
@@ -57,7 +59,7 @@ export default function CompanyModulesPage() {
   useEffect(() => {
     companyService.getModules(id)
       .then(mods => setSelected(mods))
-      .catch(() => toast.error('Failed to load modules'))
+      .catch((err) => { if (!handleNotFound(err, router)) toast.error('Failed to load modules'); })
       .finally(() => setLoading(false));
   }, [id]);
 

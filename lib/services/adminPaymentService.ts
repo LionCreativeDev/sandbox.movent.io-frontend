@@ -4,6 +4,10 @@ export interface PaymentRecord {
   id: number;
   invoice_id: number;
   amount: string;
+  currency: string | null;
+  converted_amount: string | null;
+  converted_currency: string | null;
+  exchange_rate: string | null;
   method: string | null;
   gateway: string | null;
   gateway_ref: string | null;
@@ -15,13 +19,25 @@ export interface PaymentRecord {
     invoice_number: string;
     currency: string;
     client: { id: number; name: string } | null;
+    // A guest/lead-only invoice (no Client yet) — fall back to this for the
+    // customer name.
+    lead: { id: number; name: string } | null;
   } | null;
+  // The specific account's display name (Company Admin-set label), or null
+  // if this payment wasn't a gateway charge or the account was later deleted.
+  company_gateway: { id: number; label: string | null; gateway: string } | null;
 }
 
-export interface PaymentSummary {
+export interface PaymentCurrencySummary {
+  currency: string;
   total: number;
   count: number;
   by_method: Record<string, number>;
+}
+
+export interface PaymentSummary {
+  count: number;
+  by_currency: PaymentCurrencySummary[];
 }
 
 export const adminPaymentService = {

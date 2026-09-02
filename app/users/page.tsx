@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { userService } from '@/lib/services/userService';
-import { ROLE_LABELS } from '@/lib/roleUtils';
+import { roleDisplayLabel } from '@/lib/roleUtils';
 import { MODULE_CATALOG } from '@/lib/moduleCatalog';
 import { User } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
@@ -111,7 +111,7 @@ export default function UsersPage() {
       await userService.remove(user.id);
       setUsers(prev => prev.filter(u => u.id !== user.id));
       setUsed(u => Math.max(0, u - 1));
-    } catch { alert('Failed to remove user'); }
+    } catch (err: any) { alert(err?.response?.data?.message || 'Failed to remove user'); }
     finally { setActionBusy(null); }
   };
 
@@ -136,7 +136,7 @@ export default function UsersPage() {
 
   return (
     <DashboardLayout title="Users & Permissions">
-      <div style={{ maxWidth: 1280 }}>
+      <div style={{ width: '100%', maxWidth: 'none' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
@@ -216,7 +216,7 @@ export default function UsersPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid #f1f5f9' }}>
-                    {['Name', 'Role', 'Active Modules', 'Status', 'Last Login', 'Created', 'Actions'].map(h => (
+                    {['Name', 'Role', 'Companies', 'Active Modules', 'Status', 'Last Login', 'Created', 'Actions'].map(h => (
                       <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
                         {h}
                       </th>
@@ -243,8 +243,38 @@ export default function UsersPage() {
                         {/* Role — just the role_type label, nothing else */}
                         <td style={{ padding: '14px 16px' }}>
                           <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 50, fontSize: 12, fontWeight: 600, background: '#eff6ff', color: '#2563eb', whiteSpace: 'nowrap' }}>
-                            {ROLE_LABELS[user.role_type] ?? user.role_type}
+                            {roleDisplayLabel(user)}
                           </span>
+                        </td>
+
+                        {/* Companies — every company this user is assigned to
+                            within this admin's org (not just whichever is
+                            currently active in the top-of-page filter). */}
+                        <td style={{ padding: '14px 16px', maxWidth: 200 }}>
+                          {(user.company_assignments ?? []).length > 0 ? (
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {(user.company_assignments ?? []).map(a => (
+                                <span
+                                  key={a.company_id}
+                                  title={a.status === 'suspended' ? 'Suspended' : undefined}
+                                  style={{
+                                    fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 500, whiteSpace: 'nowrap',
+                                    background: a.status === 'suspended' ? '#fef2f2' : '#eff6ff',
+                                    color: a.status === 'suspended' ? '#dc2626' : '#2563eb',
+                                  }}
+                                >
+                                  {a.company_name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span
+                              title="Not assigned to any company yet — they'll see an empty state until you assign one"
+                              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 600, whiteSpace: 'nowrap', background: '#fffbeb', color: '#b45309' }}
+                            >
+                              Unassigned
+                            </span>
+                          )}
                         </td>
 
                         {/* Active modules */}
@@ -291,10 +321,7 @@ export default function UsersPage() {
                               <HiEye size={13} /> View
                             </button>
                             <button onClick={() => router.push(`/admin/users/${user.id}/edit`)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: '1.5px solid #e0e7ff', background: '#eef2ff', color: '#4f46e5', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                              <HiPencilSquare size={13} /> Edit
-                            </button>
-                            <button onClick={() => router.push(`/admin/users/${user.id}/edit?tab=permissions`)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: '1.5px solid #ddd6fe', background: '#f5f3ff', color: '#7c3aed', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                              Permissions
+                              <HiPencilSquare size={13} /> Edit / Permissions
                             </button>
                             {user.status === 'invited' ? (
                               <>

@@ -12,6 +12,9 @@ export interface Admin {
   modules?: string[];
   max_users_per_company?: number | null;
   max_companies?: number | null;
+  // Set on My Profile — authoritative for every invoice this admin issues,
+  // across any of their companies (see Company::invoicingProfile()).
+  currency?: string;
 }
 
 export type DataScope = 'own' | 'assigned' | 'all' | 'view_only' | 'no_access';
@@ -43,6 +46,10 @@ export interface User {
   name: string;
   email: string;
   role_type: string;
+  // Display-only override for a "Custom Role" — takes priority over the
+  // generic ROLE_LABELS[role_type] name wherever a role is shown; the real
+  // permission/behavior bucket stays role_type. See roleUtils.roleDisplayLabel().
+  custom_role_label?: string | null;
   phone?: string;
   avatar_path?: string;
   avatar_url?: string | null;
@@ -65,7 +72,11 @@ export interface Company {
   currency?: string;
   logo_path?: string;
   is_active?: boolean;
-  admin?: { id: number; name: string } | null;
+  // admin.currency is the tenant's Settings-configured currency —
+  // authoritative for invoice creation, unlike the sibling `currency` above
+  // (legacy, pre-tenant-refactor, per-Company column — see
+  // Company::invoicingProfile() on the backend).
+  admin?: { id: number; name: string; currency?: string } | null;
 }
 
 export interface Permission {
@@ -87,12 +98,25 @@ export interface Client {
   phone?: string;
   company_name?: string;
   address?: string;
+  country?: string;
   portal_access: boolean;
   status: 'active' | 'inactive' | 'blocked';
   notes?: string;
   created_at: string;
   company?: Company;
   user?: { id: number; email: string; is_active: boolean };
+  // Only present on GET /user/clients/{id} for a user holding
+  // canEnableClientPortal/canDisableClientPortal — see
+  // Api\User\ClientController::show().
+  portal_permissions?: Record<string, { label: string; is_enabled: boolean; purchased: boolean }>;
+  // Same gate — whether this client's company has the real Client Portal
+  // module purchased. Only present alongside portal_permissions above.
+  has_portal_module?: boolean;
+  // Set once this client has a Project — its chat conversation has moved
+  // there (see App\Services\PaymentProjectStartService::
+  // migrateChatHistory()); the frontend uses this to point Sales Chat at
+  // Project Chat instead of the old, now-abandoned Client-anchored thread.
+  chat_project_id?: number | null;
 }
 
 export interface InvoiceItem {
@@ -107,6 +131,10 @@ export interface InvoiceItem {
 export interface InvoicePayment {
   id: number;
   amount: number;
+  currency?: string | null;
+  converted_amount?: number | null;
+  converted_currency?: string | null;
+  exchange_rate?: number | null;
   method?: string;
   gateway?: string;
   status: string;
@@ -119,6 +147,8 @@ export interface Invoice {
   id: number;
   company_id: number;
   client_id: number;
+  lead_id?: number | null;
+  project_id?: number | null;
   invoice_number: string;
   subtotal: number;
   tax_rate: number;
@@ -141,6 +171,35 @@ export interface Invoice {
   client?: Client;
   items?: InvoiceItem[];
   payments?: InvoicePayment[];
+  gateway_account_ids?: number[];
+  // Deal-facing fields — what this invoice is for, even before a Project exists.
+  invoice_purpose?: string | null;
+  payment_type?: string | null;
+  required_payment_amount?: number | null;
+  counts_toward_project_activation?: boolean;
+  // The real linked project, once one exists. "New Project" mode invoices
+  // (project_title set, no project yet) only have project_title until a
+  // qualifying payment auto-creates the project and backfills project_id.
+  project?: { id: number; name: string } | null;
+  project_title?: string | null;
+  lead?: {
+    id: number;
+    deal_reference?: string | null;
+    proposed_project_title?: string | null;
+    fulfillment_status?: string | null;
+  } | null;
+  // Every project this invoice's Deal (Lead) has ever spun off — completed,
+  // previous and latest — mirroring the Client Portal's own project list.
+  project_history?: {
+    id: number;
+    name: string;
+    status: string;
+    start_date?: string | null;
+    deadline?: string | null;
+    created_at: string;
+    progress: number;
+    project_manager?: { id: number; name: string } | null;
+  }[];
 }
 
 export interface ApiResponse<T> {

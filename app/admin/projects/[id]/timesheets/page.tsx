@@ -6,9 +6,9 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import toast from 'react-hot-toast';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
 import { adminProjectService, Timesheet, Task } from '@/lib/services/adminProjectService';
-import { userService } from '@/lib/services/userService';
 import ProjectTabs from '@/components/admin/projects/ProjectTabs';
-import { inp, lbl, card, Badge, TIMESHEET_SC, fmtDate } from '@/components/admin/projects/shared';
+import { inp, lbl, card, Badge, TIMESHEET_SC, fmtDate, DRAFT_HINT, DraftNotice } from '@/components/admin/projects/shared';
+import { handleNotFound } from '@/lib/notFound';
 
 interface UserOption { id: number; name: string }
 
@@ -23,6 +23,7 @@ export default function ProjectTimesheetsPage() {
   const [users, setUsers]   = useState<UserOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [projectDraft, setProjectDraft] = useState(false);
   const [form, setForm] = useState({ task_id: '', user_id: '', hours_logged: '', log_date: '', notes: '' });
 
   const load = async () => {
@@ -30,19 +31,21 @@ export default function ProjectTimesheetsPage() {
     try {
       const all = await adminProjectService.timesheets.list();
       setSheets(all.filter(s => s.task?.project_id === projectId));
-    } catch { toast.error('Failed to load timesheets'); }
+    } catch (err) { if (!handleNotFound(err, router)) toast.error('Failed to load timesheets'); }
     finally { setLoading(false); }
   };
 
   useEffect(() => {
     load();
     adminProjectService.tasks.list(projectId).then(setTasks).catch(() => {});
-    // Scoped to THIS project's own company — not every company the admin
-    // owns (userService.list() returns users across all of them).
+    // Only this project's own team members can be logged against — not
+    // every user in the company (same fix already applied to the Projects
+    // listing's PM dropdown and the all-Tasks page's Assigned To dropdown).
     adminProjectService.getOne(projectId).then(p => {
-      userService.list().then(d => setUsers(d.users.filter(u =>
-        (u.company_assignments ?? []).some(a => a.company_id === p.company_id && a.status === 'active')
-      ))).catch(() => {});
+      setUsers((p.team_members ?? []).filter(tm => tm.user).map(tm => ({ id: tm.user_id, name: tm.user!.name })));
+      // No hours against work that hasn't started — see the isDraft() guard
+      // in Api\Admin\TimesheetController::store().
+      setProjectDraft(p.status === 'draft');
     }).catch(() => {});
   }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -90,7 +93,9 @@ export default function ProjectTimesheetsPage() {
         }}>Export CSV</button>
       </div>
 
-      <ProjectTabs projectId={projectId} active="timesheets" />
+      <ProjectTabs projectId={projectId} active="timesheets" isDraft={projectDraft} />
+
+      {projectDraft && <DraftNotice style={{ marginBottom: 16 }} />}
 
       <form onSubmit={submit} style={card}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
@@ -121,9 +126,10 @@ export default function ProjectTimesheetsPage() {
           <label style={lbl}>Notes</label>
           <input value={form.notes} onChange={e => setF('notes', e.target.value)} style={inp} />
         </div>
-        <button type="submit" disabled={saving} style={{
-          padding: '9px 20px', background: saving ? '#93c5fd' : '#2563eb', color: '#fff',
-          border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
+        <button type="submit" disabled={saving || projectDraft} title={projectDraft ? DRAFT_HINT : undefined} style={{
+          padding: '9px 20px', background: projectDraft ? '#cbd5e1' : (saving ? '#93c5fd' : '#2563eb'), color: '#fff',
+          border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
+          cursor: saving || projectDraft ? 'not-allowed' : 'pointer',
         }}>{saving ? 'Saving…' : 'Log Time'}</button>
       </form>
 

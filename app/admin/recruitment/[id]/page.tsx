@@ -7,6 +7,8 @@ import { adminHrService, Recruitment, ApplicantStatus } from '@/lib/services/adm
 import { Badge, inp, lbl, card } from '@/components/admin/projects/shared';
 import { RECRUITMENT_SC, APPLICANT_SC } from '@/components/admin/hr/shared';
 import toast from 'react-hot-toast';
+import PhoneInput from '@/components/ui/PhoneInput';
+import { handleNotFound } from '@/lib/notFound';
 
 const APPLICANT_STATUSES: ApplicantStatus[] = ['applied', 'shortlisted', 'interviewed', 'hired', 'rejected'];
 
@@ -28,7 +30,7 @@ export default function RecruitmentDetailPage() {
 
   const load = async () => {
     try { setPosting(await adminHrService.recruitment.getOne(recruitmentId)); }
-    catch { toast.error('Failed to load posting'); }
+    catch (err) { if (!handleNotFound(err, router)) toast.error('Failed to load posting'); }
     finally { setLoading(false); }
   };
 
@@ -112,7 +114,7 @@ export default function RecruitmentDetailPage() {
             </div>
             <div>
               <label style={lbl}>Phone</label>
-              <input value={phone} onChange={e => setPhone(e.target.value)} style={inp} />
+              <PhoneInput value={phone} onChange={setPhone} />
             </div>
           </div>
           <button type="submit" disabled={saving} style={{ padding: '9px 20px', background: saving ? '#93c5fd' : '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>

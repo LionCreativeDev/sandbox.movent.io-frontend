@@ -27,6 +27,10 @@ export const MODULE_CATALOG: ModuleDef[] = [
       { key: 'canCreateClients', label: 'Create Clients',                 group: 'Client Management' },
       { key: 'canEditClients',   label: 'Edit Clients',                   group: 'Client Management' },
       { key: 'canDeleteClients', label: 'Delete / Deactivate Clients',    group: 'Client Management' },
+      // Data scope override — without it, a non-admin user only sees
+      // clients they're the account manager for, or that are linked to
+      // their own lead/invoice/project.
+      { key: 'canViewAllCompanyClients', label: 'View All Company Clients', group: 'Client Management' },
 
       // Client Portal Access (only when client_portal DB module is purchased)
       { key: 'canEnableClientPortal',   label: 'Enable Client Portal Access',  group: 'Client Portal Access', requiresDb: 'client_portal' },
@@ -64,7 +68,8 @@ export const MODULE_CATALOG: ModuleDef[] = [
       { key: 'canManagePipeline',      label: 'Manage Pipeline' },
       { key: 'canAssignLeadOwner',     label: 'Assign Lead Owner' },
       { key: 'canViewSalesTargets',    label: 'View Sales Targets' },
-      { key: 'canUpdateSalesTargets',  label: 'Update Sales Targets' },
+      { key: 'canUpdateSalesTargets',  label: 'Update Sales Targets (own)' },
+      { key: 'canManageSalesTargets',  label: 'Manage Sales Targets (all sellers)' },
       { key: 'canViewSalesReports',    label: 'View Sales Reports' },
       { key: 'canExportSalesReports',  label: 'Export Sales Reports' },
       { key: 'canAddLeadNotes',        label: 'Add Lead Notes / Activity' },
@@ -99,6 +104,10 @@ export const MODULE_CATALOG: ModuleDef[] = [
       { key: 'canManageBillingClients',     label: 'Manage Billing Clients' },
       { key: 'canViewInvoiceReports',       label: 'View Invoice Reports' },
       { key: 'canManageInvoiceSettings',    label: 'Manage Invoice Settings' },
+      { key: 'canSelectInvoiceGateway',     label: 'Select Invoice Payment Gateway' },
+      // Data scope override — without it, a non-admin user only sees
+      // invoices they created, or that are linked to their own lead/client/project.
+      { key: 'canViewAllCompanyInvoices',   label: 'View All Company Invoices (not just own)' },
     ],
   },
 
@@ -146,6 +155,13 @@ export const MODULE_CATALOG: ModuleDef[] = [
       { key: 'canResolveAlertsViolations',  label: 'Resolve Alerts & Violations' },
       { key: 'canManageDocumentCompliance', label: 'Manage Document Compliance' },
       { key: 'canUseComplianceChat',        label: 'Use Compliance Chat' },
+      // Compliance Case module (Project → Compliance Case → Requirements →
+      // Documents → Review) — distinct from the Policy/Risk/Incident/
+      // Violation keys above, which belong to an earlier, unused scaffold.
+      { key: 'canViewComplianceCases',           label: 'View Compliance Cases' },
+      { key: 'canManageComplianceTemplates',     label: 'Manage Compliance Templates' },
+      { key: 'canManageComplianceRequirements',  label: 'Manage Compliance Requirements' },
+      { key: 'canAssignComplianceOfficer',       label: 'Assign Compliance Officer' },
     ],
   },
 
@@ -182,18 +198,21 @@ export const MODULE_CATALOG: ModuleDef[] = [
       { key: 'canViewProjects',            label: 'View Projects',            group: 'Projects' },
       { key: 'canCreateProjects',          label: 'Create Projects',          group: 'Projects' },
       { key: 'canCreateProjectHandoff',    label: 'Create Project Handoff',   group: 'Projects' },
+      { key: 'canManageProjectInvoices',   label: 'Manage Project Invoices',  group: 'Projects' },
+      { key: 'canOverrideProjectCreationBeforePayment', label: 'Override Project Creation Before Payment', group: 'Projects' },
       { key: 'canEditProjects',            label: 'Edit Projects',            group: 'Projects' },
       { key: 'canViewAllCompanyProjects',  label: 'View All Company Projects', group: 'Projects' },
       { key: 'canCompleteProjects',        label: 'Complete Project',         group: 'Projects' },
       { key: 'canCloseProjects',           label: 'Close Project',            group: 'Projects' },
       { key: 'canReopenProjects',          label: 'Reopen Project',           group: 'Projects' },
       { key: 'canForceCloseProjects',      label: 'Force Close Project',      group: 'Projects' },
+      { key: 'canAssignProjectSeller',     label: 'Assign/Switch Project Seller', group: 'Projects' },
+      { key: 'canActivateProjects',        label: 'Activate Draft Project',   group: 'Projects' },
 
       { key: 'canViewTasks',               label: 'View Tasks',   group: 'Tasks' },
       { key: 'canCreateTasks',             label: 'Create Tasks', group: 'Tasks' },
       { key: 'canEditTasks',               label: 'Edit Tasks',   group: 'Tasks' },
       { key: 'canAssignTasks',             label: 'Assign Tasks', group: 'Tasks' },
-      { key: 'canMarkTaskBlocked',         label: 'Mark Task Blocked', group: 'Tasks' },
 
       { key: 'canViewTeamResources',       label: 'View Team Resources',   group: 'Team & Timesheets' },
       { key: 'canAssignTeamResources',     label: 'Assign Team Resources', group: 'Team & Timesheets' },
@@ -203,15 +222,9 @@ export const MODULE_CATALOG: ModuleDef[] = [
       { key: 'canViewProjectReports',      label: 'View Project Reports', group: 'Reports' },
       { key: 'canViewTaskReports',         label: 'View Task Reports',    group: 'Reports' },
 
-      { key: 'canViewProductionQueue',     label: 'View Production Queue',     group: 'Production' },
-      { key: 'canAssignProductionTasks',   label: 'Assign Production Tasks',   group: 'Production' },
-      { key: 'canStartProductionTasks',    label: 'Start Production Tasks',    group: 'Production' },
-      { key: 'canSubmitProductionTasks',   label: 'Submit Production Tasks',   group: 'Production' },
-
       { key: 'canCreateRevisions',         label: 'Create Revisions',    group: 'Revisions & Deliverables' },
       { key: 'canResolveRevisions',        label: 'Resolve Revisions',   group: 'Revisions & Deliverables' },
       { key: 'canUploadDeliverables',      label: 'Upload Deliverables', group: 'Revisions & Deliverables' },
-      { key: 'canVerifyDeliverables',      label: 'Verify Deliverables', group: 'Revisions & Deliverables' },
       { key: 'canViewDeliverables',        label: 'View Deliverables',   group: 'Revisions & Deliverables' },
       { key: 'canApproveDeliverables',     label: 'Approve Deliverables', group: 'Revisions & Deliverables' },
 
@@ -229,15 +242,14 @@ export const MODULE_CATALOG: ModuleDef[] = [
       { key: 'canRequestPMAssignment',        label: 'Request PM Assignment',         group: 'Seller / Linked Projects' },
       { key: 'canAddClientFacingComment',     label: 'Add Client-facing Project Comment', group: 'Seller / Linked Projects' },
 
+      // Project Chat is now a single conversation per project; there is no
+      // more "create a group" or "create a direct chat" action to gate.
       { key: 'canViewProjectChat',              label: 'View Project Chat',               group: 'Project Chat' },
       { key: 'canSendProjectChatMessage',        label: 'Send Project Chat Message',       group: 'Project Chat' },
-      { key: 'canCreateProjectChatGroup',        label: 'Create Project Chat Group',       group: 'Project Chat' },
       { key: 'canManageProjectChatParticipants', label: 'Manage Project Chat Participants', group: 'Project Chat' },
       { key: 'canAddSellerToProjectChat',        label: 'Add Seller To Project Chat',      group: 'Project Chat' },
-      { key: 'canCreateProjectDirectChat',       label: 'Create Project Direct Chat',      group: 'Project Chat' },
       { key: 'canUploadProjectChatAttachment',   label: 'Upload Project Chat Attachment',  group: 'Project Chat' },
       { key: 'canViewProjectChatAttachments',    label: 'View Project Chat Attachments',   group: 'Project Chat' },
-      { key: 'canDeleteAnyProjectChatMessage',   label: 'Delete Any Project Chat Message', group: 'Project Chat' },
     ],
   },
 ];

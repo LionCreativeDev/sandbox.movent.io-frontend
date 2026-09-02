@@ -35,7 +35,7 @@ export default function UserProjectDashboardPage() {
 
   return (
     <DashboardLayout title="Project Dashboard">
-      <div style={{ maxWidth: 1200 }}>
+      <div style={{maxWidth : 1200}}>
         {loading ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Loading…</div>
         ) : (

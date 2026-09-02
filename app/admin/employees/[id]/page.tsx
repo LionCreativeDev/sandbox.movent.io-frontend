@@ -8,6 +8,7 @@ import { adminHrService, Employee } from '@/lib/services/adminHrService';
 import { Badge, card, inp, fmtFileSize } from '@/components/admin/projects/shared';
 import { EMPLOYEE_STATUS_SC, ATTENDANCE_SC, LEAVE_SC, PAYROLL_SC } from '@/components/admin/hr/shared';
 import toast from 'react-hot-toast';
+import { handleNotFound } from '@/lib/notFound';
 
 export default function EmployeeDetailPage() {
   useModuleGuard('employees');
@@ -27,7 +28,9 @@ export default function EmployeeDetailPage() {
     setLoading(true);
     try {
       setEmployee(await adminHrService.employees.getOne(employeeId));
-    } catch { toast.error('Failed to load employee'); router.push('/admin/employees'); }
+    } catch (err) {
+      if (!handleNotFound(err, router)) { toast.error('Failed to load employee'); router.push('/admin/employees'); }
+    }
     finally { setLoading(false); }
   };
 

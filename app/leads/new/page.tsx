@@ -4,8 +4,11 @@ import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminLeadService, userLeadService } from '@/lib/services/adminLeadService';
 import { adminClientService, ClientCompany } from '@/lib/services/adminClientService';
-import { getAuthType, can } from '@/lib/auth';
+import { getAuthType, can, getActiveCompany } from '@/lib/auth';
 import { HiArrowLeft } from 'react-icons/hi2';
+import SubmitButton from '@/components/ui/SubmitButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import PhoneInput from '@/components/ui/PhoneInput';
 
 const inp: React.CSSProperties = { width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', color: '#0f172a', boxSizing: 'border-box' };
 const lbl: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' };
@@ -35,12 +38,19 @@ export default function NewLeadPage() {
   const [estValue, setEstValue]       = useState('');
   const [notes, setNotes]             = useState('');
   const [followupDate, setFollowupDate] = useState('');
+  const [followupTime, setFollowupTime] = useState('');
 
   useEffect(() => {
     if (isAdmin) {
       adminClientService.companies().then(cs => {
         setCompanies(cs);
-        if (cs.length) setCompanyId(cs[0].id);
+        if (cs.length) {
+          // Whichever company is active (the CompanySelector dropdown) wins
+          // — otherwise this always defaulted to the alphabetically-first
+          // company regardless of which one the admin actually had selected.
+          const active = getActiveCompany();
+          setCompanyId(typeof active === 'number' && cs.some(c => c.id === active) ? active : cs[0].id);
+        }
       }).catch(() => {}).finally(() => setCompaniesLoading(false));
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -50,10 +60,21 @@ export default function NewLeadPage() {
   // dropdown displays.
   const effectiveCompanyId = companyId || companies[0]?.id || 0;
 
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const today = new Date().toISOString().slice(0, 10);
+
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (saving) return; // Guards a double-click/Enter re-submit before the disabled prop re-renders.
     if (isAdmin && companies.length === 0) { setError('No active company found for your account. Please contact support.'); return; }
     if (isAdmin && companies.length > 1 && !effectiveCompanyId) { setError('Select a company'); return; }
+    // `required` alone lets a whitespace-only name through the browser's own
+    // check (it only tests for an empty raw value, not after trimming).
+    if (!name.trim()) { setError('Full name is required.'); return; }
+    if (!email.trim()) { setError('Email is required.'); return; }
+    if (!EMAIL_RE.test(email.trim())) { setError('Please enter a valid email address.'); return; }
+    if (estValue && parseFloat(estValue) < 0) { setError('Estimated value cannot be negative.'); return; }
+    if (followupDate && followupDate < today) { setError('Next Follow-up Date cannot be in the past.'); return; }
     setSaving(true); setError('');
     try {
       const payload = {
@@ -67,6 +88,7 @@ export default function NewLeadPage() {
         estimated_value:    estValue ? parseFloat(estValue) : null,
         notes:              notes.trim() || null,
         next_followup_date: followupDate || null,
+        next_followup_time: followupTime || null,
       };
 
       const lead = isAdmin
@@ -85,7 +107,8 @@ export default function NewLeadPage() {
 
   return (
     <DashboardLayout title="New Lead">
-      <div style={{ maxWidth: 720 }}>
+      <LoadingOverlay show={saving} message="Creating Lead…" />
+      <div style={{ width: '100%', maxWidth: 'none' }}>
         <button onClick={() => router.back()} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
           <HiArrowLeft size={16} /> Back
         </button>
@@ -118,27 +141,27 @@ export default function NewLeadPage() {
             )}
 
             {/* Contact info */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 18 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 18 }}>
               <div>
                 <label style={lbl}>Full Name *</label>
-                <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder="Lead's full name" required />
+                <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder="Lead's full name" maxLength={150} required />
               </div>
               <div>
                 <label style={lbl}>Company / Organisation</label>
-                <input style={inp} value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Their company name" />
+                <input style={inp} value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Their company name" maxLength={200} />
               </div>
               <div>
-                <label style={lbl}>Email</label>
-                <input type="email" style={inp} value={email} onChange={e => setEmail(e.target.value)} placeholder="lead@example.com" />
+                <label style={lbl}>Email *</label>
+                <input type="email" style={inp} value={email} onChange={e => setEmail(e.target.value)} placeholder="lead@example.com" maxLength={255} required />
               </div>
               <div>
                 <label style={lbl}>Phone</label>
-                <input style={inp} value={phone} onChange={e => setPhone(e.target.value)} placeholder="+92 300 0000000" />
+                <PhoneInput value={phone} onChange={setPhone} />
               </div>
             </div>
 
             {/* Lead meta */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 18 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 18 }}>
               <div>
                 <label style={lbl}>Source</label>
                 <select style={inp} value={source} onChange={e => setSource(e.target.value)}>
@@ -153,13 +176,16 @@ export default function NewLeadPage() {
               </div>
               <div>
                 <label style={lbl}>Status</label>
+                {/* No "Won" option here — a lead only becomes Won via the
+                    pipeline action (which stamps deal_reference/won_at) or
+                    automatically once its invoice is paid in full, never at
+                    creation (mirrors Api\*\LeadController::store()'s guard). */}
                 <select style={inp} value={status} onChange={e => setStatus(e.target.value)}>
                   <option value="new">New</option>
                   <option value="contacted">Contacted</option>
                   <option value="qualified">Qualified</option>
                   <option value="proposal">Proposal</option>
                   <option value="negotiation">Negotiation</option>
-                  <option value="won">Won</option>
                   <option value="lost">Lost</option>
                 </select>
               </div>
@@ -178,9 +204,15 @@ export default function NewLeadPage() {
               </div>
             </div>
 
-            <div style={{ marginBottom: 18 }}>
-              <label style={lbl}>Next Follow-up Date</label>
-              <input type="date" style={inp} value={followupDate} onChange={e => setFollowupDate(e.target.value)} />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 18 }}>
+              <div>
+                <label style={lbl}>Next Follow-up Date</label>
+                <input type="date" style={inp} value={followupDate} onChange={e => setFollowupDate(e.target.value)} min={today} />
+              </div>
+              <div>
+                <label style={lbl}>Next Follow-up Time</label>
+                <input type="time" style={inp} value={followupTime} onChange={e => setFollowupTime(e.target.value)} />
+              </div>
             </div>
 
             <div style={{ marginBottom: 24 }}>
@@ -188,11 +220,11 @@ export default function NewLeadPage() {
               <textarea style={{ ...inp, height: 96, resize: 'vertical' }} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Additional context, meeting notes, etc." />
             </div>
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button type="button" onClick={() => router.back()} style={{ flex: 1, padding: '11px 0', borderRadius: 9, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
-              <button type="submit" disabled={saving} style={{ flex: 3, padding: '11px 0', borderRadius: 9, border: 'none', background: saving ? '#93c5fd' : 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer' }}>
-                {saving ? 'Saving…' : 'Create Lead'}
-              </button>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => router.back()} disabled={saving} style={{ padding: '10px 22px', borderRadius: 9, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 14, fontWeight: 500, cursor: saving ? 'not-allowed' : 'pointer' }}>Cancel</button>
+              <SubmitButton loading={saving} loadingText="Creating Lead…" style={{ padding: '10px 28px', borderRadius: 9, border: 'none', background: saving ? '#93c5fd' : 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 14, fontWeight: 700 }}>
+                Create Lead
+              </SubmitButton>
             </div>
           </form>
         </div>

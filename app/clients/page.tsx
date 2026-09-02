@@ -3,10 +3,12 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminClientService } from '@/lib/services/adminClientService';
+import { userClientService } from '@/lib/services/userClientService';
 import api from '@/lib/axios';
+import toast from 'react-hot-toast';
 import { getAuthType, can } from '@/lib/auth';
 import { Client } from '@/types';
-import { HiUserPlus, HiMagnifyingGlass, HiCheckCircle, HiXCircle, HiEye, HiPencilSquare } from 'react-icons/hi2';
+import { HiUserPlus, HiMagnifyingGlass, HiCheckCircle, HiXCircle, HiEye, HiPencilSquare, HiTrash } from 'react-icons/hi2';
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   active:   { bg: '#ecfdf5', color: '#059669' },
@@ -19,6 +21,7 @@ export default function ClientsPage() {
   const isSubUser = getAuthType() === 'user';
   const canCreate = !isSubUser || can('client', 'canCreateClients');
   const canEdit   = !isSubUser || can('client', 'canEditClients');
+  const canDelete = !isSubUser || can('client', 'canDeleteClients');
 
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +32,9 @@ export default function ClientsPage() {
     setLoading(true);
     try {
       if (isSubUser) {
-        const data = await api.get('/user/clients').then(r => r.data.data);
+        const params: Record<string, string> = {};
+        if (search) params.search = search;
+        const data = await api.get('/user/clients', { params }).then(r => r.data.data);
         setClients(data);
       } else {
         const params: Record<string, string> = {};
@@ -49,9 +54,21 @@ export default function ClientsPage() {
 
   const handleSearch = (e: React.FormEvent) => { e.preventDefault(); load(); };
 
+  // Soft delete (Client uses SoftDeletes) — invoices/projects linked to this
+  // client stay intact, it just stops appearing everywhere.
+  const handleDelete = async (c: Client) => {
+    if (!confirm(`Delete "${c.name}"? This can't be undone from here.`)) return;
+    try {
+      if (isSubUser) await userClientService.remove(c.id);
+      else await adminClientService.remove(c.id);
+      toast.success('Client deleted');
+      load();
+    } catch (err: any) { toast.error(err?.response?.data?.message || 'Failed to delete client'); }
+  };
+
   return (
     <DashboardLayout title="Clients">
-      <div style={{ maxWidth: 1100 }}>
+      <div style={{ width: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Clients</h1>
@@ -139,6 +156,11 @@ export default function ClientsPage() {
                         {canEdit && (
                           <button onClick={() => router.push(`/clients/${c.id}/edit`)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: '#fff', color: '#2563eb', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
                             <HiPencilSquare size={13} /> Edit
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button onClick={() => handleDelete(c)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: '1.5px solid #fecaca', background: '#fff', color: '#dc2626', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                            <HiTrash size={13} /> Delete
                           </button>
                         )}
                       </div>

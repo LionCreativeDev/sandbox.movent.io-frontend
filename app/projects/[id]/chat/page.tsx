@@ -4,22 +4,22 @@ import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import toast from 'react-hot-toast';
-import { can, getAuthUser } from '@/lib/auth';
+import { getAuthUser } from '@/lib/auth';
 import { User } from '@/types';
-import { inp, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
+import { inp, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize, DRAFT_HINT, DraftNotice } from '@/components/admin/projects/shared';
 import {
-  userProjectMessengerService, ProjectMessengerThread, ProjectMessengerEligibleUser,
+  userProjectMessengerService, ProjectMessengerThread, ProjectMessengerEligibleUser, ProjectMessengerParticipant,
 } from '@/lib/services/projectMessengerService';
 import { userProjectService } from '@/lib/services/userProjectService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
+import { handleNotFound } from '@/lib/notFound';
+import { chatSenderName } from '@/lib/chatSender';
 
-const AVATAR_PALETTE = [
-  { bg: '#e0e7ff', fg: '#4338ca' }, { bg: '#dcfce7', fg: '#15803d' }, { bg: '#fce7f3', fg: '#be185d' },
-  { bg: '#fef3c7', fg: '#b45309' }, { bg: '#e0f2fe', fg: '#0369a1' }, { bg: '#f3e8ff', fg: '#7e22ce' },
-];
-function avatarColors(seed: number) {
-  return AVATAR_PALETTE[seed % AVATAR_PALETTE.length];
+function roleLabel(role: string | null | undefined): string {
+  if (!role) return '';
+  return role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
+
 function fmtShort(d: string | null | undefined): string {
   if (!d) return '';
   const date = new Date(d);
@@ -29,163 +29,144 @@ function fmtShort(d: string | null | undefined): string {
     ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : date.toLocaleDateString([], { day: '2-digit', month: 'short' });
 }
-function lastMessagePreview(lm: ProjectMessengerThread['last_message']): string {
-  if (!lm) return 'No messages yet';
-  if (lm.content) return lm.content;
-  return lm.message_type === 'image' ? '📷 Photo' : '📎 Attachment';
-}
-const VISIBILITY_LABEL: Record<string, string> = {
-  internal: 'Internal', seller_facing: 'Seller-facing', client_facing: 'Client-facing',
-};
 
+function errorMessage(err: unknown, fallback: string): string {
+  const ex = err as { response?: { data?: { message?: string } } };
+  return ex.response?.data?.message ?? fallback;
+}
+
+// Project Chat — one thread per project, no groups/direct chats, no
+// conversation switching (see Api\User\ProjectMessengerController and
+// ProjectChatService). Every Company employee formally tied to the project
+// plus the Project Manager/Company Admin can be in this single conversation;
+// a Seller only ever joins if a PM/Admin explicitly adds them.
 export default function ProjectChatPage() {
   useAdminGuard();
   const me = getAuthUser() as User | null;
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const projectId = Number(id);
-  // can() reads the auth cookie, which isn't available during SSR — calling
-  // it directly in the render body would make the server's HTML (no
-  // permission) disagree with the client's first paint (real permission),
-  // causing a hydration mismatch. Gating on `mounted` (false during SSR and
-  // during the client's pre-hydration first render, flipped true only in a
-  // post-mount effect) keeps that first render identical on both sides.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  // Regular internal staff (Developer/Designer/QA/Production/Team Member)
-  // can start a direct chat with anyone project-eligible EXCEPT a Seller —
-  // enforced server-side; isPM (PM/Admin) can always start one, Seller
-  // included, and doesn't need this separate permission.
-  const canStartDirect = mounted && can('project_management', 'canCreateProjectDirectChat');
-  // Company Admin/PM can delete ANY message; everyone else can only ever
-  // delete their own (plain ownership check, enforced server-side too).
-  const canDeleteAny = mounted && can('project_management', 'canDeleteAnyProjectChatMessage');
+  // Every role here can only ever delete their own message (plain ownership
+  // check, enforced server-side too). Company Admin's unrestricted delete
+  // authority only applies from the Admin panel's own chat page.
 
   const [projectName, setProjectName] = useState('');
-  const [threads, setThreads] = useState<ProjectMessengerThread[]>([]);
-  const [isPM, setIsPM] = useState(false);
-  const [loadingThreads, setLoadingThreads] = useState(true);
+  // A draft project rejects messages server-side (ProjectMessengerController::
+  // send()'s isDraft() guard) — the composer locks to match, and re-opens
+  // by itself once the project is activated.
+  const [isDraft, setIsDraft] = useState(false);
+  const [clientId, setClientId] = useState<number | null>(null);
+  const [sellerId, setSellerId] = useState<number | null>(null);
+  const [thread, setThread] = useState<ProjectMessengerThread | null>(null);
+  const [canManageParticipants, setCanManageParticipants] = useState(false);
+  // Literal PM only. Delegated participant managers still cannot @mention a
+  // Seller unless they are the actual PM, matching the backend send() gate.
+  const [isLiteralPm, setIsLiteralPm] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [noAccess, setNoAccess] = useState(false);
-  const [activeThreadId, setActiveThreadId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
 
   const [eligibleUsers, setEligibleUsers] = useState<ProjectMessengerEligibleUser[]>([]);
-  const [showNewGroup, setShowNewGroup] = useState(false);
-  const [showNewDirect, setShowNewDirect] = useState(false);
-  const [groupTitle, setGroupTitle] = useState('');
-  const [groupVisibility, setGroupVisibility] = useState<'internal' | 'seller_facing' | 'client_facing'>('internal');
-  const [groupParticipants, setGroupParticipants] = useState<number[]>([]);
   const [showParticipants, setShowParticipants] = useState(false);
   const [addParticipantId, setAddParticipantId] = useState<string>('');
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<number[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
+  const [showInvitePm, setShowInvitePm] = useState(false);
+  const [eligiblePms, setEligiblePms] = useState<{ id: number; name: string }[]>([]);
+  const [invitePmId, setInvitePmId] = useState('');
+  const [invitingPm, setInvitingPm] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fetchedEligibleRef = useRef(false);
+  const fetchedEligiblePmsRef = useRef(false);
 
-  // silent=true (the periodic background refresh from loadMessages' 8s poll,
-  // and the read-receipt refresh right after opening a thread) skips the
-  // loadingThreads flag entirely — otherwise the whole sidebar flashes to a
-  // "Loading…" placeholder and back every ~8 seconds while a thread is open.
-  const loadThreads = (silent = false) => {
-    if (!silent) setLoadingThreads(true);
-    userProjectMessengerService.list(projectId)
-      .then(r => { setThreads(r.threads); setIsPM(r.is_pm); setNoAccess(false); })
-      .catch(() => { if (!silent) setNoAccess(true); })
-      .finally(() => { if (!silent) setLoadingThreads(false); });
+  const loadMessages = () => {
+    userProjectMessengerService.messages(projectId).then(r => setMessages(r.messages)).catch(() => {});
   };
 
-  const loadMessages = (threadId: number) => {
-    userProjectMessengerService.messages(projectId, threadId).then(r => setMessages(r.messages)).catch(() => {});
-    setTimeout(() => loadThreads(true), 300);
+  const loadThread = () => {
+    userProjectMessengerService.show(projectId)
+      .then(r => {
+        setThread(r.thread); setCanManageParticipants(r.can_manage_participants); setIsLiteralPm(r.is_literal_pm); setNoAccess(false); loadMessages();
+        // eligible-participants is permission-gated server-side and only used
+        // by the Manage Participants picker.
+        // Fetched once (not on every 8s poll) since the eligible pool rarely changes mid-session.
+        if (r.can_manage_participants && !fetchedEligibleRef.current) {
+          fetchedEligibleRef.current = true;
+          userProjectMessengerService.eligibleParticipants(projectId).then(setEligibleUsers).catch(() => {});
+        }
+      })
+      .catch((err) => { if (!handleNotFound(err, router)) setNoAccess(true); })
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    loadThreads();
-    userProjectMessengerService.eligibleParticipants(projectId).then(setEligibleUsers).catch(() => {});
-    userProjectService.getOne(projectId).then(p => setProjectName(p.name)).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!activeThreadId) return;
-    loadMessages(activeThreadId);
-    const interval = setInterval(() => loadMessages(activeThreadId), 8000);
+    loadThread();
+    userProjectService.getOne(projectId).then(p => {
+      setProjectName(p.name);
+      setClientId(p.client_id);
+      setIsDraft(p.status === 'draft');
+      const seller = p.seller_id;
+      setSellerId(seller == null ? null : (typeof seller === 'object' ? seller.id : seller));
+    }).catch(() => {});
+    const interval = setInterval(() => { loadThread(); }, 8000);
     return () => clearInterval(interval);
-  }, [activeThreadId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  const activeThread = threads.find(t => t.id === activeThreadId) ?? null;
-
-  const createGroup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!groupTitle.trim() || groupParticipants.length === 0) { toast.error('Enter a title and select at least one participant'); return; }
-    try {
-      const { thread_id } = await userProjectMessengerService.createGroup(projectId, groupTitle.trim(), groupVisibility, groupParticipants);
-      setShowNewGroup(false);
-      setGroupTitle('');
-      setGroupParticipants([]);
-      loadThreads();
-      setActiveThreadId(thread_id);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to create group');
-    }
-  };
-
-  const startDirect = async (userId: number) => {
-    try {
-      const { thread_id } = await userProjectMessengerService.createDirect(projectId, userId);
-      setShowNewDirect(false);
-      loadThreads();
-      setActiveThreadId(thread_id);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to start direct chat');
-    }
-  };
-
   const addParticipant = async () => {
-    if (!activeThreadId || !addParticipantId) return;
+    if (!addParticipantId) return;
     try {
-      await userProjectMessengerService.addParticipant(projectId, activeThreadId, Number(addParticipantId));
+      await userProjectMessengerService.addParticipant(projectId, Number(addParticipantId));
       setAddParticipantId('');
-      loadThreads();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to add participant');
+      loadThread();
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to add participant'));
     }
   };
 
   const removeParticipant = async (userId: number) => {
-    if (!activeThreadId) return;
     if (!confirm('Remove this participant from the chat?')) return;
     try {
-      await userProjectMessengerService.removeParticipant(projectId, activeThreadId, userId);
-      loadThreads();
+      await userProjectMessengerService.removeParticipant(projectId, userId);
+      loadThread();
     } catch { toast.error('Failed to remove participant'); }
   };
 
-  const toggleMute = async (threadId: number) => {
-    try { await userProjectMessengerService.toggleMute(projectId, threadId); loadThreads(); }
+  const toggleMute = async () => {
+    try { await userProjectMessengerService.toggleMute(projectId); loadThread(); }
     catch { toast.error('Failed to update mute state'); }
   };
 
-  const deleteThread = async () => {
-    if (!activeThreadId || !activeThread) return;
-    if (!confirm(`Delete "${activeThread.title}" permanently? This removes the whole chat and all its messages.`)) return;
-    try {
-      await userProjectMessengerService.deleteThread(projectId, activeThreadId);
-      setActiveThreadId(null);
-      loadThreads();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to delete chat');
+  const toggleInvitePm = () => {
+    setShowInvitePm(v => !v);
+    if (!fetchedEligiblePmsRef.current) {
+      fetchedEligiblePmsRef.current = true;
+      userProjectMessengerService.eligiblePms(projectId).then(setEligiblePms).catch(() => {});
     }
+  };
+
+  const invitePm = async () => {
+    if (!invitePmId) return;
+    setInvitingPm(true);
+    try {
+      await userProjectMessengerService.invitePm(projectId, Number(invitePmId));
+      toast.success('Project Manager invited');
+      setInvitePmId('');
+      setShowInvitePm(false);
+      loadThread();
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to invite Project Manager'));
+    } finally { setInvitingPm(false); }
   };
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeThreadId) return;
     if (!text.trim() && !file) return;
     if (file) {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
@@ -194,25 +175,25 @@ export default function ProjectChatPage() {
     }
     setSending(true);
     try {
-      await userProjectMessengerService.send(projectId, activeThreadId, text.trim(), selectedMentions, file);
+      await userProjectMessengerService.send(projectId, text.trim(), selectedMentions, file);
       setText('');
       setFile(null);
       setSelectedMentions([]);
-      loadMessages(activeThreadId);
-      loadThreads();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to send message');
+      loadMessages();
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to send message'));
     } finally { setSending(false); }
   };
 
   const deleteMessage = async (messageId: number) => {
-    if (!activeThreadId) return;
     if (!confirm('Delete this message?')) return;
     try {
-      await userProjectMessengerService.deleteMessage(projectId, activeThreadId, messageId);
-      setMessages(prev => prev.filter(m => m.id !== messageId));
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to delete message');
+      await userProjectMessengerService.deleteMessage(projectId, messageId);
+      setMessages(prev => prev.map(m => m.id === messageId
+        ? { ...m, is_deleted: true, content: null, attachment_name: null, attachment_path: null }
+        : m));
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to delete message'));
     }
   };
 
@@ -227,19 +208,19 @@ export default function ProjectChatPage() {
   };
 
   const saveEdit = async (messageId: number) => {
-    if (!activeThreadId || !editText.trim()) return;
+    if (!editText.trim()) return;
     try {
-      const updated = await userProjectMessengerService.updateMessage(projectId, activeThreadId, messageId, editText.trim());
+      const updated = await userProjectMessengerService.updateMessage(projectId, messageId, editText.trim());
       setMessages(prev => prev.map(m => m.id === messageId ? updated : m));
       cancelEdit();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to update message');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to update message'));
     }
   };
 
   const downloadAttachment = async (m: ChatMessage) => {
-    if (!activeThreadId || !m.attachment_name) return;
-    try { await userProjectMessengerService.downloadAttachment(projectId, activeThreadId, m.id, m.attachment_name); }
+    if (!m.attachment_name) return;
+    try { await userProjectMessengerService.downloadAttachment(projectId, m.id, m.attachment_name); }
     catch { toast.error('Download failed'); }
   };
 
@@ -254,6 +235,32 @@ export default function ProjectChatPage() {
     setText(text.slice(0, at) + `@${name} `);
     setSelectedMentions(prev => prev.includes(userId) ? prev : [...prev, userId]);
     setMentionQuery(null);
+  };
+
+  // Mirrors send()'s mention rule exactly, so the suggestion list never
+  // offers a tag the server would silently drop: anyone who ISN'T the
+  // literal PM — Seller or plain team member alike — can only ever
+  // successfully tag the literal PM (or Company Admin, via the sentinel
+  // below); never a Seller, never the Client, never each other. Only the
+  // literal PM can tag anyone, including the Client — the only way a PM
+  // message ever reaches the Client (visibility='client', see send()).
+  // Company Admin is never a real chat_participants row, so it's added as a
+  // synthetic candidate (id 0, matching send()'s ADMIN_MENTION_ID) rather
+  // than coming from `thread.participants`.
+  const meIsSeller = me?.role_type === 'seller';
+  // Only this project's own linked Seller may invite a PM here — matches
+  // Api\User\ProjectMessengerController::invitePm()'s own gate exactly.
+  const isProjectSeller = meIsSeller && sellerId != null && me?.id === sellerId;
+  const ADMIN_MENTION_ID = 0;
+  const mentionCandidates = (query: string) => {
+    const q = query.toLowerCase();
+    const staff = (thread?.participants ?? []).filter(p =>
+      p.user_id !== me?.id
+      && (isLiteralPm || !!p.is_project_pm)
+      && p.name?.toLowerCase().includes(q)
+    );
+    const admin: ProjectMessengerParticipant = { user_id: ADMIN_MENTION_ID, name: 'Company Admin', role: null };
+    return 'company admin'.includes(q) ? [admin, ...staff] : staff;
   };
 
   if (noAccess) {
@@ -275,135 +282,56 @@ export default function ProjectChatPage() {
         <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1e293b', margin: 0 }}>Chat{projectName && ` — ${projectName}`}</h2>
       </div>
 
-      <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 220px)', minHeight: 420 }}>
-        <div style={{ width: 300, flexShrink: 0, background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {(isPM || canStartDirect) && (
-            <div style={{ padding: 14, borderBottom: '1px solid #f1f5f9', display: 'flex', gap: 8 }}>
-              {isPM && (
-                <button onClick={() => { setShowNewGroup(v => { if (!v && !groupTitle) setGroupTitle(projectName); return !v; }); setShowNewDirect(false); }} style={{ flex: 1, padding: '8px 10px', borderRadius: 20, border: 'none', background: '#2563eb', fontSize: 12, fontWeight: 600, color: '#fff', cursor: 'pointer' }}>+ Group</button>
-              )}
-              {canStartDirect && (
-                <button onClick={() => { setShowNewDirect(v => !v); setShowNewGroup(false); }} style={{ flex: 1, padding: '8px 10px', borderRadius: 20, border: '1px solid #e2e8f0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#334155', cursor: 'pointer' }}>+ New Chat</button>
-              )}
-            </div>
-          )}
-
-          {showNewGroup && (
-            <form onSubmit={createGroup} style={{ padding: 12, borderBottom: '1px solid #f1f5f9' }}>
-              <input value={groupTitle} onChange={e => setGroupTitle(e.target.value)} placeholder="Group name" style={{ ...inp, marginBottom: 8, fontSize: 12.5 }} />
-              <select value={groupVisibility} onChange={e => setGroupVisibility(e.target.value as any)} style={{ ...inp, marginBottom: 8, fontSize: 12.5 }}>
-                <option value="internal">Internal</option>
-                <option value="seller_facing">Seller-facing</option>
-                <option value="client_facing">Client-facing</option>
-              </select>
-              <div style={{ maxHeight: 160, overflowY: 'auto', marginBottom: 8 }}>
-                {eligibleUsers.map(u => (
-                  <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 2px', fontSize: 12, color: '#334155', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={groupParticipants.includes(u.id)}
-                      onChange={e => setGroupParticipants(prev => e.target.checked ? [...prev, u.id] : prev.filter(id => id !== u.id))} />
-                    {u.name} {u.is_seller && <span style={{ color: '#d97706', fontSize: 10.5 }}>(Seller)</span>}
-                  </label>
-                ))}
-              </div>
-              <button type="submit" style={{ width: '100%', padding: '7px 10px', borderRadius: 7, border: 'none', background: '#2563eb', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Create Group</button>
-            </form>
-          )}
-
-          {showNewDirect && (
-            <div style={{ padding: 12, borderBottom: '1px solid #f1f5f9', maxHeight: 220, overflowY: 'auto' }}>
-              <div onClick={() => startDirect(0)} style={{ padding: '7px 8px', borderRadius: 7, cursor: 'pointer', fontSize: 12.5, color: '#334155', fontWeight: 600 }}
-                onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-                🛡️ Company Admin
-              </div>
-              {eligibleUsers.length === 0 ? (
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>No other eligible users found.</div>
-              ) : eligibleUsers.map(u => (
-                <div key={u.id} onClick={() => startDirect(u.id)} style={{ padding: '7px 8px', borderRadius: 7, cursor: 'pointer', fontSize: 12.5, color: '#334155' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-                  {u.name} {u.is_seller && <span style={{ color: '#d97706', fontSize: 10.5 }}>(Seller)</span>}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {loadingThreads ? (
-              <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading…</div>
-            ) : threads.length === 0 ? (
-              <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No project chat yet.</div>
-            ) : threads.map(t => {
-              const colors = avatarColors(t.id);
-              const unread = t.unread_count ?? 0;
-              return (
-                <div key={t.id} onClick={() => setActiveThreadId(t.id)} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f8fafc',
-                  background: t.id === activeThreadId ? '#eff6ff' : 'transparent',
-                }}>
-                  <div style={{ width: 42, height: 42, borderRadius: '50%', background: colors.bg, color: colors.fg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, flexShrink: 0 }}>
-                    {t.thread_type === 'project_group' ? '👥' : t.title.charAt(0).toUpperCase()}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: unread > 0 ? 700 : 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.title}{t.is_muted && ' 🔕'}
-                      </span>
-                      <span style={{ fontSize: 10.5, color: unread > 0 ? '#2563eb' : '#94a3b8', fontWeight: unread > 0 ? 700 : 400, flexShrink: 0 }}>{fmtShort(t.last_message_at)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                      <span style={{ fontSize: 12, color: unread > 0 ? '#334155' : '#94a3b8', fontWeight: unread > 0 ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.last_message?.sender_name ? `${t.last_message.sender_name}: ` : ''}{lastMessagePreview(t.last_message)}
-                      </span>
-                      {unread > 0 ? (
-                        <span style={{ flexShrink: 0, minWidth: 18, height: 18, borderRadius: 9, background: '#2563eb', color: '#fff', fontSize: 10.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
-                          {unread > 99 ? '99+' : unread}
-                        </span>
-                      ) : t.visibility && (
-                        <span style={{ fontSize: 9.5, color: '#94a3b8', flexShrink: 0 }}>{VISIBILITY_LABEL[t.visibility]}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={{ flex: 1, background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {!activeThread ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 13 }}>Select a conversation</div>
+      <div style={{ height: 'calc(100vh - 220px)', minHeight: 420 }}>
+        <div style={{ height: '100%', background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {loading || !thread ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 13 }}>Loading…</div>
           ) : (
             <>
               <div style={{ padding: '12px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: avatarColors(activeThread.id).bg, color: avatarColors(activeThread.id).fg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flexShrink: 0 }}>
-                    {activeThread.thread_type === 'project_group' ? '👥' : activeThread.title.charAt(0).toUpperCase()}
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#e0e7ff', color: '#4338ca', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flexShrink: 0 }}>
+                    👥
                   </div>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{activeThread.title}</div>
-                    {activeThread.thread_type === 'project_group' && (
-                      <div style={{ fontSize: 11, color: '#94a3b8' }}>{activeThread.participants.map(p => p.name).filter(Boolean).join(', ')}</div>
-                    )}
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Project Chat</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{thread.participants.map(p => p.name).filter(Boolean).join(', ')}</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                  {isPM && (
+                  {canManageParticipants && (
                     <button onClick={() => setShowParticipants(v => !v)} style={{ border: '1px solid #e2e8f0', background: '#fff', borderRadius: 20, padding: '5px 12px', fontSize: 11.5, color: '#64748b', cursor: 'pointer' }}>Participants</button>
                   )}
-                  <button onClick={() => toggleMute(activeThread.id)} style={{ border: '1px solid #e2e8f0', background: '#fff', borderRadius: 20, padding: '5px 12px', fontSize: 11.5, color: '#64748b', cursor: 'pointer' }}>
-                    {activeThread.is_muted ? '🔔 Unmute' : '🔕 Mute'}
-                  </button>
-                  {isPM && (
-                    <button onClick={deleteThread} style={{ border: '1px solid #fecaca', background: '#fff', borderRadius: 20, padding: '5px 12px', fontSize: 11.5, color: '#dc2626', cursor: 'pointer' }}>Delete Chat</button>
+                  {isProjectSeller && (
+                    <button onClick={toggleInvitePm} style={{ border: '1px solid #e2e8f0', background: '#fff', borderRadius: 20, padding: '5px 12px', fontSize: 11.5, color: '#64748b', cursor: 'pointer' }}>+ Invite PM</button>
                   )}
+                  <button onClick={toggleMute} style={{ border: '1px solid #e2e8f0', background: '#fff', borderRadius: 20, padding: '5px 12px', fontSize: 11.5, color: '#64748b', cursor: 'pointer' }}>
+                    {thread.is_muted ? '🔔 Unmute' : '🔕 Mute'}
+                  </button>
                 </div>
               </div>
 
-              {showParticipants && isPM && (
+              {isProjectSeller && showInvitePm && (
+                <div style={{ padding: '12px 20px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <select value={invitePmId} onChange={e => setInvitePmId(e.target.value)} style={{ ...inp, fontSize: 12 }}>
+                      <option value="">Select a Project Manager…</option>
+                      {eligiblePms.map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                    <button onClick={invitePm} disabled={invitingPm || !invitePmId} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: '#2563eb', color: '#fff', fontSize: 12, fontWeight: 600, cursor: invitingPm || !invitePmId ? 'not-allowed' : 'pointer', flexShrink: 0, opacity: invitingPm || !invitePmId ? 0.6 : 1 }}>Invite</button>
+                  </div>
+                  {eligiblePms.length === 0 && (
+                    <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>No active Project Managers found at your company.</div>
+                  )}
+                </div>
+              )}
+
+              {showParticipants && canManageParticipants && (
                 <div style={{ padding: '12px 20px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                    {activeThread.participants.map(p => (
+                    {thread.participants.map(p => (
                       <span key={p.user_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '3px 10px', fontSize: 11.5, color: '#334155' }}>
                         {p.name}
                         <button onClick={() => removeParticipant(p.user_id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
@@ -413,7 +341,7 @@ export default function ProjectChatPage() {
                   <div style={{ display: 'flex', gap: 8 }}>
                     <select value={addParticipantId} onChange={e => setAddParticipantId(e.target.value)} style={{ ...inp, fontSize: 12 }}>
                       <option value="">Add participant…</option>
-                      {eligibleUsers.filter(u => !activeThread.participants.some(p => p.user_id === u.id)).map(u => (
+                      {eligibleUsers.filter(u => !thread.participants.some(p => p.user_id === u.id)).map(u => (
                         <option key={u.id} value={u.id}>{u.name}{u.is_seller ? ' (Seller)' : ''}</option>
                       ))}
                     </select>
@@ -427,7 +355,13 @@ export default function ProjectChatPage() {
                   <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 13, marginTop: 20 }}>No messages yet. Say hello 👋</div>
                 ) : messages.map(m => {
                   const isMine = m.sender_id != null && m.sender_id === me?.id;
-                  const senderName = m.sender?.name ?? m.sender_admin?.name ?? '—';
+                  // guest_sender_name — set on a message sent anonymously
+                  // from the public, no-login invoice payment page's "Chat
+                  // with Seller" (Api\PublicInvoiceChatController) before
+                  // this client ever had a portal login; previously fell
+                  // straight through to '—' since neither sender nor
+                  // sender_admin exists for it.
+                  const senderName = chatSenderName(m);
                   return (
                     <div key={m.id} style={{ display: 'flex', justifyContent: isMine ? 'flex-end' : 'flex-start', gap: 8 }}>
                       {!isMine && (
@@ -436,7 +370,7 @@ export default function ProjectChatPage() {
                         </div>
                       )}
                       <div style={{ maxWidth: '68%', display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start' }}>
-                        {!isMine && activeThread.thread_type === 'project_group' && (
+                        {!isMine && (
                           <div style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', marginBottom: 3, marginLeft: 4 }}>{senderName}</div>
                         )}
                         <div style={{
@@ -447,7 +381,9 @@ export default function ProjectChatPage() {
                           boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
                           border: isMine ? 'none' : '1px solid #f1f5f9',
                         }}>
-                          {editingMessageId === m.id ? (
+                          {m.is_deleted ? (
+                            <div style={{ fontSize: 13, fontStyle: 'italic', color: isMine ? 'rgba(255,255,255,0.75)' : '#94a3b8' }}>This message was deleted</div>
+                          ) : editingMessageId === m.id ? (
                             <div>
                               <input value={editText} onChange={e => setEditText(e.target.value)} style={{ ...inp, fontSize: 13, marginBottom: 6, color: '#0f172a' }} autoFocus />
                               <div style={{ display: 'flex', gap: 8 }}>
@@ -471,14 +407,17 @@ export default function ProjectChatPage() {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3, marginLeft: isMine ? 0 : 4, marginRight: isMine ? 4 : 0 }}>
                           <span style={{ fontSize: 10.5, color: '#94a3b8' }}>{fmtShort(m.sent_at)}{m.edited_at && ' (edited)'}</span>
-                          {isMine && editingMessageId !== m.id && (
+                          {!m.is_deleted && m.visibility === 'client' && (
+                            <span title="The client can see this message" style={{ fontSize: 10, fontWeight: 700, color: '#059669', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: '1px 7px' }}>👁 Client</span>
+                          )}
+                          {!m.is_deleted && isMine && editingMessageId !== m.id && (
                             <>
                               {m.message_type === 'text' && (
                                 <button onClick={() => startEdit(m)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: 10.5, fontWeight: 600, cursor: 'pointer', padding: 0 }}>Edit</button>
                               )}
                             </>
                           )}
-                          {(isMine || canDeleteAny) && editingMessageId !== m.id && (
+                          {!m.is_deleted && isMine && editingMessageId !== m.id && (
                             <button onClick={() => deleteMessage(m.id)} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: 10.5, fontWeight: 600, cursor: 'pointer', padding: 0 }}>Delete</button>
                           )}
                         </div>
@@ -490,13 +429,13 @@ export default function ProjectChatPage() {
               </div>
 
               <form onSubmit={send} style={{ padding: '12px 20px', borderTop: '1px solid #f1f5f9', background: '#fff', position: 'relative' }}>
-                {mentionQuery !== null && activeThread.participants.filter(p => p.name?.toLowerCase().includes(mentionQuery.toLowerCase())).length > 0 && (
+                {mentionQuery !== null && mentionCandidates(mentionQuery).length > 0 && (
                   <div style={{ position: 'absolute', bottom: '100%', left: 20, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', marginBottom: 6, maxHeight: 160, overflowY: 'auto', minWidth: 180 }}>
-                    {activeThread.participants.filter(p => p.name?.toLowerCase().includes(mentionQuery.toLowerCase())).map(p => (
+                    {mentionCandidates(mentionQuery).map(p => (
                       <div key={p.user_id} onClick={() => pickMention(p.user_id, p.name ?? '')} style={{ padding: '7px 12px', fontSize: 12.5, cursor: 'pointer', color: '#334155' }}
                         onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-                        {p.name}
+                        {p.name} {p.role && <span style={{ color: '#94a3b8', fontSize: 11 }}>({roleLabel(p.role)})</span>}
                       </div>
                     ))}
                   </div>
@@ -507,14 +446,15 @@ export default function ProjectChatPage() {
                     <button type="button" onClick={() => setFile(null)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Remove</button>
                   </div>
                 )}
+                {isDraft && <DraftNotice style={{ marginBottom: 10 }} />}
                 <div style={{ display: 'flex', gap: 10 }}>
-                  <label style={{ padding: '9px 12px', borderRadius: '50%', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontSize: 15, display: 'flex', alignItems: 'center' }}>
+                  <label title={isDraft ? DRAFT_HINT : undefined} style={{ padding: '9px 12px', borderRadius: '50%', border: '1px solid #e2e8f0', background: isDraft ? '#f8fafc' : '#fff', cursor: isDraft ? 'not-allowed' : 'pointer', fontSize: 15, display: 'flex', alignItems: 'center', opacity: isDraft ? 0.5 : 1 }}>
                     📎
-                    <input type="file" style={{ display: 'none' }} accept={ALLOWED_ATTACHMENT_TYPES.map(t => `.${t}`).join(',')}
+                    <input type="file" style={{ display: 'none' }} disabled={isDraft} accept={ALLOWED_ATTACHMENT_TYPES.map(t => `.${t}`).join(',')}
                       onChange={e => { setFile(e.target.files?.[0] ?? null); e.target.value = ''; }} />
                   </label>
-                  <input value={text} onChange={e => onTextChange(e.target.value)} placeholder="Type a message… use @ to mention" style={{ ...inp, borderRadius: 20, flex: 1 }} />
-                  <button type="submit" disabled={sending} style={{ padding: '9px 20px', borderRadius: 20, border: 'none', background: sending ? '#93c5fd' : '#2563eb', color: '#fff', fontSize: 13, fontWeight: 600, cursor: sending ? 'wait' : 'pointer' }}>Send</button>
+                  <input value={text} onChange={e => onTextChange(e.target.value)} disabled={isDraft} title={isDraft ? DRAFT_HINT : undefined} placeholder={isDraft ? 'Chat opens up once the project is activated' : clientId ? 'Type a message… the client sees it unless you @mention someone' : 'Type a message… use @ to mention'} style={{ ...inp, borderRadius: 20, flex: 1, background: isDraft ? '#f8fafc' : '#fff' }} />
+                  <button type="submit" disabled={sending || isDraft} title={isDraft ? DRAFT_HINT : undefined} style={{ padding: '9px 20px', borderRadius: 20, border: 'none', background: isDraft ? '#cbd5e1' : (sending ? '#93c5fd' : '#2563eb'), color: '#fff', fontSize: 13, fontWeight: 600, cursor: isDraft ? 'not-allowed' : (sending ? 'wait' : 'pointer') }}>Send</button>
                 </div>
               </form>
             </>

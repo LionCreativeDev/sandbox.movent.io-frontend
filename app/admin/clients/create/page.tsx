@@ -4,6 +4,10 @@ import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
+import SubmitButton from '@/components/ui/SubmitButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import PhoneInput from '@/components/ui/PhoneInput';
+import { ALL_COUNTRIES } from '@/lib/countries';
 
 interface Company { id: number; name: string; currency: string }
 
@@ -12,7 +16,6 @@ const MODULES = [
   { key: 'invoices',  label: 'Invoices',         desc: 'View invoices and request payments' },
   { key: 'payments',  label: 'Payment History',  desc: 'Read-only payment record' },
   { key: 'documents', label: 'Documents',        desc: 'Download shared files' },
-  { key: 'chat',      label: 'Chat',             desc: 'Message with your team' },
   { key: 'support',   label: 'Support Tickets',  desc: 'Raise and track issues' },
   { key: 'reports',   label: 'Reports',          desc: 'Project and invoice reports' },
 ];
@@ -36,7 +39,7 @@ export default function CreateClientPage() {
 
   const [form, setForm] = useState({
     company_id: '', name: '', email: '', phone: '',
-    company_name: '', address: '', notes: '', status: 'active',
+    company_name: '', address: '', country: '', notes: '', status: 'active',
     enable_portal: false, portal_password: '',
   });
 
@@ -53,6 +56,7 @@ export default function CreateClientPage() {
 
   const handleSubmit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
+    if (saving) return; // Guards a double-click/Enter re-submit before the disabled prop re-renders.
     if (form.enable_portal && !form.email) {
       toast.error('Contact Email is required to enable Portal Access — it doubles as the login email.');
       return;
@@ -67,6 +71,7 @@ export default function CreateClientPage() {
         phone:         form.phone || null,
         company_name:  form.company_name || null,
         address:       form.address || null,
+        country:       form.country || null,
         notes:         form.notes || null,
         status:        form.status,
         enable_portal: form.enable_portal,
@@ -93,6 +98,7 @@ export default function CreateClientPage() {
 
   return (
     <DashboardLayout title="Add Client">
+      <LoadingOverlay show={saving} message="Creating Client…" />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
         <button onClick={() => router.back()} style={{
@@ -151,7 +157,7 @@ export default function CreateClientPage() {
                 </div>
                 <div>
                   <label style={lbl}>Phone</label>
-                  <input value={form.phone} onChange={e => setF('phone', e.target.value)} placeholder="+92-300-0000000" style={inp} />
+                  <PhoneInput value={form.phone} onChange={v => setF('phone', v)} />
                 </div>
               </div>
 
@@ -160,9 +166,18 @@ export default function CreateClientPage() {
                 <input value={form.company_name} onChange={e => setF('company_name', e.target.value)} placeholder="e.g. ABC Pvt Ltd" style={inp} />
               </div>
 
-              <div style={{ marginBottom: 14 }}>
-                <label style={lbl}>Address</label>
-                <input value={form.address} onChange={e => setF('address', e.target.value)} placeholder="Street, City, Country" style={inp} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div>
+                  <label style={lbl}>Address</label>
+                  <input value={form.address} onChange={e => setF('address', e.target.value)} placeholder="Street, City, Country" style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>Country</label>
+                  <select value={form.country} onChange={e => setF('country', e.target.value)} style={inp}>
+                    <option value="">— Select —</option>
+                    {ALL_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                  </select>
+                </div>
               </div>
 
               <div>
@@ -265,14 +280,14 @@ export default function CreateClientPage() {
 
         {/* Submit */}
         <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-          <button type="submit" disabled={saving} style={{
+          <SubmitButton loading={saving} loadingText="Creating Client…" style={{
             padding: '11px 28px', background: saving ? '#93c5fd' : '#2563eb',
             color: '#fff', border: 'none', borderRadius: 8,
-            fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
+            fontSize: 14, fontWeight: 600,
           }}>
-            {saving ? 'Creating…' : 'Create Client'}
-          </button>
-          <button type="button" onClick={() => router.back()} style={{
+            Create Client
+          </SubmitButton>
+          <button type="button" onClick={() => router.back()} disabled={saving} style={{
             padding: '11px 22px', background: '#fff', color: '#64748b',
             border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, cursor: 'pointer',
           }}>Cancel</button>
