@@ -29,6 +29,15 @@ export default function ComplianceClientsPage() {
 
     const canView = can("compliance", "canViewComplianceCases");
 
+    // can() reads cookies, unavailable during server-side rendering, so the
+    // server always sees canView=false while the client's pre-hydration
+    // render sees the real cookie — a hydration mismatch. Hold the
+    // permission-gated branch behind `mounted` (false on both the server
+    // and the client's first render) so the first paint matches, then let
+    // the real value take over once mounted flips true post-hydration.
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => { setMounted(true); }, []);
+
     const [clients, setClients] = useState<ComplianceClientListItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [forbidden, setForbidden] = useState(false);
@@ -80,7 +89,11 @@ export default function ComplianceClientsPage() {
                     </p>
                 </div>
 
-                {!canView ? (
+                {!mounted ? (
+                    <div style={{ padding: 48, textAlign: "center", color: "#94a3b8" }}>
+                        Loading…
+                    </div>
+                ) : !canView ? (
                     <div
                         style={{
                             padding: 48,

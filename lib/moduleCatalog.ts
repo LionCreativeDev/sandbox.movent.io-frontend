@@ -161,7 +161,8 @@ export const MODULE_CATALOG: ModuleDef[] = [
       { key: 'canViewComplianceCases',           label: 'View Compliance Cases' },
       { key: 'canManageComplianceTemplates',     label: 'Manage Compliance Templates' },
       { key: 'canManageComplianceRequirements',  label: 'Manage Compliance Requirements' },
-      { key: 'canAssignComplianceOfficer',       label: 'Assign Compliance Officer' },
+      // No canAssignComplianceOfficer — Company Admin-only action, not a
+      // delegable staff permission.
     ],
   },
 

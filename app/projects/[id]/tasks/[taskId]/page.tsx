@@ -11,6 +11,7 @@ import { User } from '@/types';
 import { Badge, ThumbIcon, TASK_SC, PRIORITY_SC, card, inp, lbl, fmtDate, fmtFileSize, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
+import RichText from '@/components/ui/RichText';
 
 const TASK_TYPE_LABEL: Record<string, string> = {
   general: 'General', production: 'Production', client_request: 'Client Request', internal: 'Internal',
@@ -82,6 +83,10 @@ export default function UserTaskDetailPage() {
   const [attachments, setAttachments] = useState<ProjectTaskAttachment[]>([]);
   const [attLoading, setAttLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  // "Edit Tasks" is its own assignable/revocable permission (pm_edit_tasks →
+  // canEditTasks) — permission-only, no PM-tier bypass, mirroring
+  // Api\User\TaskController::update()'s $canEdit.
+  const canEditTasks = can('project_management', 'canEditTasks');
   const canViewTaskAttachments = can('project_management', 'canViewTaskAttachments');
   const canUploadTaskAttachments = can('project_management', 'canUploadTaskAttachments');
   const canDownloadTaskAttachments = can('project_management', 'canDownloadTaskAttachments');
@@ -394,6 +399,18 @@ export default function UserTaskDetailPage() {
                 {task.task_type && <Badge label={TASK_TYPE_LABEL[task.task_type] ?? task.task_type} />}
               </div>
             </div>
+            {canEditTasks && (
+              <button
+                onClick={() => router.push(`/projects/${projectId}/tasks/${taskId}/edit`)}
+                style={{
+                  padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                  background: '#fff', color: '#2563eb', border: '1px solid #bfdbfe',
+                  borderRadius: 8, flexShrink: 0,
+                }}
+              >
+                ✏️ Edit Task
+              </button>
+            )}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, margin: '20px 0' }}>
@@ -409,7 +426,7 @@ export default function UserTaskDetailPage() {
           {task.description && (
             <div style={{ marginBottom: 16 }}>
               <div style={lbl}>Description</div>
-              <div style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{task.description}</div>
+              <RichText value={task.description} style={{ fontSize: 13, color: '#475569' }} />
             </div>
           )}
 

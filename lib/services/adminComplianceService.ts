@@ -172,6 +172,15 @@ export interface ComplianceChatMessage {
   sender_admin: { id: number; name: string } | null;
 }
 
+export interface ComplianceGeneralChatThread {
+  id: number;
+  thread_type: 'direct' | 'group';
+  title: string;
+  participants: { user_id: number; name: string | null; role: string | null }[];
+  last_message_at: string | null;
+  last_message: { content: string; message_type: string; sender_name: string; sent_at: string } | null;
+}
+
 export interface ComplianceProjectAttachment {
   id: number;
   original_name: string;
@@ -263,6 +272,14 @@ export interface ComplianceTeamMember {
   user: { id: number; name: string; email: string; role_type: string } | null;
 }
 
+export interface ComplianceHistoryEvent {
+  id: string;
+  source: 'Project' | 'Task' | 'Invoice';
+  description: string;
+  causer_name: string | null;
+  created_at: string;
+}
+
 export interface ComplianceTimesheet {
   id: number;
   log_date: string;
@@ -299,7 +316,7 @@ export interface ComplianceLead {
   email: string | null;
   phone: string | null;
   company_name: string | null;
-  source: string;
+  source: string | null;
   status: LeadStatus;
   priority: string;
   estimated_value: string | null;
@@ -482,6 +499,10 @@ export const adminComplianceService = {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     },
+    generalChat: async (projectId: number): Promise<ComplianceGeneralChatThread[]> => {
+      const res = await api.get(`/admin/compliance/projects/${projectId}/general-chat`);
+      return res.data.data;
+    },
     attachments: async (projectId: number): Promise<ComplianceProjectAttachment[]> => {
       const res = await api.get(`/admin/compliance/projects/${projectId}/attachments`);
       return res.data.data;
@@ -534,6 +555,10 @@ export const adminComplianceService = {
     },
     timesheets: async (projectId: number): Promise<ComplianceTimesheet[]> => {
       const res = await api.get(`/admin/compliance/projects/${projectId}/timesheets`);
+      return res.data.data;
+    },
+    history: async (projectId: number): Promise<ComplianceHistoryEvent[]> => {
+      const res = await api.get(`/admin/compliance/projects/${projectId}/history`);
       return res.data.data;
     },
     lead: async (projectId: number): Promise<ComplianceLead | null> => {

@@ -49,6 +49,8 @@ import toast from "react-hot-toast";
 import { handleNotFound } from "@/lib/notFound";
 import SubmitButton from "@/components/ui/SubmitButton";
 import LoadingOverlay from "@/components/ui/LoadingOverlay";
+import RichText from "@/components/ui/RichText";
+import RichTextField from "@/components/ui/RichTextField";
 
 const TASK_TYPE_LABEL: Record<string, string> = {
     general: "General",
@@ -1200,16 +1202,15 @@ export default function UserProjectDetailPage() {
                         </div>
                         <div style={{ marginBottom: 16 }}>
                             <label style={lbl}>Description</label>
-                            <textarea
+                            <RichTextField
                                 value={editForm.description}
-                                onChange={(e) =>
+                                onChange={(v) =>
                                     setEditForm((f) => ({
                                         ...f,
-                                        description: e.target.value,
+                                        description: v,
                                     }))
                                 }
                                 rows={3}
-                                style={{ ...inp, resize: "vertical" }}
                             />
                         </div>
                         {canUploadAttachments && (
@@ -1488,12 +1489,12 @@ export default function UserProjectDetailPage() {
                                 marginTop: 18,
                                 paddingTop: 16,
                                 borderTop: "1px solid #f1f5f9",
-                                fontSize: 13,
-                                color: "#475569",
-                                lineHeight: 1.6,
                             }}
                         >
-                            {project.description}
+                            <RichText
+                                value={project.description}
+                                style={{ fontSize: 13, color: "#475569" }}
+                            />
                         </div>
                     )}
                 </div>
@@ -2552,15 +2553,62 @@ export default function UserProjectDetailPage() {
                                             <td
                                                 style={{ padding: "11px 16px" }}
                                             >
+                                                {/* Task Edit is its own
+                                                    permission (pm_edit_tasks
+                                                    → canEditTasks) — no
+                                                    PM-tier bypass, so this
+                                                    disappears the moment a
+                                                    Company Admin revokes it,
+                                                    exactly like the server
+                                                    side. */}
+                                                {canEditTasks &&
+                                                    !isProjectLocked && (
+                                                        <button
+                                                            onClick={() =>
+                                                                router.push(
+                                                                    `/projects/${id}/tasks/${t.id}/edit`,
+                                                                )
+                                                            }
+                                                            style={{
+                                                                marginRight: 8,
+                                                                padding:
+                                                                    "5px 10px",
+                                                                fontSize: 11.5,
+                                                                fontWeight: 600,
+                                                                cursor: "pointer",
+                                                                background:
+                                                                    "#fff",
+                                                                color: "#2563eb",
+                                                                border: "1px solid #bfdbfe",
+                                                                borderRadius: 6,
+                                                            }}
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                    )}
                                                 {(() => {
                                                     const isSelfTask =
                                                         assignedToId(t) ===
                                                         me?.id;
+                                                    // isProjectPm is here so
+                                                    // revoking "Edit Tasks"
+                                                    // (canEditTasks) doesn't
+                                                    // also take a PM's status
+                                                    // dropdown away — the
+                                                    // server still allows the
+                                                    // transition for a PM
+                                                    // actor
+                                                    // (TaskStatusService::
+                                                    // canChangeTaskStatus()),
+                                                    // and Task Edit gates the
+                                                    // task's detail FIELDS
+                                                    // only.
                                                     if (
                                                         !canEditTasks &&
                                                         !isSelfTask &&
                                                         !isQa &&
-                                                        !canOverrideTaskStatus
+                                                        !canOverrideTaskStatus &&
+                                                        !isProjectPm
                                                     )
                                                         return null;
                                                     return (

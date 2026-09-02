@@ -20,6 +20,7 @@ import {
 } from "@/components/admin/projects/shared";
 import { handleNotFound } from "@/lib/notFound";
 import { Admin } from "@/types";
+import RichTextField from "@/components/ui/RichTextField";
 
 interface ClientOption {
     id: number;
@@ -286,13 +287,10 @@ export default function EditProjectPage() {
 
                     <div style={{ marginBottom: 16 }}>
                         <label style={lbl}>Description</label>
-                        <textarea
+                        <RichTextField
                             value={form.description}
-                            onChange={(e) =>
-                                setF("description", e.target.value)
-                            }
+                            onChange={(v) => setF("description", v)}
                             rows={3}
-                            style={{ ...inp, resize: "vertical" }}
                         />
                     </div>
 

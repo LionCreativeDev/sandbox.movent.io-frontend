@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import RichTextField from '@/components/ui/RichTextField';
 
 const TASK_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'review', 'completed', 'cancelled'];
 // A Seller can never be a task assignee, full stop (unconditional exclusion
@@ -231,7 +232,7 @@ export default function CreateTaskPage() {
 
           <div style={{ marginBottom: 16 }}>
             <label style={lbl}>Description</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} style={{ ...inp, resize: 'vertical' }} placeholder="Optional" />
+            <RichTextField value={description} onChange={setDescription} rows={3} placeholder="Optional" />
           </div>
 
           <div style={{ marginBottom: 16 }}>

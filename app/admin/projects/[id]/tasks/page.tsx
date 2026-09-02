@@ -15,6 +15,7 @@ import { roleDisplayLabel } from '@/lib/roleUtils';
 import { User } from '@/types';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import RichTextField from '@/components/ui/RichTextField';
 
 const hasProjectManagementAccess = (u: User) =>
   (u.company_assignments ?? []).some(a => (a.permissions?.project_management ?? []).length > 0);
@@ -23,7 +24,8 @@ const TASK_TYPE_LABEL: Record<string, string> = {
   general: 'General', production: 'Production', client_request: 'Client Request', internal: 'Internal',
 };
 // A Project Manager genuinely on the project's team CAN be a task assignee,
-// per current policy — only Seller/Client are excluded, full stop.
+// per current policy — only Seller/Client are excluded, fu
+// ll stop.
 const NEVER_TASK_ASSIGNEE_ROLES = ['seller', 'client'];
 
 const EMPTY_FORM = {
@@ -288,7 +290,7 @@ export default function ProjectTasksPage() {
           )}
           <div style={{ marginBottom: 14 }}>
             <label style={lbl}>Description</label>
-            <textarea value={form.description} onChange={e => setF('description', e.target.value)} rows={2} style={{ ...inp, resize: 'vertical' }} />
+            <RichTextField value={form.description} onChange={v => setF('description', v)} rows={2} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
             <div>

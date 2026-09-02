@@ -434,7 +434,8 @@ export interface ProjectUsersByRole {
   designers: ProjectUserOption[];
   qa_users: ProjectUserOption[];
   team_members: ProjectUserOption[];
-  all_assignable_users: ProjectUserOption[];
+  // Compliance Users of this company only — backs the "Compliance Officer" dropdown.
+  compliance_officers: ProjectUserOption[];
   // Active Sellers of this company only — backs the "Assign Seller" dropdown.
   sellers: ProjectUserOption[];
 }

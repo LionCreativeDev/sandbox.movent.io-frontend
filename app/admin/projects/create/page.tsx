@@ -14,6 +14,7 @@ import { inp, lbl, card, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSiz
 import { Admin } from '@/types';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import RichTextField from '@/components/ui/RichTextField';
 
 interface Company {
     id: number;
@@ -369,14 +370,11 @@ function CreateProjectForm() {
 
                     <div style={{ marginBottom: 16 }}>
                         <label style={lbl}>Description</label>
-                        <textarea
+                        <RichTextField
                             value={form.description}
-                            onChange={(e) =>
-                                setF("description", e.target.value)
-                            }
+                            onChange={(v) => setF("description", v)}
                             rows={3}
                             placeholder="Project scope, goals…"
-                            style={{ ...inp, resize: "vertical" }}
                         />
                     </div>
 

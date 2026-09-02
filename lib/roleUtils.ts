@@ -157,7 +157,7 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
   // out of the box. Keep any change here mirrored in
   // App\Services\RoleDefaultPermissions::MAP on the backend.
   project_manager: {
-    // pm_view + pm_manage_projects + pm_manage_tasks + pm_manage_team +
+    // pm_view + pm_manage_projects + pm_manage_tasks + pm_edit_tasks + pm_manage_team +
     // pm_manage_production + pm_manage_deliverables + pm_manage_timesheets +
     // pm_view_reports + pm_manage_files + pm_manage_comments + pm_manage_chat
     // + every "advanced" (collapsed-by-default) bundle item — 2026-08-13:
@@ -189,7 +189,7 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
     ],
     account: ['canUseGeneralChat'],
   },
-  // pm_view + pm_manage_tasks + pm_manage_production + pm_manage_deliverables + pm_manage_files + pm_manage_comments + pm_manage_chat
+  // pm_view + pm_manage_tasks + pm_edit_tasks + pm_manage_production + pm_manage_deliverables + pm_manage_files + pm_manage_comments + pm_manage_chat
   // production: {
   //   project_management: [
   //     'canViewProjectDashboard', 'canViewProjects', 'canViewLinkedProjects',
@@ -221,7 +221,7 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
       'canViewProjectChat', 'canSendProjectChatMessage', 'canUploadProjectChatAttachment', 'canViewProjectChatAttachments',
     ],
   },
-  // pm_view + pm_manage_tasks + pm_manage_deliverables + pm_manage_files + pm_manage_comments + pm_manage_chat (no Production)
+  // pm_view + pm_manage_tasks + pm_edit_tasks + pm_manage_deliverables + pm_manage_files + pm_manage_comments + pm_manage_chat (no Production)
   // + every "advanced" (collapsed-by-default) bundle item — 2026-08-13:
   // same explicit grant as project_manager above.
   qa: {
@@ -239,7 +239,7 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
       'canDeleteAnyProjectChatMessage', 'canOverrideProjectCreationBeforePayment',
     ],
   },
-  // pm_view + pm_manage_tasks + pm_manage_files + pm_manage_comments + pm_manage_chat (no Production, no Deliverables/QA)
+  // pm_view + pm_manage_tasks + pm_edit_tasks + pm_manage_files + pm_manage_comments + pm_manage_chat (no Production, no Deliverables/QA)
   team_member: {
     project_management: [
       'canViewProjectDashboard', 'canViewProjects', 'canViewLinkedProjects',
@@ -429,7 +429,8 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
       'canViewComplianceDashboard', 'canViewPolicies', 'canCreatePolicies', 'canEditPolicies',
       'canViewAuditTrails', 'canViewComplianceReports',
       'canViewComplianceCases', 'canManageComplianceTemplates',
-      'canManageComplianceRequirements', 'canAssignComplianceOfficer',
+      'canManageComplianceRequirements',
+      // No canAssignComplianceOfficer — Company Admin-only action.
     ],
     account: ['canUseGeneralChat'],
   },

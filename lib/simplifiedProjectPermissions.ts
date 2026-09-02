@@ -29,7 +29,21 @@ export const SIMPLE_PROJECT_PERMISSIONS: SimpleProjectPermission[] = [
   },
   {
     key: 'pm_manage_tasks', label: 'Manage Tasks',
-    maps: ['canViewTasks', 'canCreateTasks', 'canCreateLinkedProjectTask', 'canEditTasks', 'canAssignTasks'],
+    maps: ['canViewTasks', 'canCreateTasks', 'canCreateLinkedProjectTask', 'canAssignTasks'],
+  },
+  {
+    // canEditTasks used to live inside pm_manage_tasks above, which made
+    // "can this role edit an existing task's details?" impossible to
+    // assign/revoke on its own — a Company Admin had to give up task
+    // viewing/creating/assigning along with it. Split into its own checkbox
+    // so Task Edit is genuinely role-wise controllable (2026-09-02 request).
+    // Gates the task fields only (title/description/notes/priority/
+    // start+due date/estimated hours — see Api\User\TaskController::update()'s
+    // $canEdit rules and the /projects/[id]/tasks/[taskId]/edit page);
+    // reassignment stays on canAssignTasks and status changes stay on the
+    // TaskStatusService actor rules, neither of which this key affects.
+    key: 'pm_edit_tasks', label: 'Edit Tasks',
+    maps: ['canEditTasks'],
   },
   {
     key: 'pm_manage_team', label: 'Manage Team / Resources',

@@ -12,6 +12,7 @@ import ProjectTabs from '@/components/admin/projects/ProjectTabs';
 import ProjectLifecycleActions from '@/components/admin/projects/ProjectLifecycleActions';
 import { card, lbl, inp, Badge, ThumbIcon, STATUS_SC, PRIORITY_SC, fmtDate, ALLOWED_ATTACHMENT_TYPES, fmtFileSize, asRelation, DRAFT_HINT, DraftNotice } from '@/components/admin/projects/shared';
 import { handleNotFound } from '@/lib/notFound';
+import RichText from '@/components/ui/RichText';
 
 // Groups a flat, newest-first comment list into proper reply threads — each
 // root comment immediately followed by all of its replies (oldest first,
@@ -372,7 +373,11 @@ export default function ProjectOverviewPage() {
       <div>
         <div style={card}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: '0 0 14px' }}>Details</h3>
-            <p style={{ fontSize: 13, color: '#475569', margin: '0 0 16px', lineHeight: 1.6 }}>{project.description || 'No description.'}</p>
+            <div style={{ margin: '0 0 16px' }}>
+              {project.description
+                ? <RichText value={project.description} style={{ fontSize: 13, color: '#475569' }} />
+                : <p style={{ fontSize: 13, color: '#475569', margin: 0, lineHeight: 1.6 }}>No description.</p>}
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <div><label style={lbl}>{project.project_manager?.role_type === 'seller' ? 'Creator' : 'Manager'}</label><div style={{ fontSize: 13 }}>
                 {project.project_manager

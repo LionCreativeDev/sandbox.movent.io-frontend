@@ -10,6 +10,7 @@ import { ROLE_LABELS } from '@/lib/roleUtils';
 import { Admin } from '@/types';
 import { card, lbl, inp, Badge, ThumbIcon, TASK_SC, PRIORITY_SC, fmtDate, fmtFileSize, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, asRelation } from '@/components/admin/projects/shared';
 import { handleNotFound } from '@/lib/notFound';
+import RichText from '@/components/ui/RichText';
 
 const TASK_TYPE_LABEL: Record<string, string> = {
   general: 'General', production: 'Production', client_request: 'Client Request', internal: 'Internal',
@@ -370,7 +371,7 @@ export default function AdminTaskDetailPage() {
           {task.description && (
             <div style={{ marginBottom: 16 }}>
               <div style={lbl}>Description</div>
-              <div style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{task.description}</div>
+              <RichText value={task.description} style={{ fontSize: 13, color: '#475569' }} />
             </div>
           )}
 

@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { mentionQueryOf, matchMentionables, applyMention, renderWithMentions, roleLabel, Mentionable } from '@/lib/chatMentions';
 import { clientPortalSenderName, isOwnClientMessage } from '@/lib/chatSender';
 import { handleNotFound } from '@/lib/notFound';
+import RichText from '@/components/ui/RichText';
 
 const GREEN = '#10b981';
 const SC: Record<string, { bg: string; color: string }> = {
@@ -207,7 +208,10 @@ export default function ClientProjectDetailPage() {
               {p.status?.replace(/_/g, ' ')}
             </span>
           </div>
-          {p.description && <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>{p.description}</p>}
+          {/* Same markup renderer the internal pages use. It emits React
+              elements only (never innerHTML), so a description written
+              internally can't inject anything into the client portal. */}
+          {p.description && <RichText value={p.description} style={{ fontSize: 13, color: '#64748b' }} />}
         </div>
         <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'right', flexShrink: 0 }}>
           <div>Start: {fmtDate(p.created_at)}</div>

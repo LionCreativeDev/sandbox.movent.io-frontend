@@ -123,7 +123,12 @@ export default function UserTasksPage() {
 
   useEffect(() => { if (ready) load(); }, [statusF, search, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const canEditTasks = isTaskManagerTier || can('project_management', 'canEditTasks');
+  // Permission-only, no PM-tier bypass — mirrors Api\User\TaskController::
+  // update()'s $canEdit, so a Company Admin revoking "Edit Tasks" really
+  // takes the ability away (see simplifiedProjectPermissions.ts's
+  // pm_edit_tasks). canAssignTasks below deliberately keeps its tier path:
+  // reassignment is a separate right from editing a task's fields.
+  const canEditTasks = can('project_management', 'canEditTasks');
   const canAssignTasks = isTaskManagerTier || can('project_management', 'canAssignTasks');
   const isQa = me?.role_type === 'qa';
   const canOverrideTaskStatus = can('project_management', 'canOverrideTaskStatus');

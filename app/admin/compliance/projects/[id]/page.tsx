@@ -10,7 +10,8 @@ import {
   ComplianceChatMessage, ComplianceProjectAttachment,
   ComplianceProjectTask, ComplianceDeliverable, ComplianceDeliverySubmission,
   ComplianceTaskComment, ComplianceTaskActivityItem, ComplianceInvoice,
-  ComplianceTeamMember, ComplianceProjectComment, ComplianceLead, ComplianceTimesheet,
+  ComplianceTeamMember, ComplianceProjectComment, ComplianceLead, ComplianceTimesheet, ComplianceHistoryEvent,
+  ComplianceGeneralChatThread,
 } from '@/lib/services/adminComplianceService';
 import { adminProjectService, ProjectUserOption } from '@/lib/services/adminProjectService';
 import SubmitButton from '@/components/ui/SubmitButton';
@@ -49,6 +50,8 @@ export default function ProjectComplianceDetailPage() {
   // Read-only project context (Chat/Attachments/Tasks/Deliverables)
   const [chatMessages, setChatMessages] = useState<ComplianceChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(true);
+  const [generalChatThreads, setGeneralChatThreads] = useState<ComplianceGeneralChatThread[]>([]);
+  const [generalChatLoading, setGeneralChatLoading] = useState(true);
   const [projectAttachments, setProjectAttachments] = useState<ComplianceProjectAttachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(true);
   const [projectTasks, setProjectTasks] = useState<ComplianceProjectTask[]>([]);
@@ -63,6 +66,8 @@ export default function ProjectComplianceDetailPage() {
   const [billingLoading, setBillingLoading] = useState(true);
   const [timesheets, setTimesheets] = useState<ComplianceTimesheet[]>([]);
   const [timesheetsLoading, setTimesheetsLoading] = useState(true);
+  const [history, setHistory] = useState<ComplianceHistoryEvent[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [projectTeam, setProjectTeam] = useState<ComplianceTeamMember[]>([]);
   const [teamLoading, setTeamLoading] = useState(true);
   const [projectComments, setProjectComments] = useState<ComplianceProjectComment[]>([]);
@@ -79,7 +84,7 @@ export default function ProjectComplianceDetailPage() {
       setOfficersLoading(true);
       adminProjectService.getOne(c.project.id)
         .then(p => adminProjectService.projectUsers(p.company_id))
-        .then(d => setOfficers(d.all_assignable_users ?? []))
+        .then(d => setOfficers(d.compliance_officers ?? []))
         .catch(() => setOfficers([]))
         .finally(() => setOfficersLoading(false));
     } catch (err) {
@@ -99,6 +104,13 @@ export default function ProjectComplianceDetailPage() {
     try { setChatMessages((await adminComplianceService.project.chat(pid)).messages); }
     catch { /* silent — chat may not have started yet */ }
     finally { setChatLoading(false); }
+  };
+
+  const loadGeneralChat = async (pid: number) => {
+    setGeneralChatLoading(true);
+    try { setGeneralChatThreads(await adminComplianceService.project.generalChat(pid)); }
+    catch { /* silent */ }
+    finally { setGeneralChatLoading(false); }
   };
 
   const loadProjectAttachments = async (pid: number) => {
@@ -137,6 +149,13 @@ export default function ProjectComplianceDetailPage() {
     try { setTimesheets(await adminComplianceService.project.timesheets(pid)); }
     catch { /* silent */ }
     finally { setTimesheetsLoading(false); }
+  };
+
+  const loadHistory = async (pid: number) => {
+    setHistoryLoading(true);
+    try { setHistory(await adminComplianceService.project.history(pid)); }
+    catch { /* silent */ }
+    finally { setHistoryLoading(false); }
   };
 
   const loadProjectTeam = async (pid: number) => {
@@ -193,11 +212,13 @@ export default function ProjectComplianceDetailPage() {
     if (!caseData) return;
     loadActivity(caseData.id);
     loadChat(caseData.project.id);
+    loadGeneralChat(caseData.project.id);
     loadProjectAttachments(caseData.project.id);
     loadProjectTasks(caseData.project.id);
     loadDeliverables(caseData.project.id);
     loadBilling(caseData.project.id);
     loadTimesheets(caseData.project.id);
+    loadHistory(caseData.project.id);
     loadProjectTeam(caseData.project.id);
     loadProjectComments(caseData.project.id);
     loadLead(caseData.project.id);
@@ -356,7 +377,7 @@ export default function ProjectComplianceDetailPage() {
             <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
               <div style={{ minWidth: 160 }}>
                 <label style={lbl}>Source</label>
-                <div style={{ fontSize: 13, color: '#334155', textTransform: 'capitalize' }}>{lead.source.replace(/_/g, ' ')}</div>
+                <div style={{ fontSize: 13, color: '#334155', textTransform: 'capitalize' }}>{lead.source ? lead.source.replace(/_/g, ' ') : '—'}</div>
               </div>
               <div style={{ minWidth: 160 }}>
                 <label style={lbl}>Priority</label>
@@ -426,7 +447,7 @@ export default function ProjectComplianceDetailPage() {
       {/* Seller-Client Chat History (read-only) */}
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0 }}>Seller-Client Chat History</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0 }}>Project Chat History</h3>
           {chatMessages.length > 0 && (
             <button onClick={exportChat} style={{
               padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
@@ -448,6 +469,35 @@ export default function ProjectComplianceDetailPage() {
                 </div>
                 <div style={{ fontSize: 13, color: '#1e293b', marginTop: 2, whiteSpace: 'pre-wrap' }}>{m.content}</div>
                 {m.attachment_name && <div style={{ fontSize: 11.5, color: '#2563eb', marginTop: 2 }}>📎 {m.attachment_name}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* General Chat (read-only, company-wide — not tied to this project) */}
+      <div style={card}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: '0 0 14px' }}>General Chat</h3>
+        {generalChatLoading ? (
+          <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+        ) : generalChatThreads.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>No General Chat threads yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
+            {generalChatThreads.map(t => (
+              <div key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid #f8fafc' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{t.title || 'Untitled'}</span>
+                  <span style={{ fontSize: 10.5, color: '#94a3b8' }}>{t.last_message_at ? fmtDate(t.last_message_at) : ''}</span>
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                  {t.participants.map(p => p.name).filter(Boolean).join(', ')}
+                </div>
+                {t.last_message && (
+                  <div style={{ fontSize: 12.5, color: '#334155', marginTop: 4 }}>
+                    <span style={{ fontWeight: 600 }}>{t.last_message.sender_name}:</span> {t.last_message.content}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -674,6 +724,32 @@ export default function ProjectComplianceDetailPage() {
                   <span style={{ fontSize: 10.5, color: '#94a3b8' }}>{fmtDate(c.created_at)}</span>
                 </div>
                 <div style={{ fontSize: 13, color: '#1e293b', marginTop: 2, whiteSpace: 'pre-wrap' }}>{c.body}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Complete Project History (read-only) — created/updated/status
+          changes, task status changes, invoice created/paid, merged from
+          every project lifecycle action, not just Compliance actions. */}
+      <div style={card}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: '0 0 14px' }}>Project History</h3>
+        {historyLoading ? (
+          <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+        ) : history.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>No history yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 420, overflowY: 'auto' }}>
+            {history.map(item => (
+              <div key={item.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#64748b', marginTop: 6, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.45 }}>{item.description}</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                    {item.source}{item.causer_name ? ` · ${item.causer_name}` : ''} · {fmtDate(item.created_at)}
+                  </div>
+                </div>
               </div>
             ))}
           </div>

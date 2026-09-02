@@ -10,6 +10,7 @@ import { User } from '@/types';
 import { ALLOWED_ATTACHMENT_TYPES, DRAFT_HINT, fmtDate, fmtFileSize, inp, lbl, MAX_ATTACHMENT_MB } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
+import RichTextField from '@/components/ui/RichTextField';
 
 const card: React.CSSProperties = {
   background: '#fff',
@@ -202,7 +203,7 @@ export default function UserEditProjectPage() {
 
             <div style={{ marginBottom: 16 }}>
               <label style={lbl}>Description</label>
-              <textarea value={form.description} onChange={e => setF('description', e.target.value)} rows={4} style={{ ...inp, resize: 'vertical' }} />
+              <RichTextField value={form.description} onChange={v => setF('description', v)} rows={4} />
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 16 }}>
