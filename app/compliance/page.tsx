@@ -44,7 +44,7 @@ export default function ComplianceDashboardPage() {
     const [loading, setLoading] = useState(true);
     const [forbidden, setForbidden] = useState(false);
 
-    const canView = can("compliance", "canViewComplianceCases");
+    const canView = can("compliance", "canViewCompliance");
 
     // can() reads cookies, unavailable during server-side rendering, so the
     // server always sees canView=false while the client's pre-hydration

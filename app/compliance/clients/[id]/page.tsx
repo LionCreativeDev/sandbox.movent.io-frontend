@@ -20,7 +20,7 @@ export default function ComplianceClientDetailPage() {
     const params = useParams();
     const id = Number(params.id);
 
-    const canView = can("compliance", "canViewComplianceCases");
+    const canView = can("compliance", "canViewCompliance");
 
     // can() reads cookies, unavailable during server-side rendering, so the
     // server always sees canView=false while the client's pre-hydration

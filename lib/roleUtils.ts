@@ -425,12 +425,13 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
     account: ['canUseGeneralChat'],
   },
   compliance: {
+    // Simplified 5-key model (2026-09-03) — see moduleCatalog.ts's
+    // compliance entry for what each key does. Default grant is view + do-
+    // the-work + download, restricted to cases the user is tied to;
+    // canViewAllCompanyCompliance and canAssignComplianceUser are explicit
+    // Company Admin grants, not defaults.
     compliance: [
-      'canViewComplianceDashboard', 'canViewPolicies', 'canCreatePolicies', 'canEditPolicies',
-      'canViewAuditTrails', 'canViewComplianceReports',
-      'canViewComplianceCases', 'canManageComplianceTemplates',
-      'canManageComplianceRequirements',
-      // No canAssignComplianceOfficer — Company Admin-only action.
+      'canViewCompliance', 'canChangeComplianceStatus', 'canDownloadComplianceData',
     ],
     account: ['canUseGeneralChat'],
   },

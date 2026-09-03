@@ -5,7 +5,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import toast from 'react-hot-toast';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
-import { can } from '@/lib/auth';
+import { can, getAuthUser } from '@/lib/auth';
 import {
   userComplianceService, ComplianceCase,
   ComplianceActivity, ComplianceCaseStatus,
@@ -13,14 +13,20 @@ import {
   ComplianceProjectTask, ComplianceDeliverable, ComplianceDeliverySubmission,
   ComplianceTaskComment, ComplianceTaskActivityItem, ComplianceInvoice,
   ComplianceTeamMember, ComplianceProjectComment, ComplianceLead, ComplianceTimesheet, ComplianceHistoryEvent,
-  ComplianceGeneralChatThread,
+  ComplianceGeneralChatThread, ComplianceDocument, ComplianceChecklistItem, ComplianceComment,
 } from '@/lib/services/userComplianceService';
+import { userProjectService, CompanyUserOption } from '@/lib/services/userProjectService';
 import SubmitButton from '@/components/ui/SubmitButton';
 import {
   card, lbl, inp, Badge, CASE_STATUS_SC,
-  TASK_SC, DELIVERABLE_SC, INVOICE_SC, LEAD_SC, FOLLOWUP_SC, TIMESHEET_SC, fmtDate, fmtFileSize, errorMessage,
+  TASK_SC, DELIVERABLE_SC, INVOICE_SC, LEAD_SC, FOLLOWUP_SC, TIMESHEET_SC,
+  DOCUMENT_STATUS_SC, REQUIREMENT_STATUS_SC, fmtDate, fmtFileSize, errorMessage,
 } from '@/components/compliance/shared';
 import { handleNotFound } from '@/lib/notFound';
+
+// Temporarily hidden — Requirements/Documents/Checklist UI isn't needed yet.
+// Flip back to true to re-enable; Compliance Comments stays on regardless.
+const SHOW_CASE_WORKFLOW_SECTIONS = false;
 
 export default function ProjectComplianceDetailPage() {
   useAdminGuard();
@@ -29,8 +35,13 @@ export default function ProjectComplianceDetailPage() {
   const router = useRouter();
   const projectId = Number(id);
 
-  const canView = can('compliance', 'canViewComplianceCases');
-  const canManage = can('compliance', 'canManageComplianceRequirements');
+  const canView = can('compliance', 'canViewCompliance');
+  const canChangeStatus = can('compliance', 'canChangeComplianceStatus');
+  const canAssignOfficer = can('compliance', 'canAssignComplianceUser');
+  const canDownload = can('compliance', 'canDownloadComplianceData');
+  // Staff can only delete their OWN compliance comments — Company Admin
+  // (the /admin portal, a separate page) can delete any comment.
+  const currentUserId = (getAuthUser() as { id?: number } | null)?.id;
 
   // can() reads cookies, which don't exist during server-side rendering —
   // the server always evaluates canView as false, while the client's first
@@ -46,10 +57,39 @@ export default function ProjectComplianceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
 
+  // Officer assignment
+  const [officers, setOfficers] = useState<CompanyUserOption[]>([]);
+  const [officersLoading, setOfficersLoading] = useState(false);
+  const [officerSelectId, setOfficerSelectId] = useState('');
+  const [officerBusy, setOfficerBusy] = useState(false);
+
   // Case-level status actions
   const [statusAction, setStatusAction] = useState<'on_hold' | 'reject' | null>(null);
   const [statusReason, setStatusReason] = useState('');
   const [statusBusy, setStatusBusy] = useState<ComplianceCaseStatus | 'mark_under_review' | 'on_hold' | 'resume' | 'reject' | null>(null);
+
+  // Compliance Requirements (sourced from caseData.requirements)
+  const [reqBusy, setReqBusy] = useState(false);
+  const [showAddReq, setShowAddReq] = useState(false);
+  const [newReq, setNewReq] = useState({ name: '', category: '', is_mandatory: false });
+
+  // Compliance Documents (sourced from caseData.documents)
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadReqId, setUploadReqId] = useState('');
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [docActionBusy, setDocActionBusy] = useState<number | null>(null);
+
+  // Compliance Checklist
+  const [checklist, setChecklist] = useState<ComplianceChecklistItem[]>([]);
+  const [checklistLoading, setChecklistLoading] = useState(true);
+  const [checklistBusy, setChecklistBusy] = useState(false);
+  const [newChecklistLabel, setNewChecklistLabel] = useState('');
+
+  // Compliance Comments (distinct from the general Project Comments card)
+  const [complianceComments, setComplianceComments] = useState<ComplianceComment[]>([]);
+  const [complianceCommentsLoading, setComplianceCommentsLoading] = useState(true);
+  const [newComplianceComment, setNewComplianceComment] = useState('');
+  const [complianceCommentBusy, setComplianceCommentBusy] = useState(false);
 
 
 
@@ -90,6 +130,7 @@ export default function ProjectComplianceDetailPage() {
     try {
       const c = await userComplianceService.cases.getByProject(projectId);
       setCaseData(c);
+      setOfficerSelectId(c.compliance_officer ? String(c.compliance_officer.id) : '');
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 403) setForbidden(true);
@@ -184,6 +225,29 @@ export default function ProjectComplianceDetailPage() {
     finally { setLeadLoading(false); }
   };
 
+  const loadOfficers = async (pid: number) => {
+    setOfficersLoading(true);
+    try {
+      const all = await userProjectService.team.companyUsers(pid);
+      setOfficers((all ?? []).filter(u => u.role_type === 'compliance'));
+    } catch { setOfficers([]); }
+    finally { setOfficersLoading(false); }
+  };
+
+  const loadChecklist = async (caseId: number) => {
+    setChecklistLoading(true);
+    try { setChecklist(await userComplianceService.checklist.list(caseId)); }
+    catch { /* silent */ }
+    finally { setChecklistLoading(false); }
+  };
+
+  const loadComplianceComments = async (caseId: number) => {
+    setComplianceCommentsLoading(true);
+    try { setComplianceComments(await userComplianceService.comments.list(caseId)); }
+    catch { /* silent */ }
+    finally { setComplianceCommentsLoading(false); }
+  };
+
   const downloadProjectAttachment = async (a: ComplianceProjectAttachment) => {
     try { await userComplianceService.project.attachmentDownload(a.id, a.original_name); }
     catch { toast.error('Download failed'); }
@@ -227,6 +291,9 @@ export default function ProjectComplianceDetailPage() {
     loadProjectTeam(caseData.project.id);
     loadProjectComments(caseData.project.id);
     loadLead(caseData.project.id);
+    if (canAssignOfficer) loadOfficers(caseData.project.id);
+    loadChecklist(caseData.id);
+    loadComplianceComments(caseData.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseData?.id]);
 
@@ -291,6 +358,151 @@ export default function ProjectComplianceDetailPage() {
   };
 
 
+  const assignOfficer = async () => {
+    setOfficerBusy(true);
+    try {
+      const updated = await userComplianceService.cases.assignOfficer(caseData.id, officerSelectId ? Number(officerSelectId) : null);
+      setCaseData(prev => prev ? { ...prev, compliance_officer: updated.compliance_officer } : prev);
+      toast.success('Officer updated');
+      loadActivity(caseData.id);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to update officer'));
+    } finally {
+      setOfficerBusy(false);
+    }
+  };
+
+  const addRequirement = async () => {
+    if (!newReq.name.trim()) { toast.error('Name is required'); return; }
+    setReqBusy(true);
+    try {
+      await userComplianceService.requirements.add(caseData.id, {
+        name: newReq.name.trim(),
+        category: newReq.category.trim() || undefined,
+        is_mandatory: newReq.is_mandatory,
+      });
+      toast.success('Requirement added');
+      setNewReq({ name: '', category: '', is_mandatory: false });
+      setShowAddReq(false);
+      load();
+      loadActivity(caseData.id);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to add requirement'));
+    } finally {
+      setReqBusy(false);
+    }
+  };
+
+  const removeRequirement = async (id: number) => {
+    if (!window.confirm('Remove this requirement?')) return;
+    try {
+      await userComplianceService.requirements.remove(id);
+      toast.success('Requirement removed');
+      load();
+      loadActivity(caseData.id);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to remove requirement'));
+    }
+  };
+
+  const uploadDocument = async () => {
+    if (!uploadFile) { toast.error('Choose a file first'); return; }
+    setUploadBusy(true);
+    try {
+      await userComplianceService.documents.upload(caseData.id, uploadFile, uploadReqId ? Number(uploadReqId) : undefined);
+      toast.success('Document uploaded');
+      setUploadFile(null);
+      setUploadReqId('');
+      load();
+      loadActivity(caseData.id);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Upload failed'));
+    } finally {
+      setUploadBusy(false);
+    }
+  };
+
+  const reviewDocument = async (
+    docId: number,
+    action: 'approve' | 'reject' | 'request_resubmission' | 'set_expiry',
+    extra?: { reason?: string; expires_at?: string },
+  ) => {
+    setDocActionBusy(docId);
+    try {
+      await userComplianceService.documents.review(docId, { action, ...extra });
+      toast.success('Document updated');
+      load();
+      loadActivity(caseData.id);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to update document'));
+    } finally {
+      setDocActionBusy(null);
+    }
+  };
+
+  const downloadComplianceDocument = async (d: ComplianceDocument) => {
+    try { await userComplianceService.documents.download(d.id, d.original_name); }
+    catch { toast.error('Download failed'); }
+  };
+
+  const generateChecklist = async () => {
+    setChecklistBusy(true);
+    try {
+      setChecklist(await userComplianceService.checklist.generate(caseData.id));
+      toast.success('Checklist generated');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to generate checklist'));
+    } finally {
+      setChecklistBusy(false);
+    }
+  };
+
+  const addChecklistItem = async () => {
+    if (!newChecklistLabel.trim()) return;
+    setChecklistBusy(true);
+    try {
+      const item = await userComplianceService.checklist.add(caseData.id, { label: newChecklistLabel.trim() });
+      setChecklist(prev => [...prev, item]);
+      setNewChecklistLabel('');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to add item'));
+    } finally {
+      setChecklistBusy(false);
+    }
+  };
+
+  const toggleChecklistItem = async (itemId: number) => {
+    try {
+      const updated = await userComplianceService.checklist.toggle(itemId);
+      setChecklist(prev => prev.map(i => (i.id === itemId ? updated : i)));
+    } catch {
+      toast.error('Failed to update item');
+    }
+  };
+
+  const addComplianceComment = async () => {
+    if (!newComplianceComment.trim()) return;
+    setComplianceCommentBusy(true);
+    try {
+      const c = await userComplianceService.comments.add(caseData.id, newComplianceComment.trim());
+      setComplianceComments(prev => [...prev, c]);
+      setNewComplianceComment('');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to add comment'));
+    } finally {
+      setComplianceCommentBusy(false);
+    }
+  };
+
+  const removeComplianceComment = async (id: number) => {
+    try {
+      await userComplianceService.comments.remove(id);
+      setComplianceComments(prev => prev.filter(c => c.id !== id));
+    } catch {
+      toast.error('Failed to remove comment');
+    }
+  };
+
   const activityText = (item: ComplianceActivity) => {
     const actor = item.actor_admin?.name ?? item.actor_user?.name ?? 'System';
     return `${actor} ${item.description}`;
@@ -320,10 +532,21 @@ export default function ProjectComplianceDetailPage() {
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 260 }}>
             <label style={lbl}>Compliance Officer</label>
-            {/* Assignable by Company Admin only — see /admin/compliance/projects/[id]. */}
-            <div style={{ fontSize: 13, color: '#334155' }}>{caseData.compliance_officer?.name ?? 'Unassigned'}</div>
+            {canAssignOfficer ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select value={officerSelectId} onChange={e => setOfficerSelectId(e.target.value)} disabled={officersLoading} style={inp}>
+                  <option value="">Unassigned</option>
+                  {officers.map(o => <option key={o.id} value={o.id}>{o.name} ({o.email})</option>)}
+                </select>
+                <SubmitButton loading={officerBusy} loadingText="Saving…" onClick={assignOfficer} style={{
+                  padding: '9px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+                }}>Save</SubmitButton>
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: '#334155' }}>{caseData.compliance_officer?.name ?? 'Unassigned'}</div>
+            )}
           </div>
-          {canManage && (
+          {canChangeStatus && (
             <div style={{ flex: 1, minWidth: 260 }}>
               <label style={lbl}>Case Actions</label>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -352,6 +575,202 @@ export default function ProjectComplianceDetailPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {SHOW_CASE_WORKFLOW_SECTIONS && (
+      <>
+      {/* Compliance Requirements */}
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0 }}>Compliance Requirements</h3>
+          {canChangeStatus && (
+            <button onClick={() => setShowAddReq(v => !v)} style={{
+              padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+              background: '#fff', color: '#2563eb', border: '1px solid #bfdbfe',
+            }}>{showAddReq ? 'Cancel' : '+ Add Requirement'}</button>
+          )}
+        </div>
+        {showAddReq && canChangeStatus && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input placeholder="Requirement name" value={newReq.name} onChange={e => setNewReq({ ...newReq, name: e.target.value })} style={{ ...inp, flex: 1, minWidth: 160 }} />
+            <input placeholder="Category (optional)" value={newReq.category} onChange={e => setNewReq({ ...newReq, category: e.target.value })} style={{ ...inp, width: 160 }} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b' }}>
+              <input type="checkbox" checked={newReq.is_mandatory} onChange={e => setNewReq({ ...newReq, is_mandatory: e.target.checked })} /> Mandatory
+            </label>
+            <SubmitButton loading={reqBusy} loadingText="Saving…" onClick={addRequirement} style={{
+              padding: '9px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+            }}>Add</SubmitButton>
+          </div>
+        )}
+        {caseData.requirements.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>No requirements yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {caseData.requirements.map(r => (
+              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #f8fafc' }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{r.name}</span>
+                  {r.is_mandatory && <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', marginLeft: 6 }}>MANDATORY</span>}
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                    {r.category ?? 'Uncategorized'}{r.expires_at ? ` · Expires ${fmtDate(r.expires_at)}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Badge label={r.status} sc={REQUIREMENT_STATUS_SC[r.status]} />
+                  {canChangeStatus && (
+                    <button onClick={() => removeRequirement(r.id)} style={{
+                      padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                      background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6,
+                    }}>Remove</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Compliance Documents */}
+      <div style={card}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: '0 0 14px' }}>Compliance Documents</h3>
+        {canChangeStatus && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input type="file" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} style={{ fontSize: 12 }} />
+            <select value={uploadReqId} onChange={e => setUploadReqId(e.target.value)} style={inp}>
+              <option value="">Link to requirement (optional)</option>
+              {caseData.requirements.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+            <SubmitButton loading={uploadBusy} loadingText="Uploading…" onClick={uploadDocument} style={{
+              padding: '9px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+            }}>Upload</SubmitButton>
+          </div>
+        )}
+        {(caseData.documents ?? []).length === 0 ? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>No documents uploaded.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {(caseData.documents ?? []).map(d => (
+              <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #f8fafc', flexWrap: 'wrap' }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{d.original_name}</span>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                    v{d.versions?.length ?? 1}{d.expires_at ? ` · Expires ${fmtDate(d.expires_at)}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <Badge label={d.status} sc={DOCUMENT_STATUS_SC[d.status]} />
+                  {canDownload && (
+                    <button onClick={() => downloadComplianceDocument(d)} style={{
+                      padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                      background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6,
+                    }}>Download</button>
+                  )}
+                  {canChangeStatus && (
+                    <>
+                      <button disabled={docActionBusy === d.id} onClick={() => reviewDocument(d.id, 'approve')} style={{
+                        padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                        background: '#fff', color: '#059669', border: '1px solid #a7f3d0', borderRadius: 6,
+                      }}>Approve</button>
+                      <button disabled={docActionBusy === d.id} onClick={() => {
+                        const reason = window.prompt('Reason for rejection:');
+                        if (reason) reviewDocument(d.id, 'reject', { reason });
+                      }} style={{
+                        padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                        background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6,
+                      }}>Reject</button>
+                      <button disabled={docActionBusy === d.id} onClick={() => {
+                        const reason = window.prompt('Reason for resubmission:');
+                        if (reason) reviewDocument(d.id, 'request_resubmission', { reason });
+                      }} style={{
+                        padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                        background: '#fff', color: '#d97706', border: '1px solid #fde68a', borderRadius: 6,
+                      }}>Resubmit</button>
+                      <button disabled={docActionBusy === d.id} onClick={() => {
+                        const date = window.prompt('Expiry date (YYYY-MM-DD):', d.expires_at ?? '');
+                        if (date) reviewDocument(d.id, 'set_expiry', { expires_at: date });
+                      }} style={{
+                        padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                        background: '#fff', color: '#64748b', border: '1px solid #e2e8f0', borderRadius: 6,
+                      }}>Set Expiry</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Compliance Checklist */}
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0 }}>Compliance Checklist</h3>
+          {canChangeStatus && (
+            <button disabled={checklistBusy} onClick={generateChecklist} style={{
+              padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+              background: '#fff', color: '#2563eb', border: '1px solid #bfdbfe',
+            }}>Generate from Requirements</button>
+          )}
+        </div>
+        {canChangeStatus && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <input placeholder="Custom checklist item" value={newChecklistLabel} onChange={e => setNewChecklistLabel(e.target.value)} style={{ ...inp, flex: 1 }} />
+            <SubmitButton loading={checklistBusy} loadingText="Saving…" onClick={addChecklistItem} style={{
+              padding: '9px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+            }}>Add</SubmitButton>
+          </div>
+        )}
+        {checklistLoading ? (
+          <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+        ) : checklist.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>No checklist items yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {checklist.map(item => (
+              <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #f8fafc', cursor: canChangeStatus ? 'pointer' : 'default' }}>
+                <input type="checkbox" checked={item.is_checked} disabled={!canChangeStatus} onChange={() => toggleChecklistItem(item.id)} />
+                <span style={{ fontSize: 13, color: item.is_checked ? '#94a3b8' : '#334155', textDecoration: item.is_checked ? 'line-through' : 'none' }}>{item.label}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      </>
+      )}
+
+      {/* Compliance Comments (distinct from Project Comments below) */}
+      <div style={card}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: '0 0 14px' }}>Compliance Comments</h3>
+        {canChangeStatus && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <input placeholder="Add a comment…" value={newComplianceComment} onChange={e => setNewComplianceComment(e.target.value)} style={{ ...inp, flex: 1 }} />
+            <SubmitButton loading={complianceCommentBusy} loadingText="Posting…" onClick={addComplianceComment} style={{
+              padding: '9px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+            }}>Post</SubmitButton>
+          </div>
+        )}
+        {complianceCommentsLoading ? (
+          <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading…</div>
+        ) : complianceComments.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>No comments yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {complianceComments.map(c => (
+              <div key={c.id} style={{ padding: '8px 0', borderBottom: '1px solid #f8fafc' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>{c.author_admin?.name ?? c.author_user?.name ?? 'Unknown'}</span>
+                  <span style={{ fontSize: 10.5, color: '#94a3b8' }}>{fmtDate(c.created_at)}</span>
+                </div>
+                <div style={{ fontSize: 13, color: '#1e293b', marginTop: 2, whiteSpace: 'pre-wrap' }}>{c.body}</div>
+                {canChangeStatus && c.author_user?.id === currentUserId && (
+                  <button onClick={() => removeComplianceComment(c.id)} style={{
+                    marginTop: 4, padding: 0, background: 'none', border: 'none', color: '#dc2626', fontSize: 10.5, cursor: 'pointer',
+                  }}>Delete</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Seller & Client Info */}
@@ -459,7 +878,7 @@ export default function ProjectComplianceDetailPage() {
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0 }}>Project Chat History</h3>
-          {chatMessages.length > 0 && (
+          {canDownload && chatMessages.length > 0 && (
             <button onClick={exportChat} style={{
               padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
               background: '#fff', color: '#2563eb', border: '1px solid #bfdbfe', flexShrink: 0,
@@ -532,10 +951,12 @@ export default function ProjectComplianceDetailPage() {
                     {fmtFileSize(a.file_size)} · {a.uploaded_by_admin?.name ?? a.uploaded_by_user?.name ?? 'Unknown'} · {fmtDate(a.created_at)}
                   </div>
                 </div>
-                <button onClick={() => downloadProjectAttachment(a)} style={{
-                  padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
-                  background: '#2563eb', color: '#fff', border: 'none', flexShrink: 0,
-                }}>Download</button>
+                {canDownload && (
+                  <button onClick={() => downloadProjectAttachment(a)} style={{
+                    padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                    background: '#2563eb', color: '#fff', border: 'none', flexShrink: 0,
+                  }}>Download</button>
+                )}
               </div>
             ))}
           </div>
@@ -645,10 +1066,12 @@ export default function ProjectComplianceDetailPage() {
                     <span>{h.file_name}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ color: '#94a3b8' }}>{h.delivered_by_admin?.name ?? 'Unknown'} · {fmtDate(h.delivered_at)}</span>
-                      <button onClick={() => downloadDelivery(h)} style={{
-                        padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
-                        background: '#2563eb', color: '#fff', border: 'none', flexShrink: 0,
-                      }}>Download</button>
+                      {canDownload && (
+                        <button onClick={() => downloadDelivery(h)} style={{
+                          padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                          background: '#2563eb', color: '#fff', border: 'none', flexShrink: 0,
+                        }}>Download</button>
+                      )}
                     </div>
                   </div>
                 ))}

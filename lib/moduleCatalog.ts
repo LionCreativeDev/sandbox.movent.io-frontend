@@ -139,30 +139,25 @@ export const MODULE_CATALOG: ModuleDef[] = [
     key: 'compliance',
     name: 'Compliance',
     color: '#dc2626',
+    // Simplified 5-key model (2026-09-03) — every key is enforced end-to-end
+    // on both frontend and backend (Api\User\ComplianceController):
+    // - View Compliance: view the module + cases/projects the user is tied
+    //   to (assigned officer, or the project's PM/Seller/team member).
+    // - View All Company Compliance: removes that restriction, company-wide.
+    // - Assign Compliance User: assign/change a case's Compliance Officer.
+    // - Change Compliance Status: add/edit/delete requirements, upload/
+    //   review documents (approve/reject/resubmission/expiry), case status
+    //   transitions, checklist, case comments.
+    // - Download Compliance Data: download documents, attachments,
+    //   deliveries, and the chat export.
+    // Template management (create/edit/delete/set-default) is Company
+    // Admin-only and not represented here.
     permissions: [
-      { key: 'canViewComplianceDashboard',  label: 'View Compliance Dashboard' },
-      { key: 'canViewPolicies',             label: 'View Policies' },
-      { key: 'canCreatePolicies',           label: 'Create Policies' },
-      { key: 'canEditPolicies',             label: 'Edit Policies' },
-      { key: 'canAssignPolicies',           label: 'Assign Policies' },
-      { key: 'canViewAuditTrails',          label: 'View Audit Trails' },
-      { key: 'canExportAuditTrails',        label: 'Export Audit Trails' },
-      { key: 'canViewComplianceReports',    label: 'View Compliance Reports' },
-      { key: 'canExportComplianceReports',  label: 'Export Compliance Reports' },
-      { key: 'canCreateRiskAssessments',    label: 'Create Risk Assessments' },
-      { key: 'canEditRiskAssessments',      label: 'Edit Risk Assessments' },
-      { key: 'canViewAlertsViolations',     label: 'View Alerts & Violations' },
-      { key: 'canResolveAlertsViolations',  label: 'Resolve Alerts & Violations' },
-      { key: 'canManageDocumentCompliance', label: 'Manage Document Compliance' },
-      { key: 'canUseComplianceChat',        label: 'Use Compliance Chat' },
-      // Compliance Case module (Project → Compliance Case → Requirements →
-      // Documents → Review) — distinct from the Policy/Risk/Incident/
-      // Violation keys above, which belong to an earlier, unused scaffold.
-      { key: 'canViewComplianceCases',           label: 'View Compliance Cases' },
-      { key: 'canManageComplianceTemplates',     label: 'Manage Compliance Templates' },
-      { key: 'canManageComplianceRequirements',  label: 'Manage Compliance Requirements' },
-      // No canAssignComplianceOfficer — Company Admin-only action, not a
-      // delegable staff permission.
+      { key: 'canViewCompliance',           label: 'View Compliance' },
+      { key: 'canViewAllCompanyCompliance', label: 'View All Company Compliance' },
+      { key: 'canAssignComplianceUser',     label: 'Assign Compliance User' },
+      { key: 'canChangeComplianceStatus',   label: 'Change Compliance Status' },
+      { key: 'canDownloadComplianceData',   label: 'Download Compliance Data' },
     ],
   },
 

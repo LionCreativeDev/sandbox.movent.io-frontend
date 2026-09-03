@@ -184,7 +184,7 @@ const USER_NAV_GROUPS = [
   {
     label: 'Compliance',
     items: [
-      { href: '/compliance', icon: HiShieldCheck, label: 'Compliance', module: 'compliance', permAny: ['canViewComplianceCases'] },
+      { href: '/compliance', icon: HiShieldCheck, label: 'Compliance', module: 'compliance', permAny: ['canViewCompliance'] },
     ],
   },
   {
@@ -230,6 +230,15 @@ export default function Sidebar() {
   // Management) so permAny gating works uniformly for Sales/Client/Invoice
   // nav items too, on top of their coarser `module` purchase gate.
   const [projectMgmtPerms, setProjectMgmtPerms] = useState<string[] | null>(null);
+  // Distinct from projectMgmtPerms above (which merges every module's keys
+  // together for permAny matching) — this tracks the project_management
+  // module specifically, since the "My Tasks" fallback below must mirror
+  // frontend/app/tasks/page.tsx's own guard (getUserModulePermissions
+  // ('project_management').length === 0 → redirect to /dashboard). A
+  // single-module staff role like Compliance/HR/Finance User has permissions
+  // under its own module only, so the old "any permission in any module"
+  // check wrongly showed "My Tasks" and then bounced them straight back out.
+  const [projectMgmtOwnPerms, setProjectMgmtOwnPerms] = useState<string[] | null>(null);
   const [navBadges, setNavBadges] = useState<{ tasks: number; projects: number }>({ tasks: 0, projects: 0 });
   // Sellers get zero Task visibility — the "My Tasks" fallback (for roles
   // that lack canViewTasks but still have their own assigned tasks) must
@@ -241,6 +250,7 @@ export default function Sidebar() {
     setAuthType(type);
     if (type === 'admin') {
       setProjectMgmtPerms(['*']);
+      setProjectMgmtOwnPerms(['*']);
       setIsSeller(false);
     } else {
       const user = getAuthUser() as User | null;
@@ -249,12 +259,17 @@ export default function Sidebar() {
       const activeId = getActiveCompany();
       const assignments = activeId ? allAssignments.filter(a => a.company_id === activeId) : allAssignments;
       const keys = new Set<string>();
+      const ownKeys = new Set<string>();
       for (const a of assignments) {
-        for (const permKeys of Object.values(a.permissions ?? {})) {
-          (permKeys as string[]).forEach(k => keys.add(k));
+        for (const [moduleKey, permKeys] of Object.entries(a.permissions ?? {})) {
+          (permKeys as string[]).forEach(k => {
+            keys.add(k);
+            if (moduleKey === 'project_management') ownKeys.add(k);
+          });
         }
       }
       setProjectMgmtPerms([...keys]);
+      setProjectMgmtOwnPerms([...ownKeys]);
     }
     if (type === 'admin') {
       const admin = getAuthUser() as Admin | null;
@@ -352,7 +367,7 @@ export default function Sidebar() {
   // convention as enabledModules, to avoid a hydration mismatch.
   const hasPermAny = (keys: string[]) =>
     projectMgmtPerms === null || projectMgmtPerms.includes('*') || keys.some(k => projectMgmtPerms.includes(k));
-  const hasAnyProjectManagementPerm = projectMgmtPerms === null || projectMgmtPerms.length > 0;
+  const hasAnyProjectManagementPerm = projectMgmtOwnPerms === null || projectMgmtOwnPerms.length > 0;
 
   type NavItem = {
     href: string; icon: (typeof HiSquares2X2); label: string;

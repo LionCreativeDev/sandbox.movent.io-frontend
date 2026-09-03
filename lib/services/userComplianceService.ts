@@ -198,7 +198,7 @@ export interface ComplianceTemplate {
 
 // ── Read-only project context (Chat/Attachments/Tasks/Deliverables) ────────
 // See Api\User\ComplianceController's projectClientChat/projectAttachments/
-// projectTasks/projectDeliverables — same 403-if-!canViewComplianceCases gate
+// projectTasks/projectDeliverables — same 403-if-!canViewCompliance gate
 // as the rest of this service.
 
 export interface ComplianceChatMessage {
@@ -434,10 +434,17 @@ export const userComplianceService = {
             const res = await api.get(`${BASE}/projects/${projectId}/case`);
             return res.data.data;
         },
-        // No assignOfficer here — assigning the Compliance Officer is Company
-        // Admin-only (see adminComplianceService.cases.assignOfficer), there
-        // is no User-guard route for it.
-        // 403 unless canManageComplianceRequirements. reason is required by the
+        // 403 unless canAssignComplianceUser — pass null to unassign.
+        assignOfficer: async (
+            caseId: number,
+            officerId: number | null,
+        ): Promise<ComplianceCase> => {
+            const res = await api.patch(`${BASE}/cases/${caseId}/officer`, {
+                compliance_officer_id: officerId,
+            });
+            return res.data.data;
+        },
+        // 403 unless canChangeComplianceStatus. reason is required by the
         // backend for 'on_hold'/'reject' — callers must collect it first.
         updateStatus: async (
             caseId: number,
@@ -590,29 +597,11 @@ export const userComplianceService = {
         },
     },
 
+    // Read-only on this guard — creating/editing/deleting templates is
+    // Company Admin-only (see adminComplianceService.templates).
     templates: {
         list: async (): Promise<ComplianceTemplate[]> => {
             const res = await api.get(`${BASE}/templates`);
-            return res.data.data;
-        },
-        create: async (
-            payload: Record<string, unknown>,
-        ): Promise<ComplianceTemplate> => {
-            const res = await api.post(`${BASE}/templates`, payload);
-            return res.data.data;
-        },
-        update: async (
-            id: number,
-            payload: Record<string, unknown>,
-        ): Promise<ComplianceTemplate> => {
-            const res = await api.put(`${BASE}/templates/${id}`, payload);
-            return res.data.data;
-        },
-        remove: async (id: number): Promise<void> => {
-            await api.delete(`${BASE}/templates/${id}`);
-        },
-        setDefault: async (id: number): Promise<ComplianceTemplate> => {
-            const res = await api.patch(`${BASE}/templates/${id}/default`);
             return res.data.data;
         },
     },
