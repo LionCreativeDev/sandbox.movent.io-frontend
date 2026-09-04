@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminLeadService, userLeadService, Lead } from '@/lib/services/adminLeadService';
-import { getAuthType, getAuthUser, can } from '@/lib/auth';
+import { adminClientService, ClientCompany } from '@/lib/services/adminClientService';
+import { getAuthType, getAuthUser, getActiveCompany, can } from '@/lib/auth';
 import { Admin } from '@/types';
 import { HiPlusCircle, HiMagnifyingGlass } from 'react-icons/hi2';
 
@@ -77,10 +78,23 @@ export default function LeadsPage() {
   const [status, setStatus]       = useState('');
   const [priority, setPriority]   = useState('');
 
-  // Company filtering is the topbar Company Switcher's job (Api\Admin\
-  // LeadController::index() already defaults to activeCompanyIds() when no
-  // explicit ?company_id is sent) — this page no longer duplicates it with
-  // its own dropdown.
+  // Company filter (multi-company Admin only). Starts on whatever the topbar
+  // Company Switcher is set to, so the first load matches what the rest of
+  // the admin area is scoped to, and can then be pointed at one specific
+  // company or at "All Companies" (company_id=all) without leaving this page
+  // — the only way to see a lead that has been MOVED to another company (see
+  // Api\Admin\LeadController::updateCompany()) alongside the rest.
+  const [companies, setCompanies] = useState<ClientCompany[]>([]);
+  const [companyF, setCompanyF]   = useState<string>(() => {
+    const active = getActiveCompany();
+    return active === null ? '' : String(active);
+  });
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    adminClientService.companies().then(setCompanies).catch(() => {});
+  }, [isAdmin]);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -88,6 +102,9 @@ export default function LeadsPage() {
       if (search)    params.search     = search;
       if (status)    params.status     = status;
       if (priority)  params.priority   = priority;
+      // Only the Admin API understands ?company_id — a staff user's leads are
+      // always scoped to their own active company server-side.
+      if (isAdmin && companyF) params.company_id = companyF;
       const data = isAdmin
         ? await adminLeadService.list(params)
         : await userLeadService.list(params);
@@ -96,7 +113,8 @@ export default function LeadsPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [status, priority]); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [status, priority, companyF]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearch = (e: React.SyntheticEvent<HTMLFormElement>) => { e.preventDefault(); load(); };
   const clearFilters = () => { setSearch(''); setStatus(''); setPriority(''); };
@@ -107,6 +125,11 @@ export default function LeadsPage() {
   const totalVal  = leads.filter(l => l.status !== 'lost').reduce((s, l) => s + l.estimated_value, 0);
 
   const leadRoot = isAdmin ? '/admin/leads' : '/leads';
+  // The Company filter and Company column only matter to an Admin who owns
+  // more than one — everyone else is always looking at a single company's
+  // pipeline, so both would just repeat themselves on every row. Same
+  // "hide when there's only one" convention as the topbar CompanySelector.
+  const isMultiCompanyAdmin = isAdmin && companies.length > 1;
 
   return (
     <DashboardLayout title="Leads">
@@ -157,6 +180,12 @@ export default function LeadsPage() {
               <HiMagnifyingGlass size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, company…" style={{ width: '100%', padding: '8px 12px 8px 30px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }} />
             </div>
+            {isMultiCompanyAdmin && (
+              <select value={companyF} onChange={e => setCompanyF(e.target.value)} style={{ padding: '8px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', minWidth: 170 }}>
+                <option value="all">All Companies</option>
+                {companies.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+              </select>
+            )}
             <select value={priority} onChange={e => setPriority(e.target.value)} style={{ padding: '8px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa' }}>
               <option value="">All Priorities</option>
               <option value="urgent">Urgent</option>
@@ -183,7 +212,10 @@ export default function LeadsPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                  {['Name', 'Company', 'Status', 'Priority', 'Est. Value', 'Source', 'Assigned', 'Created By', ''].map(h => (
+                  {/* "Company" is the tenant company the lead belongs to;
+                      the prospect's own organisation is "Organisation" (the
+                      lead form's Company / Organisation field). */}
+                  {['Name', ...(isMultiCompanyAdmin ? ['Company'] : []), 'Organisation', 'Status', 'Priority', 'Est. Value', 'Source', 'Assigned', 'Created By', ''].map(h => (
                     <th key={h} style={{ padding: '11px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
                   ))}
                 </tr>
@@ -202,6 +234,13 @@ export default function LeadsPage() {
                         <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13 }}>{lead.name}</div>
                         {lead.email && <div style={{ fontSize: 11, color: '#94a3b8' }}>{lead.email}</div>}
                       </td>
+                      {isMultiCompanyAdmin && (
+                        <td style={{ padding: '13px 14px' }}>
+                          <span style={{ display: 'inline-block', padding: '3px 9px', borderRadius: 6, background: '#f1f5f9', color: '#334155', fontSize: 11.5, fontWeight: 600 }}>
+                            🏢 {lead.company?.name ?? companies.find(c => c.id === lead.company_id)?.name ?? `Company #${lead.company_id}`}
+                          </span>
+                        </td>
+                      )}
                       <td style={{ padding: '13px 14px', color: '#475569', fontSize: 13 }}>{lead.company_name ?? '—'}</td>
                       <td style={{ padding: '13px 14px' }}>
                         <span style={{ padding: '3px 10px', borderRadius: 50, fontSize: 11, fontWeight: 600, ...ss }}>{STATUS_LABEL[statusKey] ?? cap(statusKey)}</span>

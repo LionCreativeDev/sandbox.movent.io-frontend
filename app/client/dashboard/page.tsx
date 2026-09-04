@@ -51,8 +51,25 @@ export default function ClientDashboardPage() {
     </div>
   );
 
-  const s   = data?.stats   || {};
-  const hasProjects = (data?.modules || []).includes('projects');
+  const s = data?.stats || {};
+
+  // Two separate questions, both answered by the backend (see
+  // Api\Client\DashboardController) — never re-derived from `modules` here,
+  // which is the company-wide purchase list and cannot see the Admin's
+  // per-client Portal toggle:
+  //   available — does the tile render at all?
+  //   allowed   — is the tile clickable, and does its list render?
+  // A module the Admin switched off for this client is available but not
+  // allowed: the tile still shows its real count, but leads nowhere and its
+  // list is withheld. Both default to true so an older API response (no such
+  // keys) keeps the previous behaviour instead of blanking the dashboard.
+  const avail   = data?.portal_available   || {};
+  const allowed = data?.portal_permissions || {};
+  const invoicesAvailable = avail.invoices !== false;
+  const projectsAvailable = avail.projects !== false;
+  const invoicesAllowed   = allowed.invoices !== false;
+  const projectsAllowed   = allowed.projects !== false;
+
   const recentInvoices: any[] = data?.recent_invoices || [];
   const recentProjects: any[] = data?.recent_projects || [];
 
@@ -63,59 +80,69 @@ export default function ClientDashboardPage() {
 
       {/* ── Summary stat widgets — fixed 4-per-row grid, wraps to a new row
           instead of packing however many fit the screen width ── */}
+      {/* href is passed only when the module is allowed — StatCard renders a
+          plain div (no Link, no pointer cursor, no hover lift) without it, so
+          a disabled module's tile still shows its number but goes nowhere. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
-        <StatCard
-          label="Total Invoices"
-          value={s.total_invoices ?? 0}
-          color="#1e293b"
-          href="/client/invoices"
-        />
-        <StatCard
-          label="Paid Invoices"
-          value={s.paid_count ?? 0}
-          sub={fmt(s.paid_amount ?? 0, 'USD')}
-          color="#059669"
-          href="/client/invoices"
-        />
-        <StatCard
-          label="Pending Invoices"
-          value={s.pending_count ?? 0}
-          sub={fmt(s.pending_amount ?? 0, 'USD')}
-          color="#d97706"
-          href="/client/invoices"
-        />
-        {hasProjects && (
+        {invoicesAvailable && (
+          <>
+            <StatCard
+              label="Total Invoices"
+              value={s.total_invoices ?? 0}
+              color="#1e293b"
+              href={invoicesAllowed ? '/client/invoices' : undefined}
+            />
+            <StatCard
+              label="Paid Invoices"
+              value={s.paid_count ?? 0}
+              sub={fmt(s.paid_amount ?? 0, 'USD')}
+              color="#059669"
+              href={invoicesAllowed ? '/client/invoices' : undefined}
+            />
+            <StatCard
+              label="Pending Invoices"
+              value={s.pending_count ?? 0}
+              sub={fmt(s.pending_amount ?? 0, 'USD')}
+              color="#d97706"
+              href={invoicesAllowed ? '/client/invoices' : undefined}
+            />
+          </>
+        )}
+        {projectsAvailable && (
           <>
             <StatCard
               label="Total Projects"
               value={s.total_projects ?? 0}
               color="#1e293b"
-              href="/client/projects"
+              href={projectsAllowed ? '/client/projects' : undefined}
             />
             <StatCard
               label="Pending Projects"
               value={s.pending_projects ?? 0}
               color="#d97706"
-              href="/client/projects"
+              href={projectsAllowed ? '/client/projects' : undefined}
             />
             <StatCard
               label="Ongoing Projects"
               value={s.ongoing_projects ?? 0}
               color="#2563eb"
-              href="/client/projects"
+              href={projectsAllowed ? '/client/projects' : undefined}
             />
             <StatCard
               label="Completed Projects"
               value={s.completed_projects ?? 0}
               color="#16a34a"
-              href="/client/projects"
+              href={projectsAllowed ? '/client/projects' : undefined}
             />
           </>
         )}
       </div>
 
-      {/* ── No invoices yet — empty state ── */}
-      {s.total_invoices === 0 && (
+      {/* ── No invoices yet — empty state. Suppressed when Invoices is off
+          for this client: "your invoices will appear here" is a promise the
+          portal can no longer keep, and the tiles above already carry the
+          real count. ── */}
+      {invoicesAvailable && invoicesAllowed && s.total_invoices === 0 && (
         <div style={{ background: '#fff', borderRadius: 14, border: '1.5px dashed #e2e8f0', padding: '48px 24px', textAlign: 'center', marginBottom: 24 }}>
           <div style={{ fontSize: 48, marginBottom: 12 }}>🧾</div>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#1e293b', marginBottom: 6 }}>No invoices yet</div>
@@ -123,10 +150,12 @@ export default function ClientDashboardPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: hasProjects && recentProjects.length > 0 ? '1fr 1fr' : '1fr', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: projectsAllowed && recentProjects.length > 0 ? '1fr 1fr' : '1fr', gap: 20 }}>
 
-        {/* ── Recent Invoices ── */}
-        {recentInvoices.length > 0 && (
+        {/* ── Recent Invoices — the LIST, so it is withheld entirely when the
+            module is off. The backend already returns an empty array in that
+            case; this guard makes the rule explicit at the render site too. ── */}
+        {invoicesAllowed && recentInvoices.length > 0 && (
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1e293b' }}>Recent Invoices</h3>
@@ -160,8 +189,8 @@ export default function ClientDashboardPage() {
           </div>
         )}
 
-        {/* ── Recent Projects (only if module enabled) ── */}
-        {hasProjects && recentProjects.length > 0 && (
+        {/* ── Recent Projects — same rule as Recent Invoices above ── */}
+        {projectsAllowed && recentProjects.length > 0 && (
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1e293b' }}>Recent Projects</h3>
@@ -191,9 +220,14 @@ export default function ClientDashboardPage() {
             <div style={{ fontSize: 14, fontWeight: 700, color: '#dc2626' }}>⚠ {s.overdue_count} overdue invoice{s.overdue_count > 1 ? 's' : ''}</div>
             <div style={{ fontSize: 12, color: '#ef4444', marginTop: 2 }}>Please settle your outstanding balance to avoid service interruption</div>
           </div>
-          <Link href="/client/invoices?status=overdue" style={{ padding: '8px 16px', borderRadius: 8, background: '#dc2626', color: '#fff', fontSize: 12, fontWeight: 600, textDecoration: 'none', flexShrink: 0 }}>
-            View Overdue
-          </Link>
+          {/* The count stays — it is a stat, like the tiles — but the CTA is
+              dropped when Invoices is off, since it would only lead to the
+              "not enabled" screen. */}
+          {invoicesAllowed && (
+            <Link href="/client/invoices?status=overdue" style={{ padding: '8px 16px', borderRadius: 8, background: '#dc2626', color: '#fff', fontSize: 12, fontWeight: 600, textDecoration: 'none', flexShrink: 0 }}>
+              View Overdue
+            </Link>
+          )}
         </div>
       )}
     </div>

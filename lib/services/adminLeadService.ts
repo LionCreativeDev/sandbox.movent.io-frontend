@@ -3,6 +3,11 @@ import api from '@/lib/axios';
 export interface Lead {
   id: number;
   company_id: number;
+  // The tenant Company this lead belongs to (admin API only) — NOT the same
+  // as company_name below, which is the prospect's own organisation typed
+  // into the lead form. Lets the Leads listing show which company a lead
+  // sits under after it's been moved between them.
+  company?: { id: number; name: string } | null;
   name: string;
   email: string | null;
   phone: string | null;

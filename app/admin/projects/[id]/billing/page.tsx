@@ -10,6 +10,7 @@ import ProjectTabs from '@/components/admin/projects/ProjectTabs';
 import SubmitButton from '@/components/ui/SubmitButton';
 import { card, lbl, inp, Badge, STATUS_SC, fmtDate, DraftNotice } from '@/components/admin/projects/shared';
 import { handleNotFound } from '@/lib/notFound';
+import api from '@/lib/axios';
 
 function errorMessage(err: unknown, fallback: string): string {
   const ex = err as { response?: { data?: { message?: string } } };
@@ -45,7 +46,19 @@ export default function ProjectBillingPage() {
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [newInvAmount, setNewInvAmount] = useState('');
   const [newInvDueDate, setNewInvDueDate] = useState('');
+  // What this invoice is FOR — "50% Advance Payment", "Milestone 2", etc.
+  // Optional, but without it the client only ever sees an amount: it's what
+  // the payment page, the invoice email and the portal all show as
+  // "Payment For" (see Api\Admin\ProjectController::createInvoice()).
+  const [newInvPurpose, setNewInvPurpose] = useState('');
   const [newInvEmail, setNewInvEmail] = useState('');
+  // Settings > Invoice tab defaults — the exact same values
+  // Api\Admin\ProjectController::createInvoice() resolves server-side (via
+  // Company::invoicingProfile(), which prefers the tenant admin's own row —
+  // the one this endpoint returns). Read-only here: the form doesn't offer a
+  // tax override, it just tells the admin what is about to be applied instead
+  // of leaving them to guess.
+  const [invoiceDefaults, setInvoiceDefaults] = useState<{ tax_rate: number; payment_terms: number } | null>(null);
   const [createdInvoice, setCreatedInvoice] = useState<{ id: number; invoiceNumber: string; sentTo: string; paymentUrl?: string } | null>(null);
   const [invoiceLinkCopied, setInvoiceLinkCopied] = useState(false);
   const copyInvoiceLink = () => {
@@ -77,6 +90,15 @@ export default function ProjectBillingPage() {
     if (project.invoice?.customer_email) setNewInvEmail(project.invoice.customer_email);
   }, [project]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    api.get('/admin/settings')
+      .then(r => setInvoiceDefaults({
+        tax_rate: Number(r.data.data.invoice.tax_rate) || 0,
+        payment_terms: Number(r.data.data.invoice.payment_terms) || 0,
+      }))
+      .catch(() => { /* the hint just stays hidden — never blocks invoicing */ });
+  }, []);
+
   const handleCreateProjectInvoice = async () => {
     if (invoiceBusy) return;
     if (!newInvAmount) { toast.error('Amount is required'); return; }
@@ -88,11 +110,12 @@ export default function ProjectBillingPage() {
         due_date: newInvDueDate || null,
         currency: projectInvoiceCurrency,
         items: [{ description: `Invoice for ${project?.name ?? 'project'}`, quantity: 1, unit_price: Number(newInvAmount) }],
+        invoice_purpose: newInvPurpose.trim() || null,
         recipient_email: project?.client ? undefined : newInvEmail.trim(),
       });
       toast.success('Invoice created and sent');
       setCreatedInvoice({ id: invoice.id, invoiceNumber: invoice.invoice_number, sentTo, paymentUrl: invoice.payment_url });
-      setNewInvAmount(''); setNewInvDueDate('');
+      setNewInvAmount(''); setNewInvDueDate(''); setNewInvPurpose('');
       setShowCreateInvoice(false);
       await load();
     } catch (err: unknown) {
@@ -185,6 +208,7 @@ export default function ProjectBillingPage() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap' }}>
             <input type="number" min={0} step="0.01" value={newInvAmount} onChange={e => setNewInvAmount(e.target.value)} placeholder={`Amount (${projectInvoiceCurrency ?? 'USD'})`} style={{ ...inp, width: 160 }} />
             <input type="date" value={newInvDueDate} onChange={e => setNewInvDueDate(e.target.value)} placeholder="Due date (optional)" style={{ ...inp, width: 160 }} />
+            <input value={newInvPurpose} onChange={e => setNewInvPurpose(e.target.value)} maxLength={255} placeholder="Purpose — e.g. 50% Advance Payment" style={{ ...inp, flex: '1 1 240px' }} />
             {project.client ? (
               <div style={{ fontSize: 12, color: '#64748b' }}>Will be sent to {project.client.email ?? project.client.name}</div>
             ) : (
@@ -193,6 +217,26 @@ export default function ProjectBillingPage() {
             <SubmitButton type="button" onClick={handleCreateProjectInvoice} loading={invoiceBusy} loadingText="Creating Invoice…" style={{ padding: '9px 16px', borderRadius: 7, border: 'none', background: invoiceBusy ? '#93c5fd' : '#2563eb', color: '#fff', fontSize: 13, fontWeight: 600 }}>
               Create &amp; Send
             </SubmitButton>
+            {/* The form has no tax field — the rate comes from Settings >
+                Invoice — so this line names the rate about to be applied and,
+                once an amount is typed, runs the exact same arithmetic the
+                server does: tax = round(amount × rate / 100, 2),
+                total = amount + tax. The tax half is skipped entirely until
+                the settings call has answered, rather than claiming a rate
+                this page hasn't actually confirmed. */}
+            <div style={{ width: '100%', fontSize: 11.5, color: '#475569' }}>
+              Please give purpose of invoice
+              {invoiceDefaults && (invoiceDefaults.tax_rate > 0 ? (
+                <>
+                  {' '}— tax <strong>{invoiceDefaults.tax_rate}%</strong> will be applied, as set by the admin
+                  {Number(newInvAmount) > 0 && (
+                    <> ({fmt(Number(newInvAmount))} + {fmt(Math.round(Number(newInvAmount) * invoiceDefaults.tax_rate) / 100)} tax = <strong>{fmt(Number(newInvAmount) + Math.round(Number(newInvAmount) * invoiceDefaults.tax_rate) / 100, projectInvoiceCurrency ?? 'USD')}</strong>)</>
+                  )}
+                </>
+              ) : (
+                <>{' '}— no tax will be applied, the admin has set 0%</>
+              ))}.
+            </div>
             {projectInvoiceCurrency && (
               <div style={{ width: '100%', fontSize: 11, color: '#94a3b8' }}>
                 Matches this project's existing invoice currency ({projectInvoiceCurrency}) — new invoices for this project always inherit it.

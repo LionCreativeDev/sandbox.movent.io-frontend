@@ -601,6 +601,9 @@ export const adminProjectService = {
   createInvoice: async (id: number, payload: {
     due_date?: string | null; currency?: string; tax_rate?: number; discount_amount?: number;
     notes?: string | null; items: { description: string; quantity: number; unit_price: number }[];
+    // What this invoice is FOR (e.g. "50% Advance Payment") — shown to the
+    // client on the payment page, the invoice email and the portal.
+    invoice_purpose?: string | null;
     // Required only when the project has no linked client — the invoice is
     // always emailed immediately once created (see
     // Api\Admin\ProjectController::createInvoice()).

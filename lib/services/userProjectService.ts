@@ -181,6 +181,9 @@ export const userProjectService = {
             tax_rate?: number;
             discount_amount?: number;
             notes?: string | null;
+            // What this invoice is FOR (e.g. "50% Advance Payment") — shown to
+            // the client on the payment page, the invoice email and the portal.
+            invoice_purpose?: string | null;
             items: {
                 description: string;
                 quantity: number;

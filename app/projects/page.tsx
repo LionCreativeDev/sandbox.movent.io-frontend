@@ -56,10 +56,13 @@ function UserProjectsList() {
   const invoiceId = searchParams.get('invoice_id') ? Number(searchParams.get('invoice_id')) : null;
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading]   = useState(true);
-  // Project Managers at this Seller's own company — options for the
-  // "Assigned To" dropdown on rows the Seller owns (project.seller_id ===
-  // me.id). Fetched once; every such project is the same company.
-  const [pmOptions, setPmOptions] = useState<CompanyUserOption[]>([]);
+  // Project Manager options for the "Assigned To" dropdown, keyed by the
+  // COMPANY the project belongs to — a Seller can own projects in more than
+  // one company, and each row must offer that project's own company's PMs.
+  // (Was a single flat list fetched with no project id at all, which made the
+  // backend fall back to the Seller's own primary company — the wrong list
+  // for any project outside it.)
+  const [pmOptionsByCompany, setPmOptionsByCompany] = useState<Record<number, CompanyUserOption[]>>({});
   const [assigningId, setAssigningId] = useState<number | null>(null);
   const [statusF, setStatusF]   = useState('');
 
@@ -143,12 +146,35 @@ function UserProjectsList() {
 
   // Only a Seller ever owns a project (seller_id match) here, so only a
   // Seller ever needs the PM options — skip the fetch for everyone else.
+  //
+  // One request per DISTINCT company among the Seller's own projects, not one
+  // per project and not a single company-less call: companyUsers() scopes by
+  // the project id it's given, so passing one is what makes each row's list
+  // come from that project's company.
   useEffect(() => {
-    if (me?.role_type !== 'seller') return;
-    userProjectService.team.companyUsers()
-      .then(users => setPmOptions(users.filter(u => u.role_type === 'project_manager')))
-      .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (me?.role_type !== 'seller' || projects.length === 0) return;
+
+    const repByCompany = new Map<number, number>(); // company_id → any project id of it
+    projects.forEach(p => {
+      if (sellerIdOf(p) === me.id && !repByCompany.has(p.company_id)) {
+        repByCompany.set(p.company_id, p.id);
+      }
+    });
+    if (repByCompany.size === 0) return;
+
+    let cancelled = false;
+    Promise.all(
+      [...repByCompany].map(([companyId, projectId]) =>
+        userProjectService.team.companyUsers(projectId)
+          .then(users => [companyId, users.filter(u => u.role_type === 'project_manager')] as const)
+          .catch(() => [companyId, [] as CompanyUserOption[]] as const),
+      ),
+    ).then(entries => {
+      if (!cancelled) setPmOptionsByCompany(Object.fromEntries(entries));
+    });
+
+    return () => { cancelled = true; };
+  }, [projects, me]);
 
   const assignPm = async (projectId: number, value: string) => {
     const pmId = value ? Number(value) : null;
@@ -264,7 +290,7 @@ function UserProjectsList() {
                               to the Seller themselves, so the blank option
                               reads as their own name, not "Unassigned". */}
                           <option value="">{me?.name ?? 'You'} (you)</option>
-                          {pmOptions.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                          {(pmOptionsByCompany[p.company_id] ?? []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                         </select>
                       ) : assignedToName(p)}
                     </td>

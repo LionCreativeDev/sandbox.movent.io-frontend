@@ -38,6 +38,8 @@ interface GatewayPageData {
     total_amount: number;
     paid_amount: number;
     currency: string;
+    // What this payment is for — the line items aren't listed on this screen.
+    invoice_purpose?: string | null;
   };
   gateways: Gateway[];
   bank: BankDetails | null;
@@ -207,6 +209,9 @@ export default function ClientPaymentPage() {
           <h1 style={{ fontSize: 20, fontWeight: 700, color: '#1e293b', margin: 0 }}>Submit Payment</h1>
           <p style={{ margin: '2px 0 0', fontSize: 13, color: '#64748b' }}>
             Invoice {data.invoice.invoice_number}
+            {data.invoice.invoice_purpose && (
+              <span style={{ color: '#2563eb', fontWeight: 600 }}> · {data.invoice.invoice_purpose}</span>
+            )}
           </p>
         </div>
       </div>

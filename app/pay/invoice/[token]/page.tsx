@@ -55,6 +55,10 @@ interface PublicInvoice {
   status: 'sent' | 'partially_paid' | 'paid' | 'overdue';
   due_date?: string;
   notes?: string;
+  // What this invoice is FOR ("50% Advance Payment", "Milestone 2", …) — the
+  // line items carry their own descriptions, but an invoice raised from a
+  // project's billing screen has only a generic one.
+  invoice_purpose?: string | null;
   token_expires_at?: string;
   items: PublicInvoiceItem[];
   available_gateways: Gateway[];
@@ -646,6 +650,12 @@ function PublicInvoicePayContent() {
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#94a3b8', marginBottom: 4 }}>Invoice</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a' }}>{invoice.invoice_number}</div>
+            {/* What this payment is for — the whole point of the page for a
+                milestone/advance invoice, whose line item is only ever a
+                generic "Invoice for {project}". */}
+            {invoice.invoice_purpose && (
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#2563eb', marginTop: 6 }}>{invoice.invoice_purpose}</div>
+            )}
             {invoice.due_date && (
               <div style={{ fontSize: 13, color: isOverdue ? '#dc2626' : '#64748b', marginTop: 6 }}>
                 {isOverdue ? '⚠️ Overdue — was due ' : 'Due '}{fmtDate(invoice.due_date)}

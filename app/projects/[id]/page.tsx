@@ -317,6 +317,11 @@ export default function UserProjectDetailPage() {
     const [showCreateInvoice, setShowCreateInvoice] = useState(false);
     const [newInvAmount, setNewInvAmount] = useState("");
     const [newInvDueDate, setNewInvDueDate] = useState("");
+    // What this invoice is FOR — "50% Advance Payment", "Milestone 2", etc.
+    // Optional, but without it the client only ever sees an amount: it's what
+    // the payment page, the invoice email and the portal all show as
+    // "Payment For" (see Api\User\ProjectController::createInvoice()).
+    const [newInvPurpose, setNewInvPurpose] = useState("");
     // Only asked for when the project has no linked client — otherwise the
     // invoice always goes straight to that client's own email (matches
     // Api\User\ProjectController::createInvoice()'s recipient_email rule).
@@ -372,6 +377,7 @@ export default function UserProjectDetailPage() {
                         unit_price: Number(newInvAmount),
                     },
                 ],
+                invoice_purpose: newInvPurpose.trim() || null,
                 recipient_email: project?.client
                     ? undefined
                     : newInvEmail.trim(),
@@ -385,6 +391,7 @@ export default function UserProjectDetailPage() {
             });
             setNewInvAmount("");
             setNewInvDueDate("");
+            setNewInvPurpose("");
             setShowCreateInvoice(false);
             // Refresh in place (no full-page loading flash) so the new invoice
             // shows up in the Invoices & Billing table below right away.
@@ -1692,6 +1699,15 @@ export default function UserProjectDetailPage() {
                                     placeholder="Due date (optional)"
                                     style={{ ...inp, width: 160 }}
                                 />
+                                <input
+                                    value={newInvPurpose}
+                                    onChange={(e) =>
+                                        setNewInvPurpose(e.target.value)
+                                    }
+                                    maxLength={255}
+                                    placeholder="Purpose — e.g. 50% Advance Payment"
+                                    style={{ ...inp, flex: "1 1 240px" }}
+                                />
                                 {project.client ? (
                                     <div
                                         style={{
@@ -1733,6 +1749,24 @@ export default function UserProjectDetailPage() {
                                 >
                                     Create & Send
                                 </SubmitButton>
+                                <div
+                                    style={{
+                                        width: "100%",
+                                        fontSize: 11,
+                                        color: "#94a3b8",
+                                    }}
+                                >
+                                    {/* No rate named here on purpose: the only
+                                        endpoint carrying it (/user/invoices/
+                                        gateway-accounts) is gated on
+                                        canViewInvoices/canCreateInvoices, which
+                                        a PM raising a project invoice need not
+                                        hold — calling it would just throw a
+                                        "no permission" toast at them. */}
+                                    Please give purpose of invoice — tax will be
+                                    applied as set by the admin in Settings &gt;
+                                    Invoice.
+                                </div>
                                 {projectInvoiceCurrency && (
                                     <div
                                         style={{

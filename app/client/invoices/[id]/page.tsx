@@ -84,6 +84,16 @@ export default function ClientInvoiceDetailPage() {
           </div>
         </div>
 
+        {/* What this invoice is for — set on the invoice itself
+            (invoice_purpose), separate from the line-item descriptions, which
+            for a project/milestone invoice are only ever generic. */}
+        {inv.invoice_purpose && (
+          <div style={{ marginBottom: 24, padding: '12px 16px', background: '#eff6ff', border: '1px solid #dbeafe', borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#60a5fa', marginBottom: 4 }}>PAYMENT FOR</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#1e40af' }}>{inv.invoice_purpose}</div>
+          </div>
+        )}
+
         {/* Bill To */}
         {inv.client && (
           <div style={{ marginBottom: 24, padding: '12px 16px', background: '#f8fafc', borderRadius: 8 }}>
