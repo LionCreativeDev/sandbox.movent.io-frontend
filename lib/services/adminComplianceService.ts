@@ -246,9 +246,12 @@ export interface ComplianceInvoicePayment {
   id: number;
   amount: string;
   currency: string;
-  method: string;
+  method: string | null;
   status: string;
   payment_date: string | null;
+  // Gateway account behind an online charge ("PayPal", "Stripe — EU", …);
+  // null for bank_transfer/cash/cheque/card.
+  gateway_name: string | null;
 }
 
 export interface ComplianceInvoice {

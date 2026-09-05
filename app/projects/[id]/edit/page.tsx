@@ -5,8 +5,9 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { can, getAuthUser } from '@/lib/auth';
 import { userProjectService, ProjectAttachment } from '@/lib/services/userProjectService';
+import { userClientService } from '@/lib/services/userClientService';
 import { Project, Priority, ProjectStatus } from '@/lib/services/adminProjectService';
-import { User } from '@/types';
+import { User, Client } from '@/types';
 import { ALLOWED_ATTACHMENT_TYPES, DRAFT_HINT, fmtDate, fmtFileSize, inp, lbl, MAX_ATTACHMENT_MB } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
@@ -32,12 +33,15 @@ export default function UserEditProjectPage() {
   const [attLoading, setAttLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [clients, setClients] = useState<Client[]>([]);
   const [form, setForm] = useState({
     name: '',
     description: '',
     status: 'planning' as ProjectStatus,
     priority: 'medium' as Priority,
     deadline: '',
+    client_id: '',
+    budget: '',
   });
 
   const canEditProjects = can('project_management', 'canEditProjects');
@@ -87,6 +91,8 @@ export default function UserEditProjectPage() {
           status: next.status,
           priority: next.priority,
           deadline: next.deadline?.slice(0, 10) ?? '',
+          client_id: next.client?.id ? String(next.client.id) : '',
+          budget: next.budget != null ? String(next.budget) : '',
         });
       })
       .catch((err) => {
@@ -102,6 +108,10 @@ export default function UserEditProjectPage() {
         .then(setAttachments)
         .catch(() => setAttachments([]))
         .finally(() => setAttLoading(false));
+    }
+
+    if (can('client', 'canViewClients')) {
+      userClientService.list().then(setClients).catch(() => setClients([]));
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -159,6 +169,10 @@ export default function UserEditProjectPage() {
       toast.error('Project name is required');
       return;
     }
+    if (form.budget.trim() && (isNaN(Number(form.budget)) || Number(form.budget) < 0)) {
+      toast.error('Budget must be a valid non-negative number');
+      return;
+    }
     setSaving(true);
     try {
       await userProjectService.update(projectId, {
@@ -167,6 +181,8 @@ export default function UserEditProjectPage() {
         status: form.status,
         priority: form.priority,
         deadline: form.deadline || null,
+        client_id: form.client_id ? Number(form.client_id) : null,
+        budget: form.budget.trim() ? Number(form.budget) : null,
       });
       toast.success('Project updated');
       router.push(`/projects/${projectId}`);
@@ -230,12 +246,23 @@ export default function UserEditProjectPage() {
                   <option value="urgent">Urgent</option>
                 </select>
               </div>
+              <div>
+                <label style={lbl}>Client</label>
+                <select value={form.client_id} onChange={e => setF('client_id', e.target.value)} style={inp}>
+                  <option value="">No client linked</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
               <div>
                 <label style={lbl}>Deadline</label>
                 <input type="date" value={form.deadline} onChange={e => setF('deadline', e.target.value)} style={inp} />
+              </div>
+              <div>
+                <label style={lbl}>Budget</label>
+                <input type="number" min={0} step="0.01" value={form.budget} onChange={e => setF('budget', e.target.value)} style={inp} placeholder="e.g. 5000" />
               </div>
             </div>
           </div>

@@ -119,6 +119,96 @@ export interface Client {
   chat_project_id?: number | null;
 }
 
+// GET /{admin|user}/clients/{id}/delete-summary — every record a delete would
+// take. Deleting a client is permanent and cascades, so the confirmation modal
+// puts these numbers in front of the admin first. See
+// App\Services\ClientDeletionService.
+export interface ClientDeleteSummary {
+  client: {
+    id: number;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    company_name: string | null;
+    status: string;
+    has_portal_login: boolean;
+    portal_email: string | null;
+  };
+  projects: { total: number; ongoing: number; completed: number; cancelled: number };
+  invoices: { total: number; paid: number; unpaid: number; overdue: number; cancelled: number };
+  payments: {
+    total: number;
+    // One entry per currency — a client billed in more than one can't be
+    // summed into a single figure.
+    received: { currency: string; amount: string }[];
+  };
+  other: {
+    tasks: number;
+    timesheets: number;
+    deliverables: number;
+    compliance_cases: number;
+    chat_threads: number;
+    portal_permissions: number;
+  };
+}
+
+// GET /admin/users/{id}/delete-impact — everything a user holds inside one
+// company, what a permanent account delete would do to each of it, and what
+// must be handed over first. See App\Services\UserDeletionService.
+export interface UserImpactSection {
+  key: string;
+  label: string;
+  total: number;
+  note: string | null;
+  items: { id: number; name: string; meta: string | null }[];
+  /** Rows beyond the names listed in `items`. */
+  more: number;
+  /** 'unassigned' = the record survives without them; 'deleted' = it goes too. */
+  on_delete: 'unassigned' | 'deleted';
+  /** Which reassignment bucket can clear this section, if any. */
+  reassign_key: string | null;
+  /** Active work that should be handed over before deleting. */
+  blocking_count: number;
+}
+
+// GET /admin/users/{id}/company-workload — one row per company the admin can
+// act on, so the "delete them from which company?" picker isn't blind.
+export interface UserCompanyWorkload {
+  company_id: number;
+  company_name: string;
+  status: string;
+  projects: number;
+  leads: number;
+  tasks: number;
+  clients: number;
+  tickets: number;
+  team: number;
+  total: number;
+}
+
+export interface UserDeleteImpact {
+  user: {
+    id: number;
+    name: string;
+    email: string;
+    role_type: string;
+    custom_role_label: string | null;
+    status: string;
+    is_active: boolean;
+    company_id: number;
+    company_name: string | null;
+    companies: { id: number; name: string; status: string }[];
+  };
+  sections: UserImpactSection[];
+  role_extra: { role_type: string; rows: { label: string; value: number }[] } | null;
+  blockers: { key: string; label: string; count: number; reassign_key: string | null }[];
+  reassignable: string[];
+  candidates: { id: number; name: string; email: string; role_type: string }[];
+  /** False when the account also belongs to another organisation. */
+  can_delete: boolean;
+  block_reason: string | null;
+}
+
 export interface InvoiceItem {
   id?: number;
   description: string;

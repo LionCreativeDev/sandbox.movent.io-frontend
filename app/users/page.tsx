@@ -8,7 +8,9 @@ import { MODULE_CATALOG } from '@/lib/moduleCatalog';
 import { User, CompanyAssignment } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { getActiveCompany } from '@/lib/auth';
-import { HiUserPlus, HiCheckCircle, HiClipboard, HiArrowPath, HiNoSymbol, HiPlay, HiPencilSquare, HiEye, HiKey } from 'react-icons/hi2';
+import { HiUserPlus, HiCheckCircle, HiClipboard, HiArrowPath, HiNoSymbol, HiPlay, HiPencilSquare, HiEye, HiKey, HiTrash } from 'react-icons/hi2';
+import DeleteUserModal from '@/components/users/DeleteUserModal';
+import DeleteCompanyPicker from '@/components/users/DeleteCompanyPicker';
 
 const STATUS_CFG: Record<string, { color: string; bg: string; label: string }> = {
   active:    { color: '#059669', bg: '#ecfdf5', label: 'Active'    },
@@ -76,6 +78,17 @@ export default function UsersPage() {
   // The user whose company the admin is being asked to pick, once the
   // "All Companies" case can't resolve one on its own.
   const [companyPickFor, setCompanyPickFor] = useState<User | null>(null);
+  // Delete runs in stages: for a multi-company user, "which company?" first
+  // (same question Suspend asks), then the Impact Summary for that company,
+  // then the confirmation. Nothing is deleted before the last step.
+  const [deletePickFor, setDeletePickFor] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    user: User;
+    companyId?: number;
+    // Removing their last company ends the account; while they still belong
+    // somewhere else, this only unassigns them from the one chosen.
+    mode: 'delete' | 'unassign';
+  } | null>(null);
 
   const load = async () => {
     try {
@@ -170,6 +183,24 @@ export default function UsersPage() {
     // "All Companies" (or a filter this user isn't part of): ask which
     // company's access is being changed, rather than silently picking one.
     setCompanyPickFor(user);
+  };
+
+  // Stage 1. Two or more companies → ask which one, exactly as Suspend does:
+  // every figure the Impact Summary shows is scoped to a single company, so
+  // choosing it up front is what makes that summary mean anything.
+  //
+  // One company (or an unassigned user with none) → nothing to pick, so go
+  // straight to the summary. That is also the case where the removal ends
+  // the account, since there is no other company left to keep it alive.
+  const handleDelete = (user: User) => {
+    const assignments = assignmentsOf(user);
+
+    if (assignments.length > 1) {
+      setDeletePickFor(user);
+      return;
+    }
+
+    setDeleteTarget({ user, companyId: assignments[0]?.company_id, mode: 'delete' });
   };
 
   const handleResetPassword = async (user: User) => {
@@ -408,13 +439,15 @@ export default function UsersPage() {
                                 </button>
                               </>
                             )}
-                            {/* No Delete here — removing a user from the
-                                company is one irreversible click away from
-                                every row otherwise, and Suspend already
-                                covers "stop this person from logging in".
-                                The removal itself still exists on Edit User
-                                (Unassign Company), where the consequences are
-                                spelled out per company. */}
+                            {/* Delete opens the Impact Summary rather than
+                                deleting on the spot — the objection that kept
+                                this button off the list page was that the
+                                consequences weren't spelled out anywhere near
+                                it. Now they are, and the work can be handed
+                                over before the account goes. */}
+                            <button onClick={() => handleDelete(user)} disabled={busy} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: '1.5px solid #fecaca', background: '#fff', color: '#dc2626', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                              <HiTrash size={13} /> Delete
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -479,6 +512,39 @@ export default function UsersPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Stage 1 — which company are they being deleted from? Only reached
+          when they belong to more than one. */}
+      {deletePickFor && (
+        <DeleteCompanyPicker
+          userId={deletePickFor.id}
+          userName={deletePickFor.name}
+          onCancel={() => setDeletePickFor(null)}
+          onPick={(companyId, remaining) => {
+            setDeleteTarget({
+              user: deletePickFor,
+              companyId,
+              // Still a company left afterwards → this is an unassign, and
+              // the account survives there. Nothing left → the account goes.
+              mode: remaining > 0 ? 'unassign' : 'delete',
+            });
+            setDeletePickFor(null);
+          }}
+        />
+      )}
+
+      {/* Stage 2 and 3 — the dependency summary for that company, optional
+          reassignment, then the final confirmation that actually deletes. */}
+      {deleteTarget && (
+        <DeleteUserModal
+          userId={deleteTarget.user.id}
+          userName={deleteTarget.user.name}
+          companyId={deleteTarget.companyId}
+          mode={deleteTarget.mode}
+          onCancel={() => setDeleteTarget(null)}
+          onDone={() => { setDeleteTarget(null); load(); }}
+        />
       )}
     </DashboardLayout>
   );

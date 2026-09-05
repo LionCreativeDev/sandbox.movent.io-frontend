@@ -19,6 +19,7 @@ import {
   card, lbl, inp, Badge, CASE_STATUS_SC,
   TASK_SC, DELIVERABLE_SC, INVOICE_SC, LEAD_SC, FOLLOWUP_SC, TIMESHEET_SC,
   DOCUMENT_STATUS_SC, REQUIREMENT_STATUS_SC, fmtDate, fmtFileSize, errorMessage,
+  paymentMethodText,
 } from '@/components/admin/compliance/shared';
 import { handleNotFound } from '@/lib/notFound';
 
@@ -1045,7 +1046,7 @@ export default function ProjectComplianceDetailPage() {
                   <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
                     {inv.payments.map(p => (
                       <div key={p.id} style={{ fontSize: 11.5, color: '#64748b' }}>
-                        {p.currency} {p.amount} via {p.method} — {p.status}{p.payment_date ? ` · ${fmtDate(p.payment_date)}` : ''}
+                        {p.currency} {p.amount} via {paymentMethodText(p)} — {p.status}{p.payment_date ? ` · ${fmtDate(p.payment_date)}` : ''}
                       </div>
                     ))}
                   </div>

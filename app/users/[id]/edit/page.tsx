@@ -11,6 +11,7 @@ import { CompanyOption, User } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { HiArrowLeft } from 'react-icons/hi2';
 import PhoneInput from '@/components/ui/PhoneInput';
+import DeleteUserModal from '@/components/users/DeleteUserModal';
 
 // Mirrors the same helper in app/users/new/page.tsx — visible permission
 // keys per catalog module (respecting requiresDb/hideIfCatalogKey), so role
@@ -179,32 +180,22 @@ function EditUserPageContent() {
   // "remove their only company" case). This is an immediate, destructive
   // API call (unlike Add Company above) — it doesn't wait for the page's
   // own Save button, matching how the list page's delete already behaves.
-  const [removingCompanyId, setRemovingCompanyId] = useState<number | null>(null);
+  // The bare confirm() this used to show couldn't say what the person was
+  // actually holding in the company being taken away. DeleteUserModal in
+  // 'unassign' mode spells that out and offers to hand it over first; it
+  // makes the same userService.remove(id, companyId) call at the end.
+  const [unassignCompanyId, setUnassignCompanyId] = useState<number | null>(null);
 
-  const removeCompany = async (companyId: number) => {
-    const co = companies.find(c => c.id === companyId);
+  const onCompanyUnassigned = (companyId: number) => {
     const remainingIds = assignedIds.filter(cid => cid !== companyId);
-    const confirmMsg = remainingIds.length === 0
-      ? `Remove ${co?.name ?? 'this company'} from this user? This is their only company — they will lose all company-specific CRM access until a company is assigned again.`
-      : `Remove ${co?.name ?? 'this company'} from this user?`;
-    if (!confirm(confirmMsg)) return;
-
-    setRemovingCompanyId(companyId);
-    try {
-      await userService.remove(id, companyId);
-      setAssignedIds(remainingIds);
-      setPerms(prev => {
-        const next = { ...prev };
-        delete next[companyId];
-        return next;
-      });
-      if (activeCompanyId === companyId) setActiveCompanyId(remainingIds[0] ?? null);
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message ?? 'Failed to remove company');
-    } finally {
-      setRemovingCompanyId(null);
-    }
+    setAssignedIds(remainingIds);
+    setPerms(prev => {
+      const next = { ...prev };
+      delete next[companyId];
+      return next;
+    });
+    if (activeCompanyId === companyId) setActiveCompanyId(remainingIds[0] ?? null);
+    setUnassignCompanyId(null);
   };
 
   // Changing the role is a meaningful action (it implies "this person's job
@@ -419,16 +410,14 @@ function EditUserPageContent() {
                             </span>
                             <button
                               type="button"
-                              onClick={() => removeCompany(activeCompanyId)}
-                              disabled={removingCompanyId === activeCompanyId}
+                              onClick={() => setUnassignCompanyId(activeCompanyId)}
                               title="Remove this company from this user"
                               style={{
                                 border: 'none', background: 'transparent', color: '#dc2626',
-                                fontSize: 12, fontWeight: 600, cursor: removingCompanyId === activeCompanyId ? 'not-allowed' : 'pointer',
-                                opacity: removingCompanyId === activeCompanyId ? 0.5 : 1, whiteSpace: 'nowrap',
+                                fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
                               }}
                             >
-                              {removingCompanyId === activeCompanyId ? 'Removing…' : '✕ Remove company'}
+                              ✕ Remove company
                             </button>
                           </span>
                         </div>
@@ -635,6 +624,20 @@ function EditUserPageContent() {
           </div>
         )}
       </div>
+
+      {/* Unassigning a company is destructive for everything the person is
+          carrying in it, so the same Impact Summary the Users list uses runs
+          here too — only the final action differs. */}
+      {unassignCompanyId !== null && (
+        <DeleteUserModal
+          userId={id}
+          userName={form.name || 'this user'}
+          companyId={unassignCompanyId}
+          mode="unassign"
+          onCancel={() => setUnassignCompanyId(null)}
+          onDone={() => onCompanyUnassigned(unassignCompanyId)}
+        />
+      )}
     </DashboardLayout>
   );
 }

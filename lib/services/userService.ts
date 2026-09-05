@@ -1,5 +1,5 @@
 import api from '@/lib/axios';
-import { User, Permission, CompanyOption, DataScope } from '@/types';
+import { User, Permission, CompanyOption, DataScope, UserDeleteImpact, UserCompanyWorkload } from '@/types';
 
 export interface CompanyAssignmentPayload {
   company_id: number;
@@ -113,6 +113,41 @@ const remove = async (id: number, companyId?: number): Promise<void> => {
   await api.delete(`/admin/users/${id}`, { params: companyId ? { company_id: companyId } : {} });
 };
 
+// How much this user is holding in each company the admin can act on. Feeds
+// the company picker a multi-company user gets before the Impact Summary.
+const companyWorkload = async (id: number): Promise<UserCompanyWorkload[]> => {
+  const res = await api.get(`/admin/users/${id}/company-workload`);
+  return res.data.data;
+};
+
+// Everything this user holds in one company, for the Impact Summary modal.
+// Read this before remove() or deletePermanently() — neither is reversible.
+const deleteImpact = async (id: number, companyId?: number): Promise<UserDeleteImpact> => {
+  const res = await api.get(`/admin/users/${id}/delete-impact`, {
+    params: companyId ? { company_id: companyId } : {},
+  });
+  return res.data.data;
+};
+
+// Hand this user's work over, one receiving user per bucket ('projects',
+// 'leads', 'tasks', 'clients', 'support_tickets', 'team'). Buckets left out
+// are untouched. Returns rows moved plus a freshly recomputed impact.
+const reassign = async (
+  id: number,
+  companyId: number | undefined,
+  targets: Record<string, number>,
+): Promise<{ moved: Record<string, number>; impact: UserDeleteImpact }> => {
+  const res = await api.post(`/admin/users/${id}/reassign`, { ...targets, company_id: companyId });
+  return res.data.data;
+};
+
+// Permanent, and much wider than remove(): the login is destroyed, and with
+// it their timesheets, team memberships, chat participation, notifications
+// and uploaded folder files. `force` is required while blockers remain.
+const deletePermanently = async (id: number, companyId?: number, force = false): Promise<void> => {
+  await api.delete(`/admin/users/${id}/permanent`, { data: { company_id: companyId, force } });
+};
+
 const getCompanyPermissions = async (
   userId: number,
   companyId: number
@@ -142,4 +177,5 @@ const syncPermissions = async (id: number, permissions: Partial<Permission>[]): 
 export const userService = {
   list, listCompanyOptions, checkEmail, create, invite, resendInvite, toggleStatus, resetPassword, getActivity,
   getOne, update, remove, getCompanyPermissions, updateCompanyPermissions, syncPermissions,
+  companyWorkload, deleteImpact, reassign, deletePermanently,
 };

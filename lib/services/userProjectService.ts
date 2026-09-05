@@ -28,6 +28,11 @@ export interface ProjectPayload {
     // No start_date — a project's Start Date is fixed at creation time
     // (see Api\{Admin,User}\ProjectController::store()) and is never editable.
     deadline?: string | null;
+    budget?: number | null;
+    // Editable post-creation too (Api\User\ProjectController::update()) —
+    // restricted server-side to a client this actor already manages, unless
+    // they hold canViewAllCompanyClients.
+    client_id?: number | null;
 }
 
 export interface CreateProjectPayload extends ProjectPayload {

@@ -5,6 +5,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
+import DeleteClientModal from '@/components/clients/DeleteClientModal';
 
 interface Company { id: number; name: string }
 interface Client {
@@ -92,17 +93,10 @@ export default function AdminClientsPage() {
     }
   };
 
-  // Soft delete (Client uses SoftDeletes) — the client's invoices/projects
-  // stay intact, they just stop appearing everywhere. Their portal login (if
-  // any) is deactivated server-side too.
-  const del = async (c: Client) => {
-    if (!confirm(`Delete "${c.name}"? This can't be undone from here.`)) return;
-    try {
-      await api.delete(`/admin/clients/${c.id}`);
-      toast.success('Client deleted');
-      load();
-    } catch (err: unknown) { toast.error(errorMessage(err, 'Failed to delete client')); }
-  };
+  // Permanent, cascading delete — the client's projects, invoices, payments
+  // and compliance records go with it. DeleteClientModal shows that tally and
+  // takes the confirmation; nothing is deleted until it calls back.
+  const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
   return (
     <DashboardLayout title="Clients">
@@ -223,7 +217,7 @@ export default function AdminClientsPage() {
                             opacity: enablingId === c.id ? 0.65 : 1,
                           }}>{enablingId === c.id ? 'Enabling...' : 'Enable'}</button>
                         )}
-                        <button onClick={() => del(c)} style={{
+                        <button onClick={() => setDeleteTarget(c)} style={{
                           padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
                           background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6,
                         }}>Delete</button>
@@ -236,6 +230,16 @@ export default function AdminClientsPage() {
           </table>
         )}
       </div>
+
+      {deleteTarget && (
+        <DeleteClientModal
+          clientId={deleteTarget.id}
+          clientName={deleteTarget.name}
+          base="admin"
+          onCancel={() => setDeleteTarget(null)}
+          onDeleted={() => { setDeleteTarget(null); load(); }}
+        />
+      )}
 
     </DashboardLayout>
   );

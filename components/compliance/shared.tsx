@@ -139,6 +139,27 @@ export const FOLLOWUP_SC: Record<string, { bg: string; color: string }> = {
     cancelled: { bg: "#f1f5f9", color: "#64748b" },
 };
 
+// Human labels for payments.method — the API sends the raw enum slug.
+export const PAYMENT_METHOD_LABEL: Record<string, string> = {
+    bank_transfer: "Bank Transfer",
+    cash: "Cash",
+    card: "Card",
+    cheque: "Cheque",
+    gateway: "Online Gateway",
+};
+
+// The "via …" text for one payment row: the method, plus the gateway account
+// name whenever the charge actually went through a gateway.
+export function paymentMethodText(p: {
+    method: string | null;
+    gateway_name?: string | null;
+}): string {
+    const method = p.method
+        ? (PAYMENT_METHOD_LABEL[p.method] ?? p.method)
+        : "—";
+    return p.gateway_name ? `${method} (${p.gateway_name})` : method;
+}
+
 export function Badge({
     label,
     sc,

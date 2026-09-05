@@ -1460,6 +1460,27 @@ export default function UserProjectDetailPage() {
                                     textTransform: "uppercase",
                                 }}
                             >
+                                Budget
+                            </div>
+                            <div
+                                style={{
+                                    fontSize: 13,
+                                    color: "#0f172a",
+                                    marginTop: 6,
+                                }}
+                            >
+                                {project.budget ? `$${Number(project.budget).toLocaleString()}` : "—"}
+                            </div>
+                        </div>
+                        <div>
+                            <div
+                                style={{
+                                    fontSize: 11,
+                                    color: "#94a3b8",
+                                    fontWeight: 600,
+                                    textTransform: "uppercase",
+                                }}
+                            >
                                 Start Date
                             </div>
                             <div

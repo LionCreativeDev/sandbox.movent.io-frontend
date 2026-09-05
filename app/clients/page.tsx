@@ -3,9 +3,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminClientService } from '@/lib/services/adminClientService';
-import { userClientService } from '@/lib/services/userClientService';
+import DeleteClientModal from '@/components/clients/DeleteClientModal';
 import api from '@/lib/axios';
-import toast from 'react-hot-toast';
 import { getAuthType, can } from '@/lib/auth';
 import { Client } from '@/types';
 import { HiUserPlus, HiMagnifyingGlass, HiCheckCircle, HiXCircle, HiEye, HiPencilSquare, HiTrash } from 'react-icons/hi2';
@@ -54,17 +53,10 @@ export default function ClientsPage() {
 
   const handleSearch = (e: React.FormEvent) => { e.preventDefault(); load(); };
 
-  // Soft delete (Client uses SoftDeletes) — invoices/projects linked to this
-  // client stay intact, it just stops appearing everywhere.
-  const handleDelete = async (c: Client) => {
-    if (!confirm(`Delete "${c.name}"? This can't be undone from here.`)) return;
-    try {
-      if (isSubUser) await userClientService.remove(c.id);
-      else await adminClientService.remove(c.id);
-      toast.success('Client deleted');
-      load();
-    } catch (err: any) { toast.error(err?.response?.data?.message || 'Failed to delete client'); }
-  };
+  // Permanent, cascading delete — the client's projects, invoices, payments
+  // and compliance records go with it. DeleteClientModal shows that tally and
+  // takes the confirmation; nothing is deleted until it calls back.
+  const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
   return (
     <DashboardLayout title="Clients">
@@ -159,7 +151,7 @@ export default function ClientsPage() {
                           </button>
                         )}
                         {canDelete && (
-                          <button onClick={() => handleDelete(c)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: '1.5px solid #fecaca', background: '#fff', color: '#dc2626', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                          <button onClick={() => setDeleteTarget(c)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: '1.5px solid #fecaca', background: '#fff', color: '#dc2626', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
                             <HiTrash size={13} /> Delete
                           </button>
                         )}
@@ -172,6 +164,16 @@ export default function ClientsPage() {
           )}
         </div>
       </div>
+
+      {deleteTarget && (
+        <DeleteClientModal
+          clientId={deleteTarget.id}
+          clientName={deleteTarget.name}
+          base={isSubUser ? 'user' : 'admin'}
+          onCancel={() => setDeleteTarget(null)}
+          onDeleted={() => { setDeleteTarget(null); load(); }}
+        />
+      )}
     </DashboardLayout>
   );
 }

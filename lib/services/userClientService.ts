@@ -1,5 +1,5 @@
 import api from '@/lib/axios';
-import { Client } from '@/types';
+import { Client, ClientDeleteSummary } from '@/types';
 
 // Sub-user side of Client management — basic record management plus portal
 // access (gated by canEnableClientPortal/canDisableClientPortal). Document/
@@ -33,6 +33,13 @@ export const userClientService = {
 
   update: async (id: number, payload: Partial<UserClientPayload>): Promise<Client> => {
     const res = await api.put(`/user/clients/${id}`, payload);
+    return res.data.data;
+  },
+
+  // What a delete would destroy. Read this and show DeleteClientModal before
+  // ever calling remove() — the delete is permanent and cascades.
+  deleteSummary: async (id: number): Promise<ClientDeleteSummary> => {
+    const res = await api.get(`/user/clients/${id}/delete-summary`);
     return res.data.data;
   },
 
