@@ -131,6 +131,10 @@ export default function PaymentPage() {
   const [plans,        setPlans]        = useState<SubscriptionPlan[]>([]);
   const [plansLoading,  setPlansLoading] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
+  // Billing term for "Build Your Own Plan" — null = Monthly. Custom mode has
+  // no package row of its own, so this drives its own discount math (see
+  // customTotalUsd below) independently of selectedPlanId (package mode).
+  const [customBillingTermId, setCustomBillingTermId] = useState<number | null>(null);
 
   // "Build Your Own Plan" — an alternative to picking one of the plan cards
   // above, same custom-module concept as the registration page. Toggling this
@@ -260,7 +264,35 @@ export default function PaymentPage() {
   const customModules = [...new Set(selectedCats.flatMap(c => c.modules))];
   const customDependencyErrors = moduleDependencyErrors(selectedCategories);
   const customRequiredDeps = requiredDependencyKeys(selectedCategories);
-  const customTotalUsd = selectedCats.reduce((s, c) => s + c.price_usd, 0);
+  const customMonthlyTotalUsd = selectedCats.reduce((s, c) => s + c.price_usd, 0);
+
+  // Every distinct Billing Term Super Admin currently offers (see
+  // /super-admin/billing-terms) — sourced from `plans` (each term shows up
+  // via its package companions) rather than a fixed list, same as the
+  // register page.
+  const availableBillingTerms = [
+    ...new Map(plans.filter(p => p.billing_term).map(p => [p.billing_term!.id, p.billing_term!])).values(),
+  ].sort((a, b) => a.months - b.months);
+  const customTermMonths = customBillingTermId !== null
+    ? (availableBillingTerms.find(t => t.id === customBillingTermId)?.months ?? 1) : 1;
+  const customTermDiscountPercent = customBillingTermId !== null
+    ? Number(plans.find(p => p.billing_term?.id === customBillingTermId)?.discount_percent ?? 0) : 0;
+  const customTotalUsd = customBillingTermId === null
+    ? customMonthlyTotalUsd
+    : Math.round(customMonthlyTotalUsd * customTermMonths * (1 - customTermDiscountPercent / 100) * 100) / 100;
+
+  // The real package_id backing a custom bundle + term, for future renewal
+  // billing (same "cheapest package that already covers these modules"
+  // logic as the register page's autoPackage()) — a custom bundle still
+  // needs a real package row so SubscriptionPaymentController::process()
+  // knows what billing_cycle/term to renew at next time.
+  const resolveCustomPackageId = (): number | undefined => {
+    const inTerm = plans.filter(p => (p.billing_term?.id ?? null) === customBillingTermId);
+    const covering = inTerm
+      .filter(p => customModules.every(m => p.modules.includes(m)))
+      .sort((a, b) => Number(a.price_usd) - Number(b.price_usd));
+    return covering[0]?.id ?? inTerm[0]?.id ?? undefined;
+  };
 
   const toggleCategory = (key: string) =>
     setSelectedCategories(prev => {
@@ -294,6 +326,35 @@ export default function PaymentPage() {
     : order;
 
   const canPayCustom = planMode !== 'custom' || (selectedCategories.length > 0 && customDependencyErrors.length === 0);
+
+  // Final price after this plan's own discount_percent (Super-Admin-set,
+  // e.g. a yearly row discounted vs. its monthly-equivalent list price).
+  const planPrice = (plan: SubscriptionPlan): number => {
+    const base = Number(plan.price_usd) || 0;
+    const discount = Number(plan.discount_percent) || 0;
+    return Math.round(base * (1 - discount / 100) * 100) / 100;
+  };
+
+  // Order Summary's period suffix/discount line — only computed when we
+  // actually know the term (package card picked here, or a custom term
+  // chosen above). Falls back to the original "/mo, no discount line"
+  // display when arriving via localStorage.pending_order untouched (that
+  // payload doesn't carry term info), same as before this was added — not a
+  // regression, just no extra info to show in that case.
+  const selectedPlanObj = planMode === 'package' && selectedPlanId !== null
+    ? plans.find(p => p.id === selectedPlanId) : null;
+  const orderPeriodMonths = planMode === 'custom'
+    ? customTermMonths
+    : (selectedPlanObj?.billing_term?.months ?? 1);
+  const orderTermName = planMode === 'custom'
+    ? (customBillingTermId !== null ? availableBillingTerms.find(t => t.id === customBillingTermId)?.name ?? null : null)
+    : (selectedPlanObj?.billing_term?.name ?? null);
+  const orderDiscountPercent = planMode === 'custom'
+    ? customTermDiscountPercent
+    : Number(selectedPlanObj?.discount_percent ?? 0);
+  const orderDiscountUsd = planMode === 'custom'
+    ? Math.round((customMonthlyTotalUsd * customTermMonths - customTotalUsd) * 100) / 100
+    : (selectedPlanObj ? Math.round((Number(selectedPlanObj.price_usd) - planPrice(selectedPlanObj)) * 100) / 100 : 0);
 
   // ── Fetch init data when gateway changes ──────────────────────────────────
   useEffect(() => {
@@ -404,7 +465,7 @@ export default function PaymentPage() {
               paypal_order_id: data.orderID,
               amount: paypalAmount,
               currency: paypalCurrency,
-              package_id: planMode === 'package' ? selectedPlanId ?? undefined : undefined,
+              package_id: planMode === 'package' ? selectedPlanId ?? undefined : resolveCustomPackageId(),
               is_custom_selection: planMode === 'custom',
               selected_modules: planMode === 'custom' ? customModules : undefined,
             });
@@ -477,14 +538,6 @@ export default function PaymentPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGW?.name, initData?.mode]);
 
-  // Final price after this plan's own discount_percent (Super-Admin-set,
-  // e.g. a yearly row discounted vs. its monthly-equivalent list price).
-  const planPrice = (plan: SubscriptionPlan): number => {
-    const base = Number(plan.price_usd) || 0;
-    const discount = Number(plan.discount_percent) || 0;
-    return Math.round(base * (1 - discount / 100) * 100) / 100;
-  };
-
   // Picking a plan overrides the Order Summary's price/name (and is sent
   // through as package_id below) — used for the trial-expiry/suspension
   // reactivation flow, where there's no localStorage.pending_order to fall
@@ -516,7 +569,7 @@ export default function PaymentPage() {
 
     const currency = 'USD';
     const amount   = displayOrder.total_usd;
-    const packageId = planMode === 'package' ? selectedPlanId ?? undefined : undefined;
+    const packageId = planMode === 'package' ? selectedPlanId ?? undefined : resolveCustomPackageId();
     const isCustom  = planMode === 'custom';
 
     // ── Stripe ──
@@ -804,6 +857,40 @@ export default function PaymentPage() {
                       <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 14 }}>
                         Select Modules
                       </div>
+
+                      {availableBillingTerms.length > 0 && (
+                        <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, padding: 3, gap: 3, marginBottom: 16, flexWrap: 'wrap' }}>
+                          {[{ id: null as number | null, name: 'Monthly', discount: 0 }, ...availableBillingTerms.map(t => ({
+                            id: t.id, name: t.name,
+                            discount: Number(plans.find(p => p.billing_term?.id === t.id)?.discount_percent ?? 0),
+                          }))].map(term => {
+                            const active = customBillingTermId === term.id;
+                            return (
+                              <button
+                                key={term.id ?? 'monthly'}
+                                type="button"
+                                onClick={() => setCustomBillingTermId(term.id)}
+                                style={{
+                                  flex: 1, minWidth: 70, padding: '7px 0', borderRadius: 6, border: 'none',
+                                  background: active ? '#fff' : 'transparent',
+                                  color: active ? '#0f172a' : '#64748b',
+                                  fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                                  boxShadow: active ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                                }}
+                              >
+                                {term.name}
+                                {term.discount > 0 && (
+                                  <span style={{ fontSize: 9, fontWeight: 800, color: active ? '#16a34a' : '#94a3b8' }}>
+                                    -{term.discount}%
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
                         {visibleCategories.map(cat => {
                           const active = selectedCategories.includes(cat.key);
@@ -1042,6 +1129,12 @@ export default function PaymentPage() {
                       <span style={{ color: '#64748b' }}>Plan</span>
                       <span style={{ fontWeight: 700 }}>{displayOrder.package_name}</span>
                     </div>
+                    {orderDiscountUsd > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8, color: '#16a34a' }}>
+                        <span style={{ fontWeight: 600 }}>{orderTermName ?? 'Term'} Discount ({orderDiscountPercent}%)</span>
+                        <span style={{ fontWeight: 600 }}>-${orderDiscountUsd.toFixed(2)}</span>
+                      </div>
+                    )}
                     {displayOrder.mode === 'custom' && displayOrder.modules.length > 0 && (
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Modules:</div>
@@ -1081,7 +1174,7 @@ export default function PaymentPage() {
                         <div style={{ textAlign: 'right' }}>
                           <div style={{ fontWeight: 900, fontSize: 22, color: '#2563eb' }}>
                             {fmt(displayOrder.total_pkr, displayOrder.total_usd)}
-                            <span style={{ fontSize: 12, fontWeight: 400, color: '#94a3b8' }}>/mo</span>
+                            <span style={{ fontSize: 12, fontWeight: 400, color: '#94a3b8' }}>/{orderPeriodMonths === 1 ? 'mo' : `${orderPeriodMonths}mo`}</span>
                           </div>
                           <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>after free trial</div>
                         </div>

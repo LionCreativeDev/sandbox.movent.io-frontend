@@ -63,6 +63,9 @@ export function getRolesFromModules(companyModules: string[]): RoleOption[] {
 
 export const ROLE_LABELS: Record<string, string> = {
   company_admin:   'Company Admin',
+  // Brand keeper — maintains the trading names the company bills under.
+  // Company Admin-only to assign; see COMPANY_ADMIN_ONLY_ROLES below.
+  admin:           'Admin',
   project_manager: 'Project Manager',
   production:      'Production User',
   developer:       'Developer',
@@ -101,6 +104,10 @@ export const ROLE_LABELS: Record<string, string> = {
 // picker per explicit request — still a valid role_type for existing rows,
 // backend validation (UserController::VALID_ROLES) is untouched.
 export const USER_ROLE_TYPE_OPTIONS: RoleOption[] = [
+  // Brand keeper (Brands live in the Invoice module). Offered ONLY to the
+  // Company Admin — every screen that renders this list filters it through
+  // rolesFor() below, which drops COMPANY_ADMIN_ONLY_ROLES for anyone else.
+  { value: 'admin',           label: ROLE_LABELS.admin },
   { value: 'project_manager', label: ROLE_LABELS.project_manager },
   // { value: 'production',      label: ROLE_LABELS.production },
   { value: 'developer',       label: ROLE_LABELS.developer },
@@ -124,6 +131,19 @@ export const USER_ROLE_TYPE_OPTIONS: RoleOption[] = [
 // string comparisons, so a custom role must still inherit one of these
 // buckets' behavior, it just DISPLAYS under the typed-in label instead.
 export const CUSTOM_ROLE_SENTINEL = '__custom__';
+
+// Roles only the Company Admin may assign. Mirrors
+// App\Services\RoleDefaultPermissions::COMPANY_ADMIN_ONLY_ROLES, which is what
+// actually enforces it — a delegated User Manager's role list is filtered
+// server-side too, and their VALID_ROLES rejects one sent by hand.
+export const COMPANY_ADMIN_ONLY_ROLES = ['company_admin', 'admin'];
+
+// The role choices to show a given actor. A Company Admin sees everything;
+// a staff member with the User Management Permission never sees the roles
+// above, however much user-management access they were granted.
+export function rolesFor(isCompanyAdmin: boolean, options: RoleOption[] = USER_ROLE_TYPE_OPTIONS): RoleOption[] {
+  return isCompanyAdmin ? options : options.filter(o => !COMPANY_ADMIN_ONLY_ROLES.includes(o.value));
+}
 
 // The "behaves like" choices offered once "+ Custom Role…" is picked —
 // every USER_ROLE_TYPE_OPTIONS entry, plus Team Member (hidden from the
@@ -169,6 +189,12 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
   // collapseProjectPermissions() shows the right simple checkboxes checked
   // out of the box. Keep any change here mirrored in
   // App\Services\RoleDefaultPermissions::MAP on the backend.
+  // Brand keeper — the trading names the company bills under. Deliberately
+  // nothing else: an Admin maintains the brand list, they are not a second
+  // Company Admin. Mirrors RoleDefaultPermissions::MAP['admin'].
+  admin: {
+    invoice: ['canViewBrands', 'canCreateBrands', 'canEditBrands', 'canDeleteBrands'],
+  },
   project_manager: {
     // pm_view + pm_manage_projects + pm_view_tasks + pm_manage_tasks + pm_edit_tasks + pm_manage_team +
     // pm_manage_production + pm_manage_deliverables + pm_manage_timesheets +

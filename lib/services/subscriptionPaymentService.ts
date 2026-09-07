@@ -42,6 +42,7 @@ export interface SubscriptionPlan {
   description: string | null;
   is_popular: boolean;
   features: string[] | null;
+  modules: string[];
 }
 
 export interface OrderSummary {

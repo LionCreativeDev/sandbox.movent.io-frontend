@@ -108,6 +108,12 @@ export const MODULE_CATALOG: ModuleDef[] = [
       // Data scope override — without it, a non-admin user only sees
       // invoices they created, or that are linked to their own lead/client/project.
       { key: 'canViewAllCompanyInvoices',   label: 'View All Company Invoices (not just own)' },
+      // Brands — the trading names this company bills under. Grouped so they
+      // read as their own section rather than more invoice checkboxes.
+      { key: 'canViewBrands',               label: 'View Brands',   group: 'Brands' },
+      { key: 'canCreateBrands',             label: 'Add Brands',    group: 'Brands' },
+      { key: 'canEditBrands',               label: 'Edit Brands',   group: 'Brands' },
+      { key: 'canDeleteBrands',             label: 'Delete Brands', group: 'Brands' },
     ],
   },
 

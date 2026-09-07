@@ -1,5 +1,19 @@
 import api from '@/lib/axios';
+import { getAuthType } from '@/lib/auth';
 import { User, Permission, CompanyOption, DataScope, UserDeleteImpact, UserCompanyWorkload } from '@/types';
+
+// Where the shared Users screens read and write. A Company Admin hits their
+// own /admin/users/* API; a staff member who was granted the User Management
+// Permission hits /user/users/* (Api\User\UserManagementController), which
+// answers with the same shapes but is scoped server-side to the companies
+// they actually belong to. That switch is what lets the SAME Add User / Edit
+// User pages serve both without a second copy of either.
+//
+// Only the endpoints that exist on both sides go through base(). Invite,
+// resend-invite, reset-password, activity, delete-impact/reassign/permanent
+// delete stay hardcoded to /admin/users — they are Company Admin-only, and
+// the pages hide those controls for staff rather than calling them.
+const base = () => (getAuthType() === 'admin' ? '/admin/users' : '/user/users');
 
 export interface CompanyAssignmentPayload {
   company_id: number;
@@ -55,22 +69,22 @@ export interface UserListResponse {
 }
 
 const list = async (status?: 'invited'): Promise<UserListResponse> => {
-  const res = await api.get('/admin/users', { params: status ? { status } : {} });
+  const res = await api.get(base(), { params: status ? { status } : {} });
   return res.data.data;
 };
 
 const listCompanyOptions = async (): Promise<CompanyOption[]> => {
-  const res = await api.get('/admin/users/company-options');
+  const res = await api.get(`${base()}/company-options`);
   return res.data.data;
 };
 
 const checkEmail = async (email: string): Promise<{ exists: boolean; is_admin?: boolean; name?: string; status?: string }> => {
-  const res = await api.get('/admin/users/check-email', { params: { email } });
+  const res = await api.get(`${base()}/check-email`, { params: { email } });
   return res.data.data;
 };
 
 const create = async (payload: UserPayload): Promise<User> => {
-  const res = await api.post('/admin/users', payload);
+  const res = await api.post(base(), payload);
   return res.data.data;
 };
 
@@ -85,7 +99,7 @@ const resendInvite = async (id: number): Promise<User> => {
 };
 
 const toggleStatus = async (id: number, status: 'active' | 'suspended', companyId?: number): Promise<User> => {
-  const res = await api.patch(`/admin/users/${id}/toggle-status`, { status, company_id: companyId });
+  const res = await api.patch(`${base()}/${id}/toggle-status`, { status, company_id: companyId });
   return res.data.data;
 };
 
@@ -100,17 +114,17 @@ const getActivity = async (id: number, companyId?: number): Promise<UserActivity
 };
 
 const getOne = async (id: number): Promise<User> => {
-  const res = await api.get(`/admin/users/${id}`);
+  const res = await api.get(`${base()}/${id}`);
   return res.data.data;
 };
 
 const update = async (id: number, payload: UserPayload): Promise<User> => {
-  const res = await api.put(`/admin/users/${id}`, payload);
+  const res = await api.put(`${base()}/${id}`, payload);
   return res.data.data;
 };
 
 const remove = async (id: number, companyId?: number): Promise<void> => {
-  await api.delete(`/admin/users/${id}`, { params: companyId ? { company_id: companyId } : {} });
+  await api.delete(`${base()}/${id}`, { params: companyId ? { company_id: companyId } : {} });
 };
 
 // How much this user is holding in each company the admin can act on. Feeds
@@ -152,7 +166,7 @@ const getCompanyPermissions = async (
   userId: number,
   companyId: number
 ): Promise<{ permissions: Record<string, string[]>; data_scopes: Record<string, DataScope> }> => {
-  const res = await api.get(`/admin/users/${userId}/company-permissions/${companyId}`);
+  const res = await api.get(`${base()}/${userId}/company-permissions/${companyId}`);
   return res.data.data;
 };
 
@@ -162,7 +176,7 @@ const updateCompanyPermissions = async (
   permissions: Record<string, string[]>,
   dataScopes?: Record<string, DataScope>
 ): Promise<{ permissions: Record<string, string[]>; data_scopes: Record<string, DataScope> }> => {
-  const res = await api.put(`/admin/users/${userId}/company-permissions/${companyId}`, {
+  const res = await api.put(`${base()}/${userId}/company-permissions/${companyId}`, {
     permissions,
     data_scopes: dataScopes ?? {},
   });

@@ -519,7 +519,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { userService } from '@/lib/services/userService';
 import { getAvailableModules } from '@/lib/moduleCatalog';
 import { SIMPLE_PROJECT_PERMISSIONS, collapseProjectPermissions } from '@/lib/simplifiedProjectPermissions';
-import { USER_ROLE_TYPE_OPTIONS, CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, getRoleDefaultPermissions } from '@/lib/roleUtils';
+import { CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, getRoleDefaultPermissions, rolesFor } from '@/lib/roleUtils';
 import { CompanyOption } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { getAuthType } from '@/lib/auth';
@@ -596,7 +596,8 @@ export default function NewUserPage() {
   // permission to create users, landing directly on /users/new with no
   // /admin prefix — /admin/users would be the wrong, inapplicable route for
   // that second case.
-  const usersRoot = getAuthType() === 'admin' ? '/admin/users' : '/users';
+  const usersRoot = getAuthType() === 'admin' ? '/admin/users' : '/user-management';
+  const isAdmin = getAuthType() === 'admin';
 
   // Steps 1-3
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -655,6 +656,7 @@ export default function NewUserPage() {
       setActiveCompanyId(selectedIds[0]);
     }
   }, [step, selectedIds, activeCompanyId]);
+
 
   // true when step 2 can be skipped (single company, already selected)
   const singleCompany = companies.length === 1;
@@ -884,7 +886,7 @@ export default function NewUserPage() {
                   <label style={lbl}>Role *</label>
                   <select style={inp} value={role} onChange={e => setRole(e.target.value)}>
                     <option value="">Select a role…</option>
-                    {USER_ROLE_TYPE_OPTIONS.map(r => (
+                    {rolesFor(isAdmin).map(r => (
                       <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
                     <option value={CUSTOM_ROLE_SENTINEL}>+ Custom Role…</option>
@@ -900,7 +902,7 @@ export default function NewUserPage() {
                     <div>
                       <label style={lbl}>Behaves Like *</label>
                       <select style={inp} value={customRoleBase} onChange={e => setCustomRoleBase(e.target.value)}>
-                        {CUSTOM_ROLE_BASE_OPTIONS.map(r => (
+                        {rolesFor(isAdmin, CUSTOM_ROLE_BASE_OPTIONS).map(r => (
                           <option key={r.value} value={r.value}>{r.label}</option>
                         ))}
                       </select>
@@ -1043,8 +1045,11 @@ export default function NewUserPage() {
                   );
                 })()}
 
-                {/* Add Users — one common toggle per company, not per module */}
-                {activeCompanyId !== null && (() => {
+                {/* Add Users — one common toggle per company, not per module.
+                    Company Admin only: a delegated manager can never pass the
+                    User Management Permission on (that would let the first
+                    manager mint more managers), so the box isn't offered. */}
+                {isAdmin && activeCompanyId !== null && (() => {
                   const canThisUserAddUsers = (perms[activeCompanyId]?.['account'] ?? []).includes('canAddUsers');
                   return (
                     <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderRadius: 12, border: `1.5px solid ${canThisUserAddUsers ? '#2563eb40' : '#e2e8f0'}`, background: canThisUserAddUsers ? '#eff6ff' : '#fafafa', marginBottom: 16, cursor: 'pointer' }}>
@@ -1056,7 +1061,7 @@ export default function NewUserPage() {
                       />
                       <div>
                         <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13.5 }}>User Management Permission</div>
-                        <div style={{ fontSize: 12, color: '#64748b' }}>Lets this user create/invite other staff users for this company, from their own &quot;User Management&quot; page.</div>
+                        <div style={{ fontSize: 12, color: '#64748b' }}>Gives this user their own &quot;Users&quot; page for this company: add, edit, assign roles, manage permissions, suspend/activate and remove staff. Limited to this company, and they can never grant a permission they don&apos;t hold themselves.</div>
                       </div>
                     </label>
                   );

@@ -7,7 +7,7 @@ import {
   HiFolderOpen, HiCheckCircle, HiBriefcase, HiClock,
   HiDocumentText, HiShieldCheck, HiChatBubbleLeftRight,
   HiCog6Tooth, HiArrowRightOnRectangle, HiChartBar,
-  HiCurrencyDollar, HiCalendarDays, HiFlag,
+  HiCurrencyDollar, HiCalendarDays, HiFlag, HiBuildingStorefront,
 } from 'react-icons/hi2';
 import { useAuth } from '@/hooks/useAuth';
 import { getAuthType, getAuthUser, getActiveCompany, can } from '@/lib/auth';
@@ -57,6 +57,9 @@ const ADMIN_NAV_GROUPS = [
     items: [
       { href: '/admin/invoices', icon: HiBanknotes,      label: 'Invoices', module: 'invoices' },
       { href: '/admin/payments', icon: HiCurrencyDollar, label: 'Payments', module: 'invoices' },
+      // Trading names this company bills under — part of the Invoice module,
+      // so it rides the same purchase gate as Invoices above.
+      { href: '/admin/brands',   icon: HiBuildingStorefront, label: 'Brands', module: 'invoices' },
     ],
   },
   {
@@ -164,6 +167,10 @@ const USER_NAV_GROUPS = [
     label: 'Invoice',
     items: [
       { href: '/invoices', icon: HiBanknotes, label: 'Invoices', module: 'invoices', permAny: ['canViewInvoices'] },
+      // Gated on its own Invoice-module permission, not canViewInvoices —
+      // maintaining the brand list and raising invoices are separate jobs and
+      // Company Admin grants them separately.
+      { href: '/brands',   icon: HiBuildingStorefront, label: 'Brands', module: 'invoices', permAny: ['canViewBrands'] },
     ],
   },
   {
