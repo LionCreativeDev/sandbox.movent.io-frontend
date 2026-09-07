@@ -74,7 +74,13 @@ export default function LeadsPage() {
 
   const [leads, setLeads]         = useState<Lead[]>([]);
   const [loading, setLoading]     = useState(true);
+  // `search` is only what's currently typed in the box; `query` is what has
+  // actually been submitted (Search / Enter / Clear) and is the value the API
+  // is asked for. Keeping them apart is what lets Clear re-run the list —
+  // resetting `search` alone changed nothing the load effect watches, so the
+  // previous results stayed on screen until some other filter moved.
   const [search, setSearch]       = useState('');
+  const [query, setQuery]         = useState('');
   const [status, setStatus]       = useState('');
   const [priority, setPriority]   = useState('');
 
@@ -99,7 +105,7 @@ export default function LeadsPage() {
     setLoading(true);
     try {
       const params: Record<string, string> = {};
-      if (search)    params.search     = search;
+      if (query)     params.search     = query;
       if (status)    params.status     = status;
       if (priority)  params.priority   = priority;
       // Only the Admin API understands ?company_id — a staff user's leads are
@@ -114,10 +120,14 @@ export default function LeadsPage() {
   };
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { load(); }, [status, priority, companyF]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [status, priority, companyF, query]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSearch = (e: React.SyntheticEvent<HTMLFormElement>) => { e.preventDefault(); load(); };
-  const clearFilters = () => { setSearch(''); setStatus(''); setPriority(''); };
+  const handleSearch = (e: React.SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    // Same text re-submitted: the effect won't fire, so run the load by hand.
+    if (search === query) load(); else setQuery(search);
+  };
+  const clearFilters = () => { setSearch(''); setQuery(''); setStatus(''); setPriority(''); };
 
   const wonCount  = leads.filter(l => l.status === 'won').length;
   const lostCount = leads.filter(l => l.status === 'lost').length;
@@ -178,7 +188,7 @@ export default function LeadsPage() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div style={{ flex: '1 1 200px', position: 'relative' }}>
               <HiMagnifyingGlass size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, company…" style={{ width: '100%', padding: '8px 12px 8px 30px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={isMultiCompanyAdmin ? 'Search name, email, phone, organisation, company…' : 'Search name, email, phone, organisation…'} style={{ width: '100%', padding: '8px 12px 8px 30px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }} />
             </div>
             {isMultiCompanyAdmin && (
               <select value={companyF} onChange={e => setCompanyF(e.target.value)} style={{ padding: '8px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', minWidth: 170 }}>

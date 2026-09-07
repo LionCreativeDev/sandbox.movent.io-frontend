@@ -14,6 +14,10 @@ export interface CatalogModule {
 export interface ModuleCatalog {
   modules: CatalogModule[];
   owned_modules: string[];
+  // Admin's current billing-term discount (0 on monthly) — same one the
+  // backend actually charges in purchase(), so the displayed total matches.
+  discount_percent: number;
+  billing_term_name: string | null;
 }
 
 export interface PurchasePayload {

@@ -17,13 +17,19 @@ interface PaymentRow {
 interface Usage {
   package: {
     name: string; tier: string;
+    billing_cycle?: string;
     max_companies: number | null;
     max_users_per_company: number | null;
   } | null;
   subscription: {
     status: string;
+    trial_started_at?: string | null;
     trial_ends_at: string | null;
     subscription_ends_at: string | null;
+    grace_period_ends_at?: string | null;
+    suspended_reason?: string | null;
+    trial_days_remaining?: number;
+    grace_days_remaining?: number;
   };
   staff_seats_used: number;
   staff_seats_limit: number | null;
@@ -51,10 +57,16 @@ const TIER_BADGE: Record<string, { bg: string; color: string }> = {
 const SUB_BADGE: Record<string, { bg: string; color: string; label: string }> = {
   active:          { bg: '#ecfdf5', color: '#059669', label: 'Active' },
   trial:           { bg: '#fffbeb', color: '#d97706', label: 'Trial' },
+  trial_expired:   { bg: '#fef2f2', color: '#dc2626', label: 'Trial Expired' },
+  grace_period:    { bg: '#fff7ed', color: '#ea580c', label: 'Grace Period' },
   suspended:       { bg: '#fef2f2', color: '#dc2626', label: 'Suspended' },
   cancelled:       { bg: '#f1f5f9', color: '#64748b', label: 'Cancelled' },
   pending_payment: { bg: '#fff7ed', color: '#ea580c', label: 'Pending Payment' },
 };
+
+// Statuses where the account needs the Admin to act (pay/reactivate) —
+// drives the CTA banner below.
+const NEEDS_ACTION_STATUSES = ['trial_expired', 'grace_period', 'suspended', 'cancelled', 'pending_payment'];
 
 function UsageBar({ used, limit }: { used: number; limit: number | null }) {
   if (!limit) return <span style={{ fontSize: 11, color: '#94a3b8' }}>Unlimited</span>;
@@ -131,14 +143,87 @@ export default function PlanPage() {
                 background: subB.bg, color: subB.color,
               }}>{subB.label}</span>
 
-              {sub?.trial_ends_at && !sub?.subscription_ends_at && (
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 10, color: '#94a3b8' }}>Trial ends</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#fbbf24' }}>{sub.trial_ends_at}</div>
-                </div>
+              {(sub?.status === 'trial' || sub?.status === 'trial_expired') && sub?.trial_ends_at && (
+                <>
+                  {sub.trial_started_at && (
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 10, color: '#94a3b8' }}>Trial started</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>{sub.trial_started_at}</div>
+                    </div>
+                  )}
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 10, color: '#94a3b8' }}>Trial ends</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#fbbf24' }}>{sub.trial_ends_at}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 10, color: '#94a3b8' }}>Days remaining</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: (sub.trial_days_remaining ?? 0) <= 3 ? '#f87171' : '#fbbf24' }}>
+                      {Math.max(0, sub.trial_days_remaining ?? 0)}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {sub?.status === 'grace_period' && (
+                <>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 10, color: '#94a3b8' }}>Grace period ends</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#f87171' }}>{sub.grace_period_ends_at ?? '—'}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 10, color: '#94a3b8' }}>Days remaining</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#f87171' }}>
+                      {Math.max(0, sub.grace_days_remaining ?? 0)}
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>
+
+          {sub && sub.status === 'trial' && (
+            <div style={{
+              background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12,
+              padding: '16px 20px', marginBottom: 20,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
+            }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#92400e', marginBottom: 3 }}>
+                  You&apos;re on a free trial{typeof sub.trial_days_remaining === 'number' ? ` — ${Math.max(0, sub.trial_days_remaining)} day${sub.trial_days_remaining === 1 ? '' : 's'} left` : ''}.
+                </div>
+                <div style={{ fontSize: 12, color: '#b45309' }}>Activate now to keep uninterrupted access, or purchase extra modules/seats any time from below.</div>
+              </div>
+              <Link href="/payment" style={{
+                padding: '9px 20px', borderRadius: 8, background: '#d97706', color: '#fff',
+                fontSize: 13, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap',
+              }}>Pay Now →</Link>
+            </div>
+          )}
+
+          {sub && NEEDS_ACTION_STATUSES.includes(sub.status) && (
+            <div style={{
+              background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12,
+              padding: '16px 20px', marginBottom: 20,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
+            }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b', marginBottom: 3 }}>
+                  {sub.status === 'trial_expired' && 'Your free trial has expired. Please activate a subscription to continue using Movent CRM.'}
+                  {sub.status === 'grace_period' && `Your free trial has ended — you're in a grace period${typeof sub.grace_days_remaining === 'number' ? ` (${sub.grace_days_remaining} day${sub.grace_days_remaining === 1 ? '' : 's'} left)` : sub.grace_period_ends_at ? ` until ${sub.grace_period_ends_at}` : ''}. Activate a subscription to avoid suspension.`}
+                  {sub.status === 'suspended' && 'Your account has been suspended. No data has been deleted — activate a subscription to restore access.'}
+                  {sub.status === 'cancelled' && 'Your subscription has been cancelled. Activate a plan to continue using Movent CRM.'}
+                  {sub.status === 'pending_payment' && 'Please complete your payment to activate your account.'}
+                </div>
+                {sub.suspended_reason && (sub.status === 'suspended') && (
+                  <div style={{ fontSize: 12, color: '#b91c1c' }}>Reason: {sub.suspended_reason}</div>
+                )}
+              </div>
+              <Link href="/payment" style={{
+                padding: '9px 20px', borderRadius: 8, background: '#dc2626', color: '#fff',
+                fontSize: 13, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap',
+              }}>Choose a Plan & Pay →</Link>
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
 
@@ -260,24 +345,35 @@ export default function PlanPage() {
                     + Add Company
                   </Link>
                 )}
-                <Link href="/admin/upgrade-seats?type=companies" style={{
-                  fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
-                  padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
-                }}>
-                  Upgrade Company Slots →
-                </Link>
-                <Link href="/admin/upgrade-seats?type=seats" style={{
-                  fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
-                  padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
-                }}>
-                  Upgrade Seats →
-                </Link>
-                <Link href="/admin/upgrade-modules" style={{
-                  fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
-                  padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
-                }}>
-                  Upgrade Modules →
-                </Link>
+                {/* Upgrading before ever paying doesn't make sense — a trial
+                    already carries the full module catalog for free (see
+                    PublicController::register()'s full-catalog trial grant),
+                    and every other pre-payment status (grace_period,
+                    trial_expired, suspended, pending_payment, cancelled) has
+                    nothing to "upgrade" either. Only an actual paying,
+                    'active' subscription can add on top of it. */}
+                {sub?.status === 'active' && (
+                  <>
+                    <Link href="/admin/upgrade-seats?type=companies" style={{
+                      fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
+                      padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
+                    }}>
+                      Upgrade Company Slots →
+                    </Link>
+                    <Link href="/admin/upgrade-seats?type=seats" style={{
+                      fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
+                      padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
+                    }}>
+                      Upgrade Seats →
+                    </Link>
+                    <Link href="/admin/upgrade-modules" style={{
+                      fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
+                      padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,
+                    }}>
+                      Upgrade Modules →
+                    </Link>
+                  </>
+                )}
                 <Link href="/admin/users" style={{
                   fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none',
                   padding: '5px 12px', border: '1px solid #bfdbfe', borderRadius: 6,

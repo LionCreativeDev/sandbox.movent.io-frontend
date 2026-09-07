@@ -50,6 +50,16 @@ function UpgradeSeatsContent() {
     const isUpgrade = (v: number | null) =>
         current === null ? false : v === null || v > current;
     const selectedTier = tiers.find((t) => t.value === selectedValue);
+    // Same discount the admin's current billing term already gets on their
+    // subscription (0 on monthly) — applied to seat/company upgrades too,
+    // see SeatPurchaseController::purchase().
+    const discountPercent = catalog?.discount_percent ?? 0;
+    const billingTermName = catalog?.billing_term_name ?? null;
+    const discountedPrice = (priceUsd: number) =>
+        Math.round(priceUsd * (1 - discountPercent / 100) * 100) / 100;
+    const selectedAmountUsd = selectedTier
+        ? discountedPrice(selectedTier.price_usd)
+        : 0;
 
     const handlePurchase = async (
         gateway: "stripe" | "paypal" | "authorize_net",
@@ -146,7 +156,7 @@ function UpgradeSeatsContent() {
         return (
             <DashboardLayout title="Upgrade">
                 <GatewayPaymentStep
-                    amountUsd={selectedTier.price_usd}
+                    amountUsd={selectedAmountUsd}
                     summaryLabel={
                         type === "seats"
                             ? "New seat limit:"
@@ -314,7 +324,9 @@ function UpgradeSeatsContent() {
                                                 ? "Current plan"
                                                 : disabled
                                                   ? "Already included"
-                                                  : `$${tier.price_usd}/mo`}
+                                                  : discountPercent > 0 && tier.price_usd > 0
+                                                    ? `$${discountedPrice(tier.price_usd)}/mo (was $${tier.price_usd})`
+                                                    : `$${tier.price_usd}/mo`}
                                         </div>
                                         {tier.value === current && (
                                             <span
@@ -357,17 +369,36 @@ function UpgradeSeatsContent() {
                                     {selectedTier
                                         ? `Upgrading to ${selectedTier.label}`
                                         : "Select a tier above"}
+                                    {selectedTier && discountPercent > 0 && (
+                                        <span style={{ color: "#16a34a", fontWeight: 600 }}>
+                                            {" "}
+                                            · {billingTermName ?? "Term"} discount {discountPercent}% applied
+                                        </span>
+                                    )}
                                 </div>
                                 <div
                                     style={{
-                                        fontSize: 20,
-                                        fontWeight: 800,
-                                        color: "#0f172a",
+                                        display: "flex",
+                                        alignItems: "baseline",
+                                        gap: 8,
                                     }}
                                 >
-                                    {selectedTier
-                                        ? `$${selectedTier.price_usd}/mo`
-                                        : "—"}
+                                    {selectedTier && discountPercent > 0 && selectedTier.price_usd > 0 && (
+                                        <span style={{ fontSize: 14, color: "#94a3b8", textDecoration: "line-through" }}>
+                                            ${selectedTier.price_usd}
+                                        </span>
+                                    )}
+                                    <div
+                                        style={{
+                                            fontSize: 20,
+                                            fontWeight: 800,
+                                            color: "#0f172a",
+                                        }}
+                                    >
+                                        {selectedTier
+                                            ? `$${selectedAmountUsd}/mo`
+                                            : "—"}
+                                    </div>
                                 </div>
                             </div>
                             <button

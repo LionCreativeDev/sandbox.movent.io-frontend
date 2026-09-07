@@ -701,8 +701,8 @@ import {
   HiCheckCircle, HiXCircle,
   HiUser, HiEnvelope, HiLockClosed, HiPhone,
   HiGlobeAlt, HiCheck, HiClock, HiCube, HiAdjustmentsHorizontal,
-  HiUsers, HiDocumentText, HiShieldCheck, HiBanknotes,
-  HiClipboardDocumentList, HiChevronLeft, HiArrowRight,
+  HiUsers, HiShieldCheck,
+  HiChevronLeft, HiArrowRight,
   HiEye, HiEyeSlash, HiStar,
   HiBuildingOffice2,
 } from 'react-icons/hi2';
@@ -712,6 +712,10 @@ import LandingFooter from '../../components/landing/Footer';
 // import Auth_HeroSection from '../../components/ui/Auth_HeroSection';
 import { publicService, PublicModule } from '../../lib/services/publicService';
 import { setAuthData } from '../../lib/auth';
+import {
+  CATEGORIES, moduleToCategory, moduleDependencyErrors,
+  moduleKeysToCategoryKeys, requiredDependencyKeys, DEPENDENCY_ERRORS,
+} from '../../lib/moduleCategories';
 import toast from 'react-hot-toast';
 import Container from '../../components/ui/Conatiner';
 import SubmitButton from '../../components/ui/SubmitButton';
@@ -720,20 +724,6 @@ import PhoneInput from '../../components/ui/PhoneInput';
 import { ALL_COUNTRIES } from '../../lib/countries';
 import type { Country } from 'react-phone-number-input';
 import { MdOutlineDone } from 'react-icons/md';
-
-type Category = {
-  key: string;
-  label: string;
-  icon: IconType;
-  desc: string;
-  color: string;
-  bg: string;
-  border: string;
-  price_pkr: number;
-  price_usd: number;
-  modules: string[];
-  badge: string;
-};
 
 type SeatOption = {
   label: string;
@@ -749,9 +739,18 @@ type CompanyOption = {
   price_usd: number;
 };
 
+// Null = the base monthly package. Non-null = a Super Admin-managed Billing
+// Term companion (see /super-admin/billing-terms) — an arbitrary, addable
+// list (Yearly, 2-Year, 5-Year, 18 Months, ...), not a fixed set.
+type BillingTermRef = { id: number; name: string; months: number };
+
 type Package = {
   id: number;
   name: string;
+  tier: string;
+  billing_cycle: string;
+  billing_term: BillingTermRef | null;
+  discount_percent: number;
   price_pkr: number | string;
   price_usd: number | string;
   trial_days: number;
@@ -761,71 +760,6 @@ type Package = {
 
 type Currency = 'USD';
 type Mode = 'package' | 'custom';
-
-// Presentational styling per module key — pricing/description/availability come from the
-// Modules registry (GET /public/modules) so super admin's active/inactive toggle takes effect here.
-const CATEGORIES: Category[] = [
-  // 'clients' deliberately excluded from this category's modules — Sales
-  // buyers get only the limited "Basic Clients" permission bundle, not the
-  // real Client module (see database/seeders/ModuleSeeder.php's comment).
-  { key: 'sales', label: 'Sales', icon: HiDocumentText, desc: 'Leads, clients & pipeline', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', price_pkr: 1500, price_usd: 6, modules: ['leads', 'projects_handoff', 'lead_transfer', 'reports_seller'], badge: 'Requires Invoice' },
-  { key: 'client_portal', label: 'Client', icon: HiUsers, desc: 'Client login, documents & support', color: '#10b981', bg: '#ecfdf5', border: '#6ee7b7', price_pkr: 1200, price_usd: 5, modules: ['client_portal'], badge: 'Requires Invoice or Project' },
-  { key: 'projects', label: 'Project', icon: HiClipboardDocumentList, desc: 'Tasks, timesheets & deliverables', color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc', price_pkr: 1800, price_usd: 7, modules: ['projects', 'tasks', 'timesheets', 'production', 'revisions', 'deliverables', 'team_resources', 'file_storage'], badge: 'Can be used alone' },
-  { key: 'compliance', label: 'Compliance', icon: HiShieldCheck, desc: 'Policies, audits & risk', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', price_pkr: 1500, price_usd: 6, modules: ['compliance', 'policies', 'audit_trails', 'compliance_reports', 'risk_assessments', 'alerts', 'document_compliance'], badge: 'Can be used alone' },
-  { key: 'hr', label: 'HR Management', icon: HiUsers, desc: 'Employees, attendance & payroll', color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', price_pkr: 1800, price_usd: 7, modules: ['employees', 'recruitment', 'attendance', 'leaves', 'payroll'], badge: 'Can be used alone' },
-  { key: 'finance', label: 'Finance', icon: HiBanknotes, desc: 'Dashboard, revenue & reports', color: '#d97706', bg: '#fffbeb', border: '#fde68a', price_pkr: 1200, price_usd: 5, modules: ['finance_dashboard', 'finance_reports', 'revenue_reports', 'payments_report'], badge: 'Requires Invoice' },
-  { key: 'invoice', label: 'Invoice', icon: HiDocumentText, desc: 'Billing, payments & reminders', color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', price_pkr: 1200, price_usd: 5, modules: ['invoices', 'payments', 'payment_details', 'invoice_reminders'], badge: 'Can be used alone' },
-];
-const DEFAULT_CATEGORY_STYLE = { icon: HiCube, color: '#475569', bg: '#f8fafc', border: '#e2e8f0', badge: 'Can be used alone' };
-
-function moduleToCategory(m: PublicModule): Category {
-  const style = CATEGORIES.find(c => c.key === m.key) ?? DEFAULT_CATEGORY_STYLE;
-  return {
-    key: m.key,
-    label: m.label,
-    icon: style.icon,
-    desc: m.description ?? '',
-    color: style.color,
-    bg: style.bg,
-    border: style.border,
-    price_pkr: m.price_pkr,
-    price_usd: m.price_usd,
-    modules: m.sub_modules,
-    badge: style.badge,
-  };
-}
-
-const DEPENDENCY_ERRORS: Record<string, string> = {
-  sales: 'Invoice module is required because Sales includes invoice features.',
-  client_portal: 'Client module requires Invoice or Project.',
-  finance: 'Invoice module is required because Finance depends on invoice and payment data.',
-};
-
-function requiredDependencyKeys(selected: string[]): string[] {
-  const deps: string[] = [];
-  if ((selected.includes('sales') || selected.includes('finance')) && selected.includes('invoice')) {
-    deps.push('invoice');
-  }
-  return deps;
-}
-
-function moduleDependencyErrors(selected: string[]): string[] {
-  const errors: string[] = [];
-  if (selected.includes('sales') && !selected.includes('invoice')) errors.push(DEPENDENCY_ERRORS.sales);
-  if (selected.includes('finance') && !selected.includes('invoice')) errors.push(DEPENDENCY_ERRORS.finance);
-  if (selected.includes('client_portal') && !selected.includes('invoice') && !selected.includes('projects')) {
-    errors.push(DEPENDENCY_ERRORS.client_portal);
-  }
-  return errors;
-}
-
-function moduleKeysToCategoryKeys(moduleKeys: string[]): string[] {
-  return CATEGORIES
-    .filter(category =>
-      moduleKeys.includes(category.key) || category.modules.some(moduleKey => moduleKeys.includes(moduleKey))
-    )
-    .map(category => category.key);
-}
 
 const SEAT_OPTIONS: SeatOption[] = [
   { label: '10 Users', value: 10, price_pkr: 0, price_usd: 0 },
@@ -985,11 +919,17 @@ function RegisterContent() {
 
   const [step, setStep] = useState<number>(1);
   const [mode, setMode] = useState<Mode>('package');
+  // Chosen up front on Step 1 (Create Account) instead of via two separate
+  // submit buttons on Step 2 — one flow, one dropdown, same downstream
+  // handleSubmit(startTypeChoice) call either way.
+  const [startTypeChoice, setStartTypeChoice] = useState<'trial' | 'paid'>('trial');
   const currency: Currency = 'USD';
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [packages, setPackages] = useState<Package[]>([]);
   const [loadingPackages, setLoadingPackages] = useState<boolean>(true);
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
+  // null = Monthly (base package). A number selects a Billing Term's id.
+  const [billingTermId, setBillingTermId] = useState<number | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [liveModules, setLiveModules] = useState<PublicModule[] | null>(null);
   const [seatIdx, setSeatIdx] = useState<number>(0);
@@ -999,6 +939,36 @@ function RegisterContent() {
 
   const seat = SEAT_OPTIONS[seatIdx];
   const company = COMPANY_OPTIONS[companyIdx];
+  // Every package now carries the same value here (the Super Admin's global
+  // Subscription Policy — see PublicController::packages()), so any package
+  // in the list is a representative source. 14 is only a pre-load fallback.
+  const effectiveTrialDays = packages[0]?.trial_days ?? 14;
+
+  // Trials switched off by Super Admin after the dropdown already defaulted
+  // to 'trial' (or before packages load) — force 'paid' so Step 2's button
+  // label/behavior never contradicts a trial that isn't actually on offer.
+  useEffect(() => {
+    if (effectiveTrialDays === 0) setStartTypeChoice('paid');
+  }, [effectiveTrialDays]);
+
+  const visiblePackages = packages.filter(p => (p.billing_term?.id ?? null) === billingTermId);
+
+  // Every distinct Billing Term currently on offer (Super Admin-managed, see
+  // /super-admin/billing-terms) — sorted shortest-to-longest, deduped since
+  // each term appears once per tier's companion package.
+  const availableBillingTerms: BillingTermRef[] = [
+    ...new Map(packages.filter(p => p.billing_term).map(p => [p.billing_term!.id, p.billing_term!])).values(),
+  ].sort((a, b) => a.months - b.months);
+
+  // Switching term keeps the same tier selected (Business monthly →
+  // Business yearly) rather than dropping the selection — every companion
+  // shares its monthly parent's tier (see YearlyPackageSync).
+  const switchBillingTerm = (termId: number | null) => {
+    setBillingTermId(termId);
+    if (!selectedPackage) return;
+    const match = packages.find(p => (p.billing_term?.id ?? null) === termId && p.tier === selectedPackage.tier);
+    if (match) setSelectedPackage(match);
+  };
   // Live category list — label/description/price come from the Modules
   // registry so a Super Admin price (or active/inactive) change takes effect
   // immediately here; icon/color/badge styling still comes from CATEGORIES.
@@ -1006,23 +976,67 @@ function RegisterContent() {
   const visibleCategories = liveCategories ?? CATEGORIES;
   const selectedCats = visibleCategories.filter(c => selectedCategories.includes(c.key));
   const customModules = [...new Set(selectedCats.flatMap(c => c.modules))];
-  const customBasePkr = selectedCats.reduce((s, c) => s + c.price_pkr, 0);
-  const customBaseUsd = selectedCats.reduce((s, c) => s + c.price_usd, 0);
+  const customMonthlyBasePkr = selectedCats.reduce((s, c) => s + c.price_pkr, 0);
+  const customMonthlyBaseUsd = selectedCats.reduce((s, c) => s + c.price_usd, 0);
   const packageDependencyErrors = moduleDependencyErrors(moduleKeysToCategoryKeys(selectedPackage?.modules ?? []));
   const customDependencyErrors = moduleDependencyErrors(selectedCategories);
   const activeDependencyErrors = mode === 'package' ? packageDependencyErrors : customDependencyErrors;
   const requiredDeps = requiredDependencyKeys(selectedCategories);
 
+  // Every package row for the currently selected Billing Term carries the
+  // same term-driven discount_percent/months (see YearlyPackageSync) —
+  // reused here since a custom module bundle has no package row of its own
+  // to read a discount off of. 0%/1 month for monthly (never discounted).
+  const selectedTermPkg = billingTermId !== null ? packages.find(p => p.billing_term?.id === billingTermId) : null;
+  const currentCycleDiscountPercent = Number(selectedTermPkg?.discount_percent ?? 0);
+  const currentCycleMonths = selectedTermPkg?.billing_term?.months ?? 1;
+
+  // A package's own price_usd is the pre-discount amount (monthly price ×
+  // term months for a multi-year row — see YearlyPackageSync) —
+  // discount_percent is applied here, same formula as the payment page's
+  // planPrice().
+  const packagePriceUsd = (pkg: Package): number => {
+    const discount = Number(pkg.discount_percent) || 0;
+    return Math.round(Number(pkg.price_usd) * (1 - discount / 100) * 100) / 100;
+  };
+
+  // Custom mode has no package row to read a multi-year price/discount off
+  // of — same ×term-months then discount formula applied directly to the
+  // monthly module total.
+  const customBasePkr = billingTermId === null
+    ? customMonthlyBasePkr
+    : Math.round(customMonthlyBasePkr * currentCycleMonths * (1 - currentCycleDiscountPercent / 100) * 100) / 100;
+  const customBaseUsd = billingTermId === null
+    ? customMonthlyBaseUsd
+    : Math.round(customMonthlyBaseUsd * currentCycleMonths * (1 - currentCycleDiscountPercent / 100) * 100) / 100;
 
   const addonPkr = seat.price_pkr + company.price_pkr;
   const addonUsd = seat.price_usd + company.price_usd;
   const totalPkr = mode === 'package' ? Number(selectedPackage?.price_pkr ?? 0) + addonPkr : customBasePkr + addonPkr;
-  const totalUsd = mode === 'package' ? Number(selectedPackage?.price_usd ?? 0) + addonUsd : customBaseUsd + addonUsd;
+  const totalUsd = mode === 'package' ? (selectedPackage ? packagePriceUsd(selectedPackage) : 0) + addonUsd : customBaseUsd + addonUsd;
+
+  // How much the current term's discount is actually saving, in dollars —
+  // shown as its own Order Summary line so the discount isn't just implicit
+  // in a lower total.
+  const discountAmountUsd = billingTermId === null ? 0
+    : mode === 'package'
+      ? (selectedPackage ? Number(selectedPackage.price_usd) - packagePriceUsd(selectedPackage) : 0)
+      : (customMonthlyBaseUsd * currentCycleMonths) - customBaseUsd;
 
 
+  // Resolves the cheapest real package (in the currently toggled billing
+  // cycle) that already covers every custom-picked module — needed as the
+  // package_id FK on submit, since a custom bundle has no package row of its
+  // own. Matching the toggle here (not always monthly) matters for billing:
+  // the admin's package_id is what later decides a monthly vs yearly renewal
+  // period (see SubscriptionPaymentController::process()) — a yearly-priced
+  // custom bundle linked to a monthly package_id would silently re-bill
+  // monthly instead. Yearly rows mirror their monthly parent's modules
+  // exactly (YearlyPackageSync), so the coverage check works identically.
   const autoPackage = (): Package | null => {
-    if (!packages.length || !customModules.length) return null;
-    const sorted = [...packages].sort((a, b) => Number(a.price_usd) - Number(b.price_usd));
+    const inCycle = packages.filter(p => (p.billing_term?.id ?? null) === billingTermId);
+    if (!inCycle.length || !customModules.length) return null;
+    const sorted = [...inCycle].sort((a, b) => Number(a.price_usd) - Number(b.price_usd));
     for (const pkg of sorted) {
       if (customModules.every(m => (pkg.modules ?? []).includes(m))) return pkg;
     }
@@ -1056,11 +1070,18 @@ function RegisterContent() {
         setPackages(pkgs);
         if (preSelectedPkg) {
           const found = pkgs.find(p => p.id === Number(preSelectedPkg));
-          if (found) { setSelectedPackage(found); return; }
+          if (found) { setBillingTermId(found.billing_term?.id ?? null); setSelectedPackage(found); return; }
         }
-        setSelectedPackage(pkgs.find(p => p.is_popular) ?? pkgs[0] ?? null);
+        // Defaults to a monthly pick — pkgs includes every Billing Term (see
+        // publicService.getPackages()), and the initial toggle state above
+        // is null (Monthly).
+        const monthly = pkgs.filter(p => p.billing_term === null);
+        setSelectedPackage(monthly.find(p => p.is_popular) ?? monthly[0] ?? null);
       })
-      .catch(() => { })
+      // Previously swallowed silently, which left Step 2 with no package
+      // ever selected and the submit button permanently (and silently)
+      // disabled — no error, no toast, nothing in the console to explain it.
+      .catch(() => toast.error('Failed to load pricing plans. Please refresh the page.'))
       .finally(() => setLoadingPackages(false));
   }, [preSelectedPkg]);
 
@@ -1141,7 +1162,13 @@ function RegisterContent() {
 
   const step1Valid = !!(companyName && companyNameOk && name && email && emailOk && password.length >= 8 && password === confirm);
 
-  const handleSubmit = async () => {
+  // startType 'trial' (the primary CTA) still only actually grants a trial if
+  // the Super Admin's Subscription Policy has trial_enabled — a policy-off
+  // company always lands on pending_payment regardless. 'paid' (the "Skip
+  // Trial, Pay Now" secondary action) always skips straight to pending_payment
+  // by request, letting someone who doesn't want a trial go straight to
+  // checkout instead of waiting out however many trial days are configured.
+  const handleSubmit = async (startType: 'trial' | 'paid' = 'trial') => {
     if (submitting) return; // Guards a double-click re-submit before the disabled prop re-renders.
     const pkgToUse = mode === 'package' ? selectedPackage : autoPackage();
     const modulesToUse = mode === 'package' ? (selectedPackage?.modules ?? []) : customModules;
@@ -1160,11 +1187,18 @@ function RegisterContent() {
         phone: phone || undefined,
         package_id: pkgToUse.id,
         selected_modules: modulesToUse,
-        currency, start_type: 'paid', timezone: selectedCountry.timezone, country: countryCode,
+        is_custom_selection: mode === 'custom',
+        currency, start_type: startType, timezone: selectedCountry.timezone, country: countryCode,
         max_users: seat.value, max_companies: company.value,
       });
       if (res.success) {
         setAuthData(res.data.token, res.data.admin, 'admin');
+        // Trial was actually granted (policy-dependent — see the comment
+        // above) — nothing left to pay for yet, go straight in.
+        if (res.data.admin.subscription_status === 'trial') {
+          router.push('/admin/dashboard');
+          return;
+        }
         localStorage.setItem('pending_order', JSON.stringify({
           package_name: pkgToUse.name,
           modules: mode === 'custom' ? selectedCats.map(c => c.label) : [],
@@ -1246,8 +1280,24 @@ function RegisterContent() {
                   Create Account
                 </h2>
                 <p style={{ color: '#6b7280', fontSize: 15, margin: '0 0 32px' }}>
-                  Fill in your details to get started with a 14-day free trial.
+                  Fill in your details to get started with a {effectiveTrialDays}-day free trial.
                 </p>
+
+                {effectiveTrialDays > 0 && (
+                  <div style={{ marginBottom: 18 }}>
+                    <label style={labelBase}>Start with</label>
+                    <select
+                      value={startTypeChoice}
+                      onChange={e => setStartTypeChoice(e.target.value as 'trial' | 'paid')}
+                      style={{ ...inputBase, paddingLeft: 14, paddingRight: 14, appearance: 'none' }}
+                      onFocus={e => (e.target.style.borderColor = 'var(--brand-blue)')}
+                      onBlur={e => (e.target.style.borderColor = 'var(--bg-blue-light1)')}
+                    >
+                      <option value="trial">Free Trial — {effectiveTrialDays} days, no payment now</option>
+                      <option value="paid">Skip Trial — Pay Now</option>
+                    </select>
+                  </div>
+                )}
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <InputField
@@ -1405,22 +1455,49 @@ function RegisterContent() {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => step1Valid && setStep(2)}
-                  disabled={!step1Valid}
-                  style={{
-                    width: '100%', height: 50,
-                    borderRadius: 8, border: 'none',
-                    cursor: step1Valid ? 'pointer' : 'not-allowed',
-                    background: step1Valid ? 'var(--brand-gradient)' : 'var(--bg-blue-light1)',
-                    color: '#fff', fontSize: 15, fontWeight: 600,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    transition: 'background 0.2s',
-                    marginBottom: 16,
-                  }}
-                >
-                  Next: Select Plan <HiArrowRight size={16} />
-                </button>
+                {/* Trial needs no package/module choice — it already gets the
+                    full catalog (see PublicController::register()), so Step 2
+                    is skipped entirely and this submits right away with
+                    whatever package auto-selected on load (any package works
+                    identically for a trial; it only matters once they pay).
+                    "Skip Trial, Pay Now" still needs Step 2 to actually pick
+                    what they're paying for. */}
+                {startTypeChoice === 'trial' ? (
+                  <SubmitButton
+                    type="button"
+                    onClick={() => step1Valid && handleSubmit('trial')}
+                    loading={submitting}
+                    loadingText="Creating Account…"
+                    disabled={!step1Valid || !selectedPackage}
+                    style={{
+                      width: '100%', height: 50,
+                      borderRadius: 8, border: 'none',
+                      background: (step1Valid && selectedPackage) ? 'var(--brand-gradient)' : 'var(--bg-blue-light1)',
+                      color: '#fff', fontSize: 15, fontWeight: 600,
+                      transition: 'background 0.2s',
+                      marginBottom: 16,
+                    }}
+                  >
+                    Start Free Trial <HiArrowRight size={16} />
+                  </SubmitButton>
+                ) : (
+                  <button
+                    onClick={() => step1Valid && setStep(2)}
+                    disabled={!step1Valid}
+                    style={{
+                      width: '100%', height: 50,
+                      borderRadius: 8, border: 'none',
+                      cursor: step1Valid ? 'pointer' : 'not-allowed',
+                      background: step1Valid ? 'var(--brand-gradient)' : 'var(--bg-blue-light1)',
+                      color: '#fff', fontSize: 15, fontWeight: 600,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      transition: 'background 0.2s',
+                      marginBottom: 16,
+                    }}
+                  >
+                    Next: Select Plan <HiArrowRight size={16} />
+                  </button>
+                )}
 
                 <div style={{ textAlign: 'center', fontSize: 13, color: '#9ca3af' }}>
                   Already have an account? <Link href="/login" style={{ color: 'var(--brand-blue)', paddingLeft: "5px", fontWeight: 600, textDecoration: 'none' }}>
@@ -1479,6 +1556,8 @@ function RegisterContent() {
 
                 <div className='w-full defaultMargin  grid grid-cols-12 items-start gap-2'>
                   <div className='w-full col-span-12 gap-6 items-start md:col-span-8'>
+                    {/* Monthly/Yearly toggle lives in the Order Summary sidebar
+                        only — no need to duplicate it here too. */}
                     {mode === 'package' && (
                       loadingPackages
                         ? (
@@ -1502,7 +1581,7 @@ function RegisterContent() {
                         )
                         : (
                           <div className='defaultMargin grid md:grid-cols-2 items-start gap-3 w-full'>
-                            {packages.map(pkg => {
+                            {visiblePackages.map(pkg => {
                               const active = selectedPackage?.id === pkg.id;
                               return (
                                 <div
@@ -1602,10 +1681,15 @@ function RegisterContent() {
                                       letterSpacing: '-0.04em',
                                       color: '#0f172a'
                                     }}>
-                                      {pkg.price_usd}
+                                      {packagePriceUsd(pkg)}
                                     </span>
+                                    {Number(pkg.discount_percent) > 0 && (
+                                      <span style={{ fontSize: 15, fontWeight: 600, color: '#94a3b8', textDecoration: 'line-through' }}>
+                                        ${pkg.price_usd}
+                                      </span>
+                                    )}
                                   </div>
-                                  <div style={{ fontSize: 14, color: '#94a3b8' }}>/month</div>
+                                  <div style={{ fontSize: 14, color: '#94a3b8' }}>/{pkg.billing_term ? pkg.billing_term.name : 'month'}</div>
 
                                   {/* Trial */}
                                   <div style={{
@@ -1759,18 +1843,69 @@ function RegisterContent() {
                         Order Summary
                       </h4>
 
+                      {availableBillingTerms.length > 0 && (
+                        <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, padding: 3, gap: 3, marginBottom: 16, flexWrap: 'wrap' }}>
+                          {[{ id: null as number | null, name: 'Monthly' }, ...availableBillingTerms].map(term => {
+                            const active = billingTermId === term.id;
+                            const termPkg = term.id !== null ? packages.find(p => p.billing_term?.id === term.id) : null;
+                            return (
+                              <button
+                                key={term.id ?? 'monthly'}
+                                type="button"
+                                onClick={() => switchBillingTerm(term.id)}
+                                style={{
+                                  flex: 1, minWidth: 70, padding: '7px 0', borderRadius: 6, border: 'none',
+                                  background: active ? '#fff' : 'transparent',
+                                  color: active ? '#0f172a' : '#64748b',
+                                  fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                                  boxShadow: active ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                                  transition: 'all 0.15s',
+                                }}
+                              >
+                                {term.name}
+                                {termPkg && Number(termPkg.discount_percent) > 0 && (
+                                  <span style={{ fontSize: 9, fontWeight: 800, color: active ? '#16a34a' : '#94a3b8' }}>
+                                    -{Number(termPkg.discount_percent)}%
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       {mode === 'package' && selectedPackage && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
                           <span style={{ color: '#6b7280', display: 'flex', alignItems: 'center', gap: 5 }}>
                             <HiCube size={13} style={{ color: 'var(--brand-blue)' }} /> {selectedPackage.name}
                           </span>
-                          <span style={{ fontWeight: 600 }}>{fmt(Number(selectedPackage.price_pkr), Number(selectedPackage.price_usd))}</span>
+                          <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                            {Number(selectedPackage.discount_percent) > 0 && (
+                              <span style={{ color: '#9ca3af', textDecoration: 'line-through', fontSize: 12 }}>
+                                {fmt(Number(selectedPackage.price_pkr), Number(selectedPackage.price_usd))}
+                              </span>
+                            )}
+                            <span style={{ fontWeight: 600 }}>{fmt(Number(selectedPackage.price_pkr), packagePriceUsd(selectedPackage))}</span>
+                          </span>
                         </div>
                       )}
 
                       {mode === 'package' && packageDependencyErrors.length > 0 && (
                         <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
                           {packageDependencyErrors.map(message => <span key={message}>{message}</span>)}
+                        </div>
+                      )}
+
+                      {mode === 'package' && !selectedPackage && !loadingPackages && (
+                        <div style={{ color: '#dc2626', fontSize: 13, textAlign: 'center', padding: '8px 0 12px' }}>
+                          Couldn&apos;t load pricing plans. Please refresh the page.
+                        </div>
+                      )}
+
+                      {mode === 'package' && !selectedPackage && loadingPackages && (
+                        <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: '8px 0 12px' }}>
+                          Loading plans…
                         </div>
                       )}
 
@@ -1789,6 +1924,13 @@ function RegisterContent() {
                       {mode === 'custom' && selectedCats.length === 0 && (
                         <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: '8px 0 12px' }}>
                           Select modules to see pricing
+                        </div>
+                      )}
+
+                      {discountAmountUsd > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                          <span style={{ color: '#16a34a', fontWeight: 600 }}>{selectedTermPkg?.billing_term?.name ?? 'Term'} Discount ({currentCycleDiscountPercent}%)</span>
+                          <span style={{ fontWeight: 600, color: '#16a34a' }}>-${discountAmountUsd.toFixed(2)}</span>
                         </div>
                       )}
 
@@ -1817,9 +1959,11 @@ function RegisterContent() {
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontWeight: 800, fontSize: 20, color: 'var(--brand-blue)' }}>
                                 {fmt(totalPkr, totalUsd)}
-                                <span style={{ fontSize: 12, fontWeight: 400, color: '#9ca3af' }}>/mo</span>
+                                <span style={{ fontSize: 12, fontWeight: 400, color: '#9ca3af' }}>/{billingTermId === null ? 'mo' : `${currentCycleMonths}mo`}</span>
                               </div>
-                              <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>14-day free trial included</div>
+                              {effectiveTrialDays > 0 && startTypeChoice === 'trial' && (
+                                <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>{effectiveTrialDays}-day free trial included</div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1827,23 +1971,25 @@ function RegisterContent() {
 
                       <SubmitButton
                         type="button"
-                        onClick={handleSubmit}
+                        onClick={() => handleSubmit(startTypeChoice)}
                         loading={submitting}
                         loadingText="Creating Account…"
                         disabled={!canSubmit}
                         style={{
-                          width: '100%', height: 42,
-                          borderRadius: 4, border: 'none',
+                          width: '100%', height: 46,
+                          borderRadius: 6, border: 'none',
                           background: canSubmit ? 'var(--brand-gradient)' : 'var(--bg-blue-light1)',
-                          color: '#fff', fontSize: 14, fontWeight: 600,
+                          color: '#fff', fontSize: 14, fontWeight: 700,
                           transition: 'background 0.2s',
                         }}
                       >
-                        Continue to Payment <HiArrowRight size={16} />
+                        {startTypeChoice === 'trial'
+                          ? <>Start Free Trial <HiArrowRight size={16} /></>
+                          : <>Continue to Payment <HiArrowRight size={16} /></>}
                       </SubmitButton>
 
                       <div style={{ textAlign: 'center', marginTop: 10, fontSize: 11, color: '#9ca3af', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                        <HiShieldCheck size={12} /> Secure · 14-day free trial included
+                        <HiShieldCheck size={12} /> Secure{effectiveTrialDays > 0 && startTypeChoice === 'trial' ? ` · ${effectiveTrialDays}-day free trial included` : ''}
                       </div>
                     </div>
                   </div>

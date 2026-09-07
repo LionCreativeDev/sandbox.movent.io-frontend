@@ -31,7 +31,6 @@ export default function EditPackagePage() {
   const [form, setForm] = useState({
     name: '', tier: 'basic' as Package['tier'], price: '',
     price_usd: '', trial_days: '',
-    billing_cycle: 'monthly' as Package['billing_cycle'],
     max_companies: '', max_users_per_company: '',
     description: '', is_visible: true, is_popular: false,
     modules: [] as string[],
@@ -46,7 +45,6 @@ export default function EditPackagePage() {
           price: String(pkg.price),
           price_usd: pkg.price_usd != null ? String(pkg.price_usd) : '',
           trial_days: pkg.trial_days != null ? String(pkg.trial_days) : '',
-          billing_cycle: pkg.billing_cycle,
           max_companies: pkg.max_companies != null ? String(pkg.max_companies) : '',
           max_users_per_company: pkg.max_users_per_company != null ? String(pkg.max_users_per_company) : '',
           description: pkg.description ?? '',
@@ -83,8 +81,11 @@ export default function EditPackagePage() {
         name: form.name, tier: form.tier,
         price: Number(form.price),
         price_usd: form.price_usd ? Number(form.price_usd) : null,
-        billing_cycle: form.billing_cycle,
         trial_days: form.trial_days ? Number(form.trial_days) : null,
+        // Monthly packages are never discounted — only the automatically-
+        // derived Yearly counterpart is, via Subscription Policy's Yearly
+        // Discount %.
+        discount_percent: 0,
         max_companies: form.max_companies ? Number(form.max_companies) : null,
         max_users_per_company: form.max_users_per_company ? Number(form.max_users_per_company) : null,
         description: form.description || null,
@@ -134,24 +135,19 @@ export default function EditPackagePage() {
                   <label style={lbl}>Package Name *</label>
                   <input style={inp} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="e.g. Business Pro" />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-                  <div>
-                    <label style={lbl}>Tier *</label>
-                    <select style={inp} value={form.tier} onChange={e => setForm(f => ({ ...f, tier: e.target.value as Package['tier'] }))}>
-                      <option value="basic">Basic</option>
-                      <option value="professional">Professional</option>
-                      <option value="enterprise">Enterprise</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={lbl}>Billing Cycle *</label>
-                    <select style={inp} value={form.billing_cycle} onChange={e => setForm(f => ({ ...f, billing_cycle: e.target.value as Package['billing_cycle'] }))}>
-                      <option value="monthly">Monthly</option>
-                      <option value="yearly">Yearly</option>
-                    </select>
-                  </div>
+                <div style={{ marginBottom: 16, maxWidth: 300 }}>
+                  <label style={lbl}>Tier *</label>
+                  <select style={inp} value={form.tier} onChange={e => setForm(f => ({ ...f, tier: e.target.value as Package['tier'] }))}>
+                    <option value="basic">Basic</option>
+                    <option value="professional">Professional</option>
+                    <option value="enterprise">Enterprise</option>
+                    <option value="custom">Custom</option>
+                  </select>
                 </div>
+                <p style={{ fontSize: 11, color: '#94a3b8', margin: '-8px 0 16px' }}>
+                  Every package here is billed monthly. Its Yearly option is generated automatically —
+                  see the Yearly Discount % under <a href="/super-admin/subscription-policy" style={{ color: '#7c3aed' }}>Subscription Policy</a>.
+                </p>
                 <div>
                   <label style={lbl}>Description</label>
                   <textarea style={{ ...inp, minHeight: 80, resize: 'vertical' }} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Short description shown on pricing page..." />
@@ -166,8 +162,9 @@ export default function EditPackagePage() {
                     <input style={inp} type="number" min="0" step="0.01" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} required placeholder="0.00" />
                   </div>
                   <div>
-                    <label style={lbl}>Trial Days</label>
-                    <input style={inp} type="number" min="0" value={form.trial_days} onChange={e => setForm(f => ({ ...f, trial_days: e.target.value }))} placeholder="14" />
+                    <label style={lbl}>Trial Days (unused)</label>
+                    <input style={inp} type="number" min="0" value={form.trial_days} onChange={e => setForm(f => ({ ...f, trial_days: e.target.value }))} placeholder="14" disabled title="Every sign-up's trial length now comes from Subscription Policy, not per-package. This field is no longer read." />
+                    <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>Trial length for all sign-ups is set once in Subscription Policy, not per package.</p>
                   </div>
                 </div>
               </div>

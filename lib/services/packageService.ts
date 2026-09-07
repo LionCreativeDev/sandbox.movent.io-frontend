@@ -1,13 +1,18 @@
 import api from '@/lib/axios';
 import { Package } from '@/types';
 
+// Every package created here is monthly — its Yearly counterpart is derived
+// automatically (price × 12, Subscription Policy's Yearly Discount %) by
+// YearlyPackageSync, not built through this form. billing_cycle/discount_percent
+// are read-only display fields on the Package type itself (see types/index.ts),
+// not accepted here.
 export interface PackagePayload {
   name: string;
   tier: Package['tier'];
   price: number;
   price_usd?: number | null;
-  billing_cycle: Package['billing_cycle'];
   trial_days?: number | null;
+  discount_percent?: number | null;
   max_companies?: number | null;
   max_users_per_company?: number | null;
   description?: string | null;

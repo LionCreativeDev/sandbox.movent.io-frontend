@@ -18,6 +18,14 @@ const STATUS_CFG: Record<string, { color: string; bg: string; label: string }> =
   suspended: { color: '#dc2626', bg: '#fef2f2', label: 'Suspended' },
 };
 
+// Delete is hidden on the Users list. Suspend/Activate covers day-to-day
+// offboarding and is reversible; removing an account (and its assignments) is
+// deliberately not offered as a row action here. The whole flow behind it —
+// handleDelete(), DeleteCompanyPicker, DeleteUserModal and
+// DELETE /admin/users/{id} — is left intact, so flipping this back to true is
+// all it takes to restore the button.
+const SHOW_DELETE_ACTION = false;
+
 function StatusIcon({ status }: { status: string }) {
   if (status === 'invited')   return <HiArrowPath size={13} />;
   if (status === 'suspended') return <HiNoSymbol size={13} />;
@@ -439,15 +447,16 @@ export default function UsersPage() {
                                 </button>
                               </>
                             )}
-                            {/* Delete opens the Impact Summary rather than
-                                deleting on the spot — the objection that kept
-                                this button off the list page was that the
-                                consequences weren't spelled out anywhere near
-                                it. Now they are, and the work can be handed
-                                over before the account goes. */}
-                            <button onClick={() => handleDelete(user)} disabled={busy} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: '1.5px solid #fecaca', background: '#fff', color: '#dc2626', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                              <HiTrash size={13} /> Delete
-                            </button>
+                            {/* Hidden — see SHOW_DELETE_ACTION. When on, this
+                                opens the Impact Summary rather than deleting
+                                on the spot, so the consequences are spelled
+                                out and the work can be handed over before the
+                                account goes. */}
+                            {SHOW_DELETE_ACTION && (
+                              <button onClick={() => handleDelete(user)} disabled={busy} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: '1.5px solid #fecaca', background: '#fff', color: '#dc2626', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                <HiTrash size={13} /> Delete
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

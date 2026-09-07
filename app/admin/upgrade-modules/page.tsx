@@ -102,6 +102,11 @@ export default function UpgradeModulesPage() {
   const [owned, setOwned] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  // Same discount the admin's current billing term already gets on their
+  // subscription (0 on monthly) — applied to add-on modules too, see
+  // ModulePurchaseController::purchase().
+  const [discountPercent, setDiscountPercent] = useState(0);
+  const [billingTermName, setBillingTermName] = useState<string | null>(null);
 
   // Payment step — mirrors frontend/app/payment/page.tsx
   const [gateways, setGateways] = useState<ActiveGateway[]>([]);
@@ -128,7 +133,12 @@ export default function UpgradeModulesPage() {
 
   useEffect(() => {
     moduleUpgradeService.catalog()
-      .then(d => { setModules(d.modules); setOwned(d.owned_modules); })
+      .then(d => {
+        setModules(d.modules);
+        setOwned(d.owned_modules);
+        setDiscountPercent(d.discount_percent);
+        setBillingTermName(d.billing_term_name);
+      })
       .catch(() => toast.error('Failed to load module catalog'))
       .finally(() => setLoading(false));
   }, []);
@@ -161,7 +171,8 @@ export default function UpgradeModulesPage() {
   const requiredDeps = requiredDependencyKeys(selected);
   const dependencyErrors = moduleDependencyErrors([...owned, ...selected]);
   const selectedModules = modules.filter(m => selected.includes(m.key));
-  const totalUsd = selectedModules.reduce((s, m) => s + Number(m.price_usd), 0);
+  const rawTotalUsd = selectedModules.reduce((s, m) => s + Number(m.price_usd), 0);
+  const totalUsd = Math.round(rawTotalUsd * (1 - discountPercent / 100) * 100) / 100;
   const canProceed = selected.length > 0 && dependencyErrors.length === 0;
 
   const handleContinue = () => {
@@ -553,10 +564,21 @@ export default function UpgradeModulesPage() {
                     ))}
                   </div>
                 </div>
+                {discountPercent > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6, color: '#16a34a' }}>
+                    <span style={{ fontWeight: 600 }}>{billingTermName ?? 'Term'} Discount ({discountPercent}%)</span>
+                    <span style={{ fontWeight: 600 }}>-${(rawTotalUsd - totalUsd).toFixed(2)}</span>
+                  </div>
+                )}
                 <div style={{ borderTop: '1.5px dashed #e2e8f0', paddingTop: 12, marginTop: 12, marginBottom: 18 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <span style={{ fontWeight: 800, color: '#0f172a', fontSize: 14 }}>Total</span>
-                    <div style={{ fontWeight: 900, fontSize: 22, color: '#2563eb' }}>${totalUsd}<span style={{ fontSize: 12, fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+                    <div style={{ textAlign: 'right' }}>
+                      {discountPercent > 0 && (
+                        <div style={{ fontSize: 12, color: '#94a3b8', textDecoration: 'line-through' }}>${rawTotalUsd}</div>
+                      )}
+                      <div style={{ fontWeight: 900, fontSize: 22, color: '#2563eb' }}>${totalUsd}<span style={{ fontSize: 12, fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+                    </div>
                   </div>
                 </div>
                 {showPayBtn && (
@@ -634,8 +656,16 @@ export default function UpgradeModulesPage() {
 
             <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '18px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 2 }}>{selected.length} module{selected.length !== 1 ? 's' : ''} selected</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>${totalUsd}<span style={{ fontSize: 12, fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 2 }}>
+                  {selected.length} module{selected.length !== 1 ? 's' : ''} selected
+                  {discountPercent > 0 && <span style={{ color: '#16a34a', fontWeight: 600 }}> · {billingTermName ?? 'Term'} discount {discountPercent}% applied</span>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  {discountPercent > 0 && rawTotalUsd > 0 && (
+                    <span style={{ fontSize: 14, color: '#94a3b8', textDecoration: 'line-through' }}>${rawTotalUsd}</span>
+                  )}
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>${totalUsd}<span style={{ fontSize: 12, fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+                </div>
               </div>
               <button
                 onClick={handleContinue}

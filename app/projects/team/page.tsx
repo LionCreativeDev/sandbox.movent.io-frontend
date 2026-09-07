@@ -11,6 +11,7 @@ import { MODULE_CATALOG } from '@/lib/moduleCatalog';
 import { inp, lbl, card, TEAM_ROLE_LABEL } from '@/components/admin/projects/shared';
 import { ROLE_LABELS } from '@/lib/roleUtils';
 import toast from 'react-hot-toast';
+import { HiMagnifyingGlass } from 'react-icons/hi2';
 
 const PROJECT_MODULE = MODULE_CATALOG.find(m => m.key === 'project_management');
 
@@ -36,6 +37,7 @@ function UserTeamPageInner() {
   // Pre-selected when arriving from a specific project's "Manage Team" link
   // (e.g. /projects/team?project=50) — falls back to the empty picker state.
   const [projectId, setProjectId] = useState(searchParams.get('project') ?? '');
+  const [projectSearch, setProjectSearch] = useState('');
   const [users, setUsers]       = useState<CompanyUserOption[]>([]);
   const [userId, setUserId]     = useState('');
   // Role is no longer picked/edited on this page — just plain team members.
@@ -120,7 +122,35 @@ function UserTeamPageInner() {
     ? projects.filter(p => p.project_manager_id === me.id || (p.team_members ?? []).some(m => m.user_id === me.id))
     : projects;
 
+  // Project search — narrows the picker below by name (and by company name,
+  // which the options already carry, so a multi-company staff member can tell
+  // two identically-named projects apart). Purely client-side: the projects
+  // are already loaded, so the team appears the moment a match is picked.
+  const q = projectSearch.trim().toLowerCase();
+  const matches = q
+    ? pickerProjects.filter(p =>
+        p.name.toLowerCase().includes(q) || (p.company?.name ?? '').toLowerCase().includes(q))
+    : pickerProjects;
+
+  // Typing a name that leaves exactly one project standing selects it right
+  // there — that's the "search the project, see its team" path, with no
+  // second trip through the dropdown.
+  const handleProjectSearch = (value: string) => {
+    setProjectSearch(value);
+    const nq = value.trim().toLowerCase();
+    if (!nq) return;
+    const hits = pickerProjects.filter(p =>
+      p.name.toLowerCase().includes(nq) || (p.company?.name ?? '').toLowerCase().includes(nq));
+    if (hits.length === 1) setProjectId(String(hits[0].id));
+  };
+
   const selected = pickerProjects.find(p => String(p.id) === projectId) ?? null;
+  // Whatever is selected stays listed even once the search stops matching it,
+  // so the dropdown never renders a value it has no option for (which shows
+  // as an empty picker sitting above a populated team table).
+  const optionProjects = selected && !matches.some(p => p.id === selected.id)
+    ? [selected, ...matches]
+    : matches;
   const rawMembers = selected?.team_members ?? [];
   // A project's Seller has no project_team_members row at all unless one was
   // separately, manually added — assign()/reassign() (ProjectSellerAssignmentService::
@@ -200,13 +230,38 @@ function UserTeamPageInner() {
         <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 20px' }}>Team / Resources</h1>
 
         <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #f1f5f9', padding: '16px 20px', marginBottom: 16 }}>
+          <label style={lbl}>Search Project</label>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+            <div style={{ flex: '1 1 300px', maxWidth: 480, position: 'relative' }}>
+              <HiMagnifyingGlass size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+              <input
+                value={projectSearch}
+                onChange={e => handleProjectSearch(e.target.value)}
+                placeholder="Type a project name…"
+                style={{ ...inp, paddingLeft: 32, background: '#fafafa' }}
+              />
+            </div>
+            {q && (
+              <>
+                <span style={{ fontSize: 12, color: matches.length ? '#64748b' : '#dc2626' }}>
+                  {matches.length
+                    ? `${matches.length} ${matches.length === 1 ? 'project' : 'projects'} matched`
+                    : 'No project matched'}
+                </span>
+                <button type="button" onClick={() => setProjectSearch('')} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', color: '#94a3b8', fontSize: 12.5, cursor: 'pointer' }}>
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+
           <label style={lbl}>Select Project</label>
           <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...inp, maxWidth: 480 }}>
             <option value="">Choose a project…</option>
             {/* Company name inline — a multi-company staff member can other-
                 wise have two identically-named projects here with no way to
                 tell which company each belongs to. */}
-            {pickerProjects.map(p => (
+            {optionProjects.map(p => (
               <option key={p.id} value={String(p.id)}>
                 {p.name}{p.company?.name ? ` — ${p.company.name}` : ''}
               </option>

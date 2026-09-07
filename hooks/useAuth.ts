@@ -15,6 +15,13 @@ export const useAuth = () => {
   // tryCredentials()'s deliberate block) — lets the login screen offer a
   // "Complete Payment" action instead of just a toast.
   const [paymentRequired, setPaymentRequired] = useState(false);
+  // Set when login() fails because the matched User's Company Admin is
+  // isBlockedFromAccess() (trial expired / suspended / cancelled / pending
+  // payment) — a sub-user can't fix this themselves, only their Company
+  // Admin can, so the login screen shows a dedicated message instead of a
+  // plain toast. Holds the backend's own message text (already distinguishes
+  // trial-expired vs. suspended wording — see UserAuthController::tryCredentials()).
+  const [subscriptionBlocked, setSubscriptionBlocked] = useState<string | null>(null);
 
   // Shared request runner for the unified /login flow — password and Google
   // both land here. The backend (Auth\UnifiedLoginController /
@@ -29,7 +36,10 @@ export const useAuth = () => {
       clearErrors?: boolean;
       setFieldErrors?: boolean;
       defaultErrorMessage?: string;
-      onError?: (responseErrors: Record<string, unknown> | undefined) => boolean;
+      // Returning true means onError already showed its own dedicated UI
+      // (e.g. the subscriptionBlocked card, or the paymentRequired button) —
+      // skip the generic toast so the user doesn't see the same thing twice.
+      onError?: (responseErrors: Record<string, unknown> | undefined, message: string) => boolean;
     } = {}
   ) => {
     setLoading(true);
@@ -39,9 +49,10 @@ export const useAuth = () => {
       if (res.data.success) onSuccess(res.data.data);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string; errors?: Record<string, unknown> } } };
-      toast.error(axiosErr.response?.data?.message || opts.defaultErrorMessage || 'Login failed');
+      const message = axiosErr.response?.data?.message || opts.defaultErrorMessage || 'Login failed';
       const responseErrors = axiosErr.response?.data?.errors;
-      const handled = opts.onError?.(responseErrors) ?? false;
+      const handled = opts.onError?.(responseErrors, message) ?? false;
+      if (!handled) toast.error(message);
       if (opts.setFieldErrors && !handled) setErrors((responseErrors as Record<string, string[]>) || {});
     } finally {
       setLoading(false);
@@ -86,12 +97,17 @@ export const useAuth = () => {
 
   const login = (email: string, password: string) => {
     setPaymentRequired(false);
+    setSubscriptionBlocked(null);
     return performRequest('/login', { email, password }, applyUnifiedLoginSuccess, {
       clearErrors: true,
       setFieldErrors: true,
-      onError: (responseErrors) => {
+      onError: (responseErrors, message) => {
         if (responseErrors?.error_code === 'payment_required') {
           setPaymentRequired(true);
+          return true;
+        }
+        if (responseErrors?.error_code === 'subscription_required') {
+          setSubscriptionBlocked(message);
           return true;
         }
         return false;
@@ -164,5 +180,5 @@ export const useAuth = () => {
     router.push(redirects[type] ?? '/login');
   };
 
-  return { login, superAdminLogin, exchangeGoogleCode, logoutUser, resumePayment, loading, errors, paymentRequired };
+  return { login, superAdminLogin, exchangeGoogleCode, logoutUser, resumePayment, loading, errors, paymentRequired, subscriptionBlocked };
 };

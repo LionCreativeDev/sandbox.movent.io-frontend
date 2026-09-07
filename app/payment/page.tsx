@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import LandingNavbar from '@/components/landing/Navbar';
 import LandingFooter from '@/components/landing/Footer';
-import { publicService, ActiveGateway } from '@/lib/services/publicService';
-import { subscriptionPaymentService, GatewayInitData } from '@/lib/services/subscriptionPaymentService';
+import { publicService, ActiveGateway, PublicModule } from '@/lib/services/publicService';
+import { subscriptionPaymentService, GatewayInitData, SubscriptionPlan } from '@/lib/services/subscriptionPaymentService';
 import api from '@/lib/axios';
 import { getAuthType, getAuthUser, getToken, setAuthData } from '@/lib/auth';
 import { Admin } from '@/types';
@@ -12,6 +12,9 @@ import toast from 'react-hot-toast';
 import type { Stripe, StripeCardElement } from '@stripe/stripe-js';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import {
+  CATEGORIES, moduleToCategory, moduleDependencyErrors, requiredDependencyKeys,
+} from '@/lib/moduleCategories';
 
 // Augment window for PayPal SDK and Accept.js
 declare global {
@@ -104,6 +107,39 @@ export default function PaymentPage() {
   const router = useRouter();
 
   const [order,        setOrder]        = useState<PendingOrder | null>(null);
+  // Whether the browser still has the exact package/module choice made a
+  // moment ago on the registration page (localStorage.pending_order) — if so,
+  // re-showing the whole picker here read as "choose again?" even though
+  // nothing changed. Read synchronously (not in the mount effect below) so
+  // the picker never flashes visible before immediately collapsing.
+  const [hadPendingOrder] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try { return !!localStorage.getItem('pending_order'); } catch { return false; }
+  });
+  // Monthly/Yearly plan picker — shown for the trial-expiry/suspension
+  // reactivation flow (no localStorage.pending_order — order comes from
+  // orderSummary() instead, and the admin genuinely needs to pick something).
+  // For a fresh registration hand-off it starts collapsed (see
+  // hadPendingOrder above) since that choice was already made seconds ago;
+  // "Change Plan" reveals it if they want to switch anyway. Selecting a plan
+  // here overrides `order`'s price/name and is sent through as `package_id`
+  // so the backend can switch the Admin's plan.
+  const [showPlanPicker, setShowPlanPicker] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try { return !localStorage.getItem('pending_order'); } catch { return true; }
+  });
+  const [plans,        setPlans]        = useState<SubscriptionPlan[]>([]);
+  const [plansLoading,  setPlansLoading] = useState(true);
+  const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
+
+  // "Build Your Own Plan" — an alternative to picking one of the plan cards
+  // above, same custom-module concept as the registration page. Toggling this
+  // on clears any selected plan card (the two are mutually exclusive choices
+  // of what to pay for).
+  const [planMode, setPlanMode] = useState<'package' | 'custom'>('package');
+  const [liveModules, setLiveModules] = useState<PublicModule[] | null>(null);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+
   const [gateways,     setGateways]     = useState<ActiveGateway[]>([]);
   const [loadingGW,    setLoadingGW]    = useState(true);
   const [selectedGW,   setSelectedGW]   = useState<ActiveGateway | null>(null);
@@ -160,14 +196,14 @@ export default function PaymentPage() {
     if (getAuthType() !== 'admin') return;
 
     const cached = getAuthUser() as Admin | null;
-    if (cached && cached.subscription_status !== 'pending_payment') {
+    if (cached && cached.subscription_status === 'active') {
       router.replace('/admin/dashboard');
       return;
     }
 
     api.get('/admin/me').then(res => {
       const fresh = res.data?.data;
-      if (fresh && fresh.subscription_status !== 'pending_payment') {
+      if (fresh && fresh.subscription_status === 'active') {
         const token = getToken();
         if (token) setAuthData(token, fresh, 'admin');
         router.replace('/admin/dashboard');
@@ -207,7 +243,57 @@ export default function PaymentPage() {
         setSelectedGW(fallback[0]);
       })
       .finally(() => setLoadingGW(false));
+
+    subscriptionPaymentService.plans()
+      .then(setPlans)
+      .catch(() => {})
+      .finally(() => setPlansLoading(false));
+
+    publicService.getModules()
+      .then(setLiveModules)
+      .catch(() => {});
   }, []);
+
+  // ── Custom module picker (mirrors the registration page's own logic) ──────
+  const visibleCategories = liveModules ? liveModules.map(moduleToCategory) : CATEGORIES;
+  const selectedCats = visibleCategories.filter(c => selectedCategories.includes(c.key));
+  const customModules = [...new Set(selectedCats.flatMap(c => c.modules))];
+  const customDependencyErrors = moduleDependencyErrors(selectedCategories);
+  const customRequiredDeps = requiredDependencyKeys(selectedCategories);
+  const customTotalUsd = selectedCats.reduce((s, c) => s + c.price_usd, 0);
+
+  const toggleCategory = (key: string) =>
+    setSelectedCategories(prev => {
+      if (prev.includes(key)) return prev.filter(k => k !== key);
+      const next = [...prev, key];
+      if ((key === 'sales' || key === 'finance') && !next.includes('invoice')) next.push('invoice');
+      return next;
+    });
+
+  const selectPlanMode = (m: 'package' | 'custom') => {
+    setPlanMode(m);
+    if (m === 'package') setSelectedCategories([]);
+    else setSelectedPlanId(null);
+  };
+
+  // Custom selection overrides the plan-derived order summary/amount, same
+  // way selecting a plan card overrides the localStorage pending_order.
+  const displayOrder: PendingOrder | null = planMode === 'custom'
+    ? {
+        package_name: 'Custom Plan',
+        modules: customModules,
+        required_dependencies: customRequiredDeps.map(key => visibleCategories.find(c => c.key === key)?.label ?? key),
+        mode: 'custom',
+        seats: order?.seats ?? '—',
+        companies: order?.companies ?? '—',
+        total_pkr: 0,
+        total_usd: customTotalUsd,
+        currency: 'USD',
+        trial_days: order?.trial_days ?? 0,
+      }
+    : order;
+
+  const canPayCustom = planMode !== 'custom' || (selectedCategories.length > 0 && customDependencyErrors.length === 0);
 
   // ── Fetch init data when gateway changes ──────────────────────────────────
   useEffect(() => {
@@ -285,11 +371,11 @@ export default function PaymentPage() {
 
   // ── Load PayPal SDK and render buttons ────────────────────────────────────
   useEffect(() => {
-    if (selectedGW?.name !== 'paypal' || !initData?.client_id || !order) return;
+    if (selectedGW?.name !== 'paypal' || !initData?.client_id || !displayOrder || !canPayCustom) return;
 
     // PayPal only supports specific currencies — always use USD
     const paypalCurrency = 'USD';
-    const paypalAmount   = order.total_usd;
+    const paypalAmount   = displayOrder.total_usd;
 
     const renderButtons = () => {
       const container = document.getElementById('paypal-button-container');
@@ -318,6 +404,9 @@ export default function PaymentPage() {
               paypal_order_id: data.orderID,
               amount: paypalAmount,
               currency: paypalCurrency,
+              package_id: planMode === 'package' ? selectedPlanId ?? undefined : undefined,
+              is_custom_selection: planMode === 'custom',
+              selected_modules: planMode === 'custom' ? customModules : undefined,
             });
             localStorage.removeItem('pending_order');
             await refreshSessionAfterPayment();
@@ -351,7 +440,7 @@ export default function PaymentPage() {
       document.body.appendChild(script);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGW?.name, initData?.client_id, order]);
+  }, [selectedGW?.name, initData?.client_id, displayOrder, planMode, customModules, selectedPlanId, canPayCustom]);
 
   // ── Load Accept.js for Authorize.Net ──────────────────────────────────────
   useEffect(() => {
@@ -388,14 +477,47 @@ export default function PaymentPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGW?.name, initData?.mode]);
 
+  // Final price after this plan's own discount_percent (Super-Admin-set,
+  // e.g. a yearly row discounted vs. its monthly-equivalent list price).
+  const planPrice = (plan: SubscriptionPlan): number => {
+    const base = Number(plan.price_usd) || 0;
+    const discount = Number(plan.discount_percent) || 0;
+    return Math.round(base * (1 - discount / 100) * 100) / 100;
+  };
+
+  // Picking a plan overrides the Order Summary's price/name (and is sent
+  // through as package_id below) — used for the trial-expiry/suspension
+  // reactivation flow, where there's no localStorage.pending_order to fall
+  // back on and the admin may want to switch Monthly ⇄ Yearly or tier.
+  const selectPlan = (plan: SubscriptionPlan) => {
+    setPlanMode('package');
+    setSelectedCategories([]);
+    setSelectedPlanId(plan.id);
+    setOrder(prev => ({
+      package_name: plan.name,
+      modules: prev?.modules ?? [],
+      required_dependencies: prev?.required_dependencies,
+      mode: prev?.mode ?? 'standard',
+      seats: prev?.seats ?? '—',
+      companies: prev?.companies ?? '—',
+      total_pkr: 0,
+      total_usd: planPrice(plan),
+      currency: 'USD',
+      trial_days: plan.trial_days ?? 0,
+    }));
+  };
+
   // ── Pay handler (Stripe + Authorize.Net) ──────────────────────────────────
   const handlePay = async () => {
     if (processing) return; // Guards a double-click re-submit before the disabled prop re-renders.
-    if (!selectedGW || !initData || !order) return;
+    if (!selectedGW || !initData || !displayOrder) return;
+    if (!canPayCustom) { toast.error('Please select at least one module, or fix the dependency errors below.'); return; }
     setError('');
 
     const currency = 'USD';
-    const amount   = order.total_usd;
+    const amount   = displayOrder.total_usd;
+    const packageId = planMode === 'package' ? selectedPlanId ?? undefined : undefined;
+    const isCustom  = planMode === 'custom';
 
     // ── Stripe ──
     if (selectedGW.name === 'stripe') {
@@ -418,6 +540,9 @@ export default function PaymentPage() {
           payment_method_id: paymentMethod!.id,
           amount,
           currency,
+          package_id: packageId,
+          is_custom_selection: isCustom,
+          selected_modules: isCustom ? customModules : undefined,
         });
         localStorage.removeItem('pending_order');
         await refreshSessionAfterPayment();
@@ -486,6 +611,9 @@ export default function PaymentPage() {
               opaque_data_value:      response.opaqueData.dataValue,
               amount,
               currency,
+              package_id: packageId,
+              is_custom_selection: isCustom,
+              selected_modules: isCustom ? customModules : undefined,
             });
             devLog('backend payment success');
             localStorage.removeItem('pending_order');
@@ -575,6 +703,147 @@ export default function PaymentPage() {
 
             {/* ── Left: Gateway selection + payment form ── */}
             <div>
+
+              {/* Already chose a package/module bundle seconds ago on the
+                  registration page — don't ask again, just say what it was
+                  and offer a way to change it instead of showing the full
+                  picker by default. */}
+              {!showPlanPicker && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: '16px 20px', marginBottom: 18,
+                }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>Your Plan</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{order?.package_name ?? '—'}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPlanPicker(true)}
+                    style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Change Plan
+                  </button>
+                </div>
+              )}
+
+              {showPlanPicker && (
+                <>
+                  {/* Package vs. custom-module toggle — same "Choose a Package" /
+                      "Build Your Own Plan" choice as registration, available here
+                      too since a lot of admins land on this page well after
+                      sign-up (converting a trial, reactivating, or renewing). */}
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
+                    {(['package', 'custom'] as const).map(m => {
+                      const active = planMode === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => { if (!processing) selectPlanMode(m); }}
+                          style={{
+                            flex: 1, padding: '12px 16px', borderRadius: 12, cursor: processing ? 'not-allowed' : 'pointer',
+                            border: `2px solid ${active ? '#2563eb' : '#e2e8f0'}`,
+                            background: active ? '#eff6ff' : '#fff',
+                            textAlign: 'left', transition: 'all 0.15s',
+                          }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: active ? '#2563eb' : '#0f172a' }}>
+                            {m === 'package' ? 'Choose a Package' : 'Build Your Own Plan'}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                            {m === 'package' ? 'Pre-built plans with fixed pricing' : 'Pick exactly the modules you need'}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Plan picker — Monthly/Yearly plans Super Admin has configured.
+                      Optional: not choosing one just renews whatever plan the
+                      admin is already on (order summary already reflects that). */}
+                  {planMode === 'package' && !plansLoading && plans.length > 0 && (
+                    <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 14 }}>
+                        Choose a Plan
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                        {plans.map(plan => {
+                          const active = selectedPlanId === plan.id;
+                          const discount = Number(plan.discount_percent) || 0;
+                          return (
+                            <div
+                              key={plan.id}
+                              onClick={() => { if (!processing) selectPlan(plan); }}
+                              style={{
+                                padding: '14px 16px', borderRadius: 12, cursor: processing ? 'not-allowed' : 'pointer',
+                                border: `2px solid ${active ? '#2563eb' : '#e2e8f0'}`,
+                                background: active ? '#eff6ff' : '#fff',
+                                transition: 'all 0.15s',
+                              }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{plan.name}</span>
+                                {plan.is_popular && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', background: '#faf5ff', padding: '2px 6px', borderRadius: 8 }}>Popular</span>}
+                              </div>
+                              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>{plan.billing_term?.name ?? 'Monthly'}</div>
+                              <div style={{ fontSize: 20, fontWeight: 800, color: active ? '#2563eb' : '#0f172a' }}>
+                                ${planPrice(plan).toFixed(2)}
+                              </div>
+                              {discount > 0 && (
+                                <div style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>{discount}% off</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Custom module picker */}
+                  {planMode === 'custom' && (
+                    <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 14 }}>
+                        Select Modules
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+                        {visibleCategories.map(cat => {
+                          const active = selectedCategories.includes(cat.key);
+                          const Icon = cat.icon;
+                          return (
+                            <div
+                              key={cat.key}
+                              onClick={() => { if (!processing) toggleCategory(cat.key); }}
+                              style={{
+                                padding: '14px 16px', borderRadius: 12, cursor: processing ? 'not-allowed' : 'pointer',
+                                border: `2px solid ${active ? cat.color : '#e2e8f0'}`,
+                                background: active ? cat.bg : '#fff',
+                                transition: 'all 0.15s',
+                              }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                                <Icon size={14} style={{ color: cat.color }} />
+                                <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{cat.label}</span>
+                              </div>
+                              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>{cat.desc}</div>
+                              <div style={{ fontSize: 16, fontWeight: 800, color: active ? cat.color : '#0f172a' }}>
+                                ${cat.price_usd}<span style={{ fontSize: 11, fontWeight: 400, color: '#94a3b8' }}>/mo</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {customDependencyErrors.length > 0 && (
+                        <div style={{ marginTop: 14, color: '#dc2626', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {customDependencyErrors.map(message => <span key={message}>{message}</span>)}
+                        </div>
+                      )}
+                      {selectedCategories.length === 0 && (
+                        <div style={{ marginTop: 14, color: '#94a3b8', fontSize: 12, textAlign: 'center' }}>
+                          Select at least one module to continue.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
 
               {/* Gateway selector */}
               <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>
@@ -675,6 +944,8 @@ export default function PaymentPage() {
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 14 }}>Pay with PayPal</div>
                   {initLoading ? (
                     <div style={{ color: '#94a3b8', fontSize: 13, padding: '16px 0', textAlign: 'center' }}>Connecting to PayPal…</div>
+                  ) : !canPayCustom ? (
+                    <div style={{ color: '#94a3b8', fontSize: 13, padding: '16px 0', textAlign: 'center' }}>Select at least one module above to continue.</div>
                   ) : initData ? (
                     <>
                       <div id="paypal-button-container" style={{ minHeight: 50 }} />
@@ -765,27 +1036,27 @@ export default function PaymentPage() {
               <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 20, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
                 <h4 style={{ fontSize: 15, fontWeight: 800, color: '#0f172a', margin: '0 0 16px' }}>Order Summary</h4>
 
-                {order ? (
+                {displayOrder ? (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
                       <span style={{ color: '#64748b' }}>Plan</span>
-                      <span style={{ fontWeight: 700 }}>{order.package_name}</span>
+                      <span style={{ fontWeight: 700 }}>{displayOrder.package_name}</span>
                     </div>
-                    {order.mode === 'custom' && order.modules.length > 0 && (
+                    {displayOrder.mode === 'custom' && displayOrder.modules.length > 0 && (
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Modules:</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {order.modules.map(m => (
+                          {displayOrder.modules.map(m => (
                             <span key={m} style={{ padding: '2px 8px', background: '#f1f5f9', borderRadius: 10, fontSize: 11, color: '#475569' }}>{m}</span>
                           ))}
                         </div>
                       </div>
                     )}
-                    {order.mode === 'custom' && (order.required_dependencies?.length ?? 0) > 0 && (
+                    {displayOrder.mode === 'custom' && (displayOrder.required_dependencies?.length ?? 0) > 0 && (
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>Required dependencies:</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {order.required_dependencies!.map(m => (
+                          {displayOrder.required_dependencies!.map(m => (
                             <span key={m} style={{ padding: '2px 8px', background: '#f1f5f9', borderRadius: 10, fontSize: 11, color: '#475569' }}>{m}</span>
                           ))}
                         </div>
@@ -793,15 +1064,15 @@ export default function PaymentPage() {
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
                       <span style={{ color: '#64748b' }}>👤 Seats</span>
-                      <span style={{ fontWeight: 600 }}>{order.seats}</span>
+                      <span style={{ fontWeight: 600 }}>{displayOrder.seats}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
                       <span style={{ color: '#64748b' }}>🏢 Companies</span>
-                      <span style={{ fontWeight: 600 }}>{order.companies}</span>
+                      <span style={{ fontWeight: 600 }}>{displayOrder.companies}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 14 }}>
                       <span style={{ color: '#64748b' }}>Free trial</span>
-                      <span style={{ fontWeight: 600, color: '#22c55e' }}>{order.trial_days} days</span>
+                      <span style={{ fontWeight: 600, color: '#22c55e' }}>{displayOrder.trial_days} days</span>
                     </div>
 
                     <div style={{ borderTop: '1.5px dashed #e2e8f0', paddingTop: 12, marginBottom: 18 }}>
@@ -809,7 +1080,7 @@ export default function PaymentPage() {
                         <span style={{ fontWeight: 800, color: '#0f172a', fontSize: 14 }}>Total</span>
                         <div style={{ textAlign: 'right' }}>
                           <div style={{ fontWeight: 900, fontSize: 22, color: '#2563eb' }}>
-                            {fmt(order.total_pkr, order.total_usd)}
+                            {fmt(displayOrder.total_pkr, displayOrder.total_usd)}
                             <span style={{ fontSize: 12, fontWeight: 400, color: '#94a3b8' }}>/mo</span>
                           </div>
                           <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 600 }}>after free trial</div>
@@ -830,16 +1101,16 @@ export default function PaymentPage() {
                     onClick={handlePay}
                     loading={processing}
                     loadingText="Processing Payment…"
-                    disabled={!selectedGW || initLoading || !initData}
+                    disabled={!selectedGW || initLoading || !initData || !canPayCustom}
                     style={{
                       width: '100%', padding: '13px',
-                      background: (processing || !selectedGW || initLoading || !initData)
+                      background: (processing || !selectedGW || initLoading || !initData || !canPayCustom)
                         ? '#e2e8f0'
                         : `linear-gradient(135deg, ${meta?.color ?? '#2563eb'}, ${meta?.color ?? '#3b82f6'})`,
                       border: 'none', borderRadius: 10,
-                      color: (processing || !selectedGW || initLoading || !initData) ? '#94a3b8' : '#fff',
+                      color: (processing || !selectedGW || initLoading || !initData || !canPayCustom) ? '#94a3b8' : '#fff',
                       fontSize: 14, fontWeight: 700,
-                      boxShadow: (processing || !selectedGW || initLoading || !initData) ? 'none' : '0 4px 14px rgba(37,99,235,0.3)',
+                      boxShadow: (processing || !selectedGW || initLoading || !initData || !canPayCustom) ? 'none' : '0 4px 14px rgba(37,99,235,0.3)',
                       transition: 'all 0.15s',
                     }}>
                     🔒 Pay Now

@@ -12,6 +12,9 @@ export interface RegisterData {
   selected_modules: string[];
   currency: 'USD';
   start_type: 'trial' | 'paid';
+  // True only for "Build Your Own Plan" — an explicit hand-picked module set
+  // that must never be widened to every module during a trial (see backend).
+  is_custom_selection?: boolean;
   timezone: string;
   country?: string;
   max_users?: number | null;

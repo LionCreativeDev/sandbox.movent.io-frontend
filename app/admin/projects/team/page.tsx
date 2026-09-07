@@ -7,6 +7,7 @@ import { useModuleGuard } from '@/hooks/useModuleGuard';
 import { adminProjectService, Project, TeamMember } from '@/lib/services/adminProjectService';
 import { TEAM_ROLE_LABEL } from '@/components/admin/projects/shared';
 import { ROLE_LABELS } from '@/lib/roleUtils';
+import { HiMagnifyingGlass } from 'react-icons/hi2';
 
 // A team member's actual job (role_type, e.g. "Seller") is more useful here
 // than the generic 4-value project role_in_project — fall back to the
@@ -23,6 +24,7 @@ export default function TeamOverviewPage() {
   useModuleGuard('projects');
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading]   = useState(true);
+  const [search, setSearch]     = useState('');
 
   useEffect(() => {
     adminProjectService.list()
@@ -30,6 +32,21 @@ export default function TeamOverviewPage() {
       .catch(() => toast.error('Failed to load team overview'))
       .finally(() => setLoading(false));
   }, []);
+
+  // Project search — narrows this overview to one project's team. Filtering
+  // happens on the projects BEFORE the byUser matrix below is built, so a
+  // match shows every member of that project and nothing else: the whole
+  // point of the search is "who is on this project", not "which of this
+  // person's projects matched".
+  //
+  // Company name is matched too because it's a column here: an Admin owning
+  // several companies can have two identically-named projects, and narrowing
+  // by company is the only way to tell those apart.
+  const q = search.trim().toLowerCase();
+  const visibleProjects = q
+    ? projects.filter(p =>
+        p.name.toLowerCase().includes(q) || (p.company?.name ?? '').toLowerCase().includes(q))
+    : projects;
 
   // Keyed by userId -> projectId, so a Seller sourced from projects.seller_id
   // below can overwrite (never duplicate) a stale/cosmetic team_members
@@ -48,7 +65,7 @@ export default function TeamOverviewPage() {
     byUser.set(userId, row);
   };
 
-  projects.forEach(p => {
+  visibleProjects.forEach(p => {
     // An Admin owning several companies sees every one of them here at once,
     // so the project name alone doesn't say which company it belongs to.
     const company = p.company?.name ?? '—';
@@ -79,11 +96,41 @@ export default function TeamOverviewPage() {
         <p style={{ fontSize: 13, color: '#64748b', margin: '4px 0 0' }}>Who is assigned to which project</p>
       </div>
 
+      {/* Project search — filters as you type (the list is already in memory,
+          so there's nothing to submit and nothing to wait for). */}
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '14px 16px', marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 260px', position: 'relative' }}>
+            <HiMagnifyingGlass size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search by project name…"
+              style={{ width: '100%', padding: '8px 12px 8px 30px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }}
+            />
+          </div>
+          {q && (
+            <>
+              <span style={{ fontSize: 12, color: '#64748b' }}>
+                {visibleProjects.length} {visibleProjects.length === 1 ? 'project' : 'projects'} matched
+              </span>
+              <button type="button" onClick={() => setSearch('')} style={{ padding: '8px 14px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: '#fff', color: '#94a3b8', fontSize: 13, cursor: 'pointer' }}>
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
       <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Loading…</div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>No team members assigned to any project yet.</div>
+          <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>
+            {q
+              ? <>No project matching <strong style={{ color: '#64748b' }}>&ldquo;{search.trim()}&rdquo;</strong> has any team member assigned.</>
+              : 'No team members assigned to any project yet.'}
+          </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>

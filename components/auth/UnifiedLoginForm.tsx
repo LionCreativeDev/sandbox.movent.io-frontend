@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, ChangeEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
-import { HiEye, HiEyeSlash } from 'react-icons/hi2';
+import { HiEye, HiEyeSlash, HiExclamationTriangle } from 'react-icons/hi2';
 import { FcGoogle } from 'react-icons/fc';
 import { useAuth } from '@/hooks/useAuth';
 import { isAuthenticated, getAuthType, getAuthUser, getActiveCompany, resolveStaffRedirect } from '@/lib/auth';
@@ -30,6 +30,7 @@ const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
   inactive_company:   'Your company account is inactive',
   email_not_verified: 'Your Google email is not verified. Please verify it with Google and try again.',
   payment_required:   'Please complete your payment to activate your account.',
+  subscription_required: 'Your free trial has expired or your account has been suspended. Please ask your Company Admin to activate a subscription.',
   oauth_failed:       'Google sign-in failed. Please try again.',
 };
 
@@ -37,7 +38,7 @@ function UnifiedLoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const { login, exchangeGoogleCode, resumePayment, loading, errors, paymentRequired } = useAuth();
+  const { login, exchangeGoogleCode, resumePayment, loading, errors, paymentRequired, subscriptionBlocked } = useAuth();
 
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -260,6 +261,31 @@ function UnifiedLoginContent() {
                     >
                       Complete Payment
                     </button>
+                  )}
+
+                  {/* Shown when the matched staff/sub-user account belongs to
+                      a Company Admin whose subscription is blocked (trial
+                      expired / suspended / cancelled / pending payment) — a
+                      sub-user can't fix this themselves, so this is purely
+                      informational, not an action button. */}
+                  {subscriptionBlocked && (
+                    <div style={{
+                      marginTop: 16, padding: '20px 22px', borderRadius: 12,
+                      background: '#fef2f2', border: '1.5px solid #fecaca', textAlign: 'center',
+                    }}>
+                      <div style={{
+                        width: 44, height: 44, borderRadius: '50%', background: '#fee2e2',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px',
+                      }}>
+                        <HiExclamationTriangle size={22} color="#dc2626" />
+                      </div>
+                      <h3 style={{ fontSize: 15, fontWeight: 700, color: '#991b1b', margin: '0 0 6px' }}>
+                        Account Access Suspended
+                      </h3>
+                      <p style={{ fontSize: 13, color: '#7f1d1d', margin: 0, lineHeight: 1.55 }}>
+                        {subscriptionBlocked}
+                      </p>
+                    </div>
                   )}
 
                   <div className="mt-4">

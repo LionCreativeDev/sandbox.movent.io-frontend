@@ -10,6 +10,8 @@ import {
   HiShieldCheck,
   HiCreditCard,
   HiPuzzlePiece,
+  HiClock,
+  HiCalendarDays,
 } from 'react-icons/hi2';
 
 const NAV_ITEMS = [
@@ -19,6 +21,8 @@ const NAV_ITEMS = [
   { href: '/super-admin/admins',             icon: HiUserGroup,       label: 'Company Admins' },
   { href: '/super-admin/companies',          icon: HiBuildingOffice2, label: 'Companies' },
   { href: '/super-admin/payment-gateways',   icon: HiCreditCard,      label: 'Payment Gateways' },
+  { href: '/super-admin/subscription-policy', icon: HiClock,          label: 'Trial & Subscription' },
+  { href: '/super-admin/billing-terms',       icon: HiCalendarDays,   label: 'Billing Terms' },
 ];
 
 export default function SuperAdminSidebar() {

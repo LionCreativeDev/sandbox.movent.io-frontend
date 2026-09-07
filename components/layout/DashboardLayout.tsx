@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { isAuthenticated, getAuthType, getAuthUser, setAuthData, getToken, logout, getActiveCompany, setActiveCompany, clearActiveCompany } from '@/lib/auth';
 import { Admin, User } from '@/types';
 import Sidebar from './Sidebar';
@@ -15,6 +15,7 @@ export default function DashboardLayout({
   title?: string;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   // Unassign Company from User — counts consecutive polls in a row that saw
   // zero active companies (or an active-company selection no longer valid).
   // A Company Admin's "remove this company, then add 2 new ones" edit is
@@ -43,6 +44,26 @@ export default function DashboardLayout({
     const cachedUser = getAuthUser() as User | null;
     const active = (cachedUser?.company_assignments ?? []).filter(a => a.status === 'active');
     return active.length === 0;
+  });
+
+  // Persistent trial/grace-period countdown bar (Company Admin only) —
+  // initialized from the cached login/register snapshot so it's correct on
+  // first paint, then kept current by the same /admin/me refresh loop below
+  // (no extra call). Reads effective_subscription_status (not the raw
+  // column) so this reflects reality even before the daily lifecycle cron
+  // has formalized a trial→grace_period transition — see CompanyAdmin::
+  // effectiveSubscriptionStatus().
+  type BarInfo = { kind: 'trial' | 'grace'; days: number } | null;
+  const barInfoFrom = (a: Admin | null): BarInfo => {
+    if (!a) return null;
+    const status = a.effective_subscription_status ?? a.subscription_status;
+    if (status === 'trial') return { kind: 'trial', days: a.trial_days_remaining ?? 0 };
+    if (status === 'grace_period') return { kind: 'grace', days: a.grace_days_remaining ?? 0 };
+    return null;
+  };
+  const [barInfo, setBarInfo] = useState<BarInfo>(() => {
+    if (typeof window === 'undefined' || !isAuthenticated() || getAuthType() !== 'admin') return null;
+    return barInfoFrom(getAuthUser() as Admin | null);
   });
 
   useEffect(() => {
@@ -119,6 +140,9 @@ export default function DashboardLayout({
           if (fresh && token) {
             setAuthData(token, fresh, type as 'admin' | 'user');
             window.dispatchEvent(new Event('auth_refreshed'));
+            if (type === 'admin') {
+              setBarInfo(barInfoFrom(fresh as Admin));
+            }
             if (type === 'admin' && fresh.subscription_status === 'pending_payment' && !isPaymentRoute) {
               logout();
               router.replace('/login');
@@ -194,13 +218,52 @@ export default function DashboardLayout({
     );
   }
 
+  // /admin/plan already shows its own prominent countdown + CTA card, and
+  // /payment is mid-checkout — the global bar would just be a redundant/
+  // distracting second copy of the same message on those two pages.
+  const showBar = barInfo !== null
+    && !(pathname ?? '').startsWith('/admin/plan')
+    && !(pathname ?? '').startsWith('/payment');
+
+  // Grace period is always the urgent/red styling regardless of days left —
+  // it only exists because the trial already ended, unlike the trial bar
+  // itself, which stays amber until close to the end.
+  const urgent = showBar && (barInfo!.kind === 'grace' || barInfo!.days <= 3);
+
   return (
     <div>
       <Sidebar />
       <div className="main-content">
         <Navbar title={title} />
-        <div style={{ padding: '24px' }}>{children}</div>
+        <div style={{ padding: '24px', paddingBottom: showBar ? 64 : 24 }}>{children}</div>
       </div>
+      {showBar && (
+        <div style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 40,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+          padding: '10px 16px',
+          background: urgent ? '#fef2f2' : '#fffbeb',
+          borderTop: `1px solid ${urgent ? '#fecaca' : '#fde68a'}`,
+          color: urgent ? '#991b1b' : '#92400e',
+          fontSize: 13, fontWeight: 600,
+        }}>
+          <span>
+            {barInfo!.kind === 'grace'
+              ? (barInfo!.days > 0
+                  ? `Your free trial has ended — ${barInfo!.days} day${barInfo!.days === 1 ? '' : 's'} left in your grace period.`
+                  : 'Your grace period ends today.')
+              : (barInfo!.days > 0
+                  ? `${barInfo!.days} day${barInfo!.days === 1 ? '' : 's'} left in your free trial.`
+                  : 'Your free trial ends today.')}
+          </span>
+          <a href="/admin/plan" style={{
+            color: urgent ? '#dc2626' : '#b45309',
+            fontWeight: 700, textDecoration: 'underline',
+          }}>
+            Pay Now →
+          </a>
+        </div>
+      )}
     </div>
   );
 }

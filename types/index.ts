@@ -5,7 +5,13 @@ export interface Admin {
   phone?: string;
   avatar_url?: string | null;
   subscription_status: string;
+  // Live-computed — reflects what the daily lifecycle cron would have set by
+  // now even if it hasn't run yet. Prefer this over subscription_status for
+  // any display (see CompanyAdmin::effectiveSubscriptionStatus()).
+  effective_subscription_status?: string;
   trial_ends_at?: string;
+  trial_days_remaining?: number | null;
+  grace_days_remaining?: number | null;
   subscription_ends_at?: string;
   is_active?: boolean;
   companies: Company[];
@@ -301,10 +307,22 @@ export interface ApiResponse<T> {
 
 // ─── Public / Landing types ───────────────────────────────────────────────────
 
+export interface BillingTermRef {
+  id: number;
+  name: string;
+  months: number;
+}
+
 export interface PublicPackage {
   id: number;
   name: string;
   tier: string;
+  billing_cycle: string;
+  // Null = the base monthly package. Non-null = a multi-year companion for
+  // this Billing Term (Super Admin-managed, see /super-admin/billing-terms) —
+  // months drives price/period math generically, no fixed cycle list.
+  billing_term: BillingTermRef | null;
+  discount_percent: number;
   price_pkr: number;
   price_usd: number;
   trial_days: number;
@@ -349,8 +367,10 @@ export interface Package {
   price: number | string;
   price_pkr: number | null;
   price_usd: number | null;
-  billing_cycle: 'monthly' | 'yearly';
+  billing_cycle: string;
+  billing_term_id: number | null;
   trial_days: number | null;
+  discount_percent: number | string | null;
   max_companies: number | null;
   max_users_per_company: number | null;
   description: string | null;

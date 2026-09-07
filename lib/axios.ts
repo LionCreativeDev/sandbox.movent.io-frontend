@@ -41,6 +41,33 @@ api.interceptors.response.use(
       }
     }
 
+    if (error.response?.status === 402 && error.response?.data?.errors?.error_code === 'subscription_required') {
+      // Trial expired / suspended / cancelled — every admin AND every staff
+      // (User-guard) request now 402s this way (see EnsureSubscriptionActive
+      // / EnsureCompanySubscriptionActive). A Company Admin still needs their
+      // own token to reach /admin/plan and /admin/subscription/* (both are
+      // exempted from the block), so just redirect them there instead of
+      // logging out. A staff/sub-user has nothing reachable once blocked —
+      // log them out so /login shows the exact reason via the same
+      // 'subscription_required' handling used for the direct-login path.
+      const authType = Cookies.get('auth_type');
+      const message = error.response?.data?.message ?? 'Your account has been suspended. Please activate a subscription to continue using Movent CRM.';
+
+      if (authType === 'admin') {
+        if (!window.location.pathname.startsWith('/admin/plan') && !window.location.pathname.startsWith('/payment')) {
+          toast.error(message);
+          window.location.href = '/admin/plan';
+        }
+      } else if (authType === 'user') {
+        Cookies.remove('auth_token');
+        Cookies.remove('auth_user');
+        Cookies.remove('auth_type');
+        window.localStorage.removeItem('auth_user');
+        toast.error(message);
+        window.location.href = '/login';
+      }
+    }
+
     if (error.response?.status === 401) {
       const url: string = error.config?.url ?? '';
 
