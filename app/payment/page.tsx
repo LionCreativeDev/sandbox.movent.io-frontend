@@ -107,30 +107,22 @@ export default function PaymentPage() {
   const router = useRouter();
 
   const [order,        setOrder]        = useState<PendingOrder | null>(null);
-  // Whether the browser still has the exact package/module choice made a
-  // moment ago on the registration page (localStorage.pending_order) — if so,
-  // re-showing the whole picker here read as "choose again?" even though
-  // nothing changed. Read synchronously (not in the mount effect below) so
-  // the picker never flashes visible before immediately collapsing.
-  const [hadPendingOrder] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try { return !!localStorage.getItem('pending_order'); } catch { return false; }
-  });
-  // Monthly/Yearly plan picker — shown for the trial-expiry/suspension
-  // reactivation flow (no localStorage.pending_order — order comes from
-  // orderSummary() instead, and the admin genuinely needs to pick something).
-  // For a fresh registration hand-off it starts collapsed (see
-  // hadPendingOrder above) since that choice was already made seconds ago;
-  // "Change Plan" reveals it if they want to switch anyway. Selecting a plan
-  // here overrides `order`'s price/name and is sent through as `package_id`
-  // so the backend can switch the Admin's plan.
-  const [showPlanPicker, setShowPlanPicker] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    try { return !localStorage.getItem('pending_order'); } catch { return true; }
-  });
+  // Monthly/Yearly/etc. plan picker — always shown. (Previously collapsed
+  // by default when arriving with a localStorage.pending_order from
+  // registration, on the idea that the choice was already made seconds ago
+  // — but that hid each plan's discount/term info behind an extra click,
+  // which read as "discount isn't showing." Always visible now; selecting a
+  // plan here overrides `order`'s price/name and is sent through as
+  // `package_id` so the backend can switch the Admin's plan.)
   const [plans,        setPlans]        = useState<SubscriptionPlan[]>([]);
   const [plansLoading,  setPlansLoading] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
+  // Billing term for "Choose a Plan" — null = Monthly. `plans` holds every
+  // tier × every term flattened into one list; this narrows the visible
+  // cards to one term at a time (with a toggle, same as custom mode below)
+  // instead of showing all terms mixed together, which buried each term's
+  // discount badge in a wall of 12+ cards.
+  const [packageBillingTermId, setPackageBillingTermId] = useState<number | null>(null);
   // Billing term for "Build Your Own Plan" — null = Monthly. Custom mode has
   // no package row of its own, so this drives its own discount math (see
   // customTotalUsd below) independently of selectedPlanId (package mode).
@@ -273,6 +265,21 @@ export default function PaymentPage() {
   const availableBillingTerms = [
     ...new Map(plans.filter(p => p.billing_term).map(p => [p.billing_term!.id, p.billing_term!])).values(),
   ].sort((a, b) => a.months - b.months);
+
+  // Only the tier cards for the currently toggled term — same idea as the
+  // register page's visiblePackages, so each term's discount is obvious via
+  // the toggle instead of buried in one long mixed list of every term.
+  const visiblePlans = plans.filter(p => (p.billing_term?.id ?? null) === packageBillingTermId);
+
+  // Switching term keeps the same tier selected (Business Monthly →
+  // Business Yearly) rather than dropping the selection.
+  const switchPackageBillingTerm = (termId: number | null) => {
+    setPackageBillingTermId(termId);
+    const currentTier = plans.find(p => p.id === selectedPlanId)?.tier;
+    if (!currentTier) return;
+    const match = plans.find(p => (p.billing_term?.id ?? null) === termId && p.tier === currentTier);
+    if (match) selectPlan(match);
+  };
   const customTermMonths = customBillingTermId !== null
     ? (availableBillingTerms.find(t => t.id === customBillingTermId)?.months ?? 1) : 1;
   const customTermDiscountPercent = customBillingTermId !== null
@@ -757,36 +764,11 @@ export default function PaymentPage() {
             {/* ── Left: Gateway selection + payment form ── */}
             <div>
 
-              {/* Already chose a package/module bundle seconds ago on the
-                  registration page — don't ask again, just say what it was
-                  and offer a way to change it instead of showing the full
-                  picker by default. */}
-              {!showPlanPicker && (
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: '16px 20px', marginBottom: 18,
-                }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>Your Plan</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{order?.package_name ?? '—'}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowPlanPicker(true)}
-                    style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
-                  >
-                    Change Plan
-                  </button>
-                </div>
-              )}
-
-              {showPlanPicker && (
-                <>
-                  {/* Package vs. custom-module toggle — same "Choose a Package" /
-                      "Build Your Own Plan" choice as registration, available here
-                      too since a lot of admins land on this page well after
-                      sign-up (converting a trial, reactivating, or renewing). */}
-                  <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
+              {/* Package vs. custom-module toggle — same "Choose a Package" /
+                  "Build Your Own Plan" choice as registration, available here
+                  too since a lot of admins land on this page well after
+                  sign-up (converting a trial, reactivating, or renewing). */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
                     {(['package', 'custom'] as const).map(m => {
                       const active = planMode === m;
                       return (
@@ -819,8 +801,41 @@ export default function PaymentPage() {
                       <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 14 }}>
                         Choose a Plan
                       </div>
+
+                      {availableBillingTerms.length > 0 && (
+                        <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, padding: 3, gap: 3, marginBottom: 16, flexWrap: 'wrap' }}>
+                          {[{ id: null as number | null, name: 'Monthly' }, ...availableBillingTerms].map(term => {
+                            const active = packageBillingTermId === term.id;
+                            const termDiscount = term.id !== null
+                              ? Number(plans.find(p => p.billing_term?.id === term.id)?.discount_percent ?? 0) : 0;
+                            return (
+                              <button
+                                key={term.id ?? 'monthly'}
+                                type="button"
+                                onClick={() => { if (!processing) switchPackageBillingTerm(term.id); }}
+                                style={{
+                                  flex: 1, minWidth: 70, padding: '7px 0', borderRadius: 6, border: 'none',
+                                  background: active ? '#fff' : 'transparent',
+                                  color: active ? '#0f172a' : '#64748b',
+                                  fontWeight: 700, fontSize: 12, cursor: processing ? 'not-allowed' : 'pointer',
+                                  boxShadow: active ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                                }}
+                              >
+                                {term.name}
+                                {termDiscount > 0 && (
+                                  <span style={{ fontSize: 9, fontWeight: 800, color: active ? '#16a34a' : '#94a3b8' }}>
+                                    -{termDiscount}%
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-                        {plans.map(plan => {
+                        {visiblePlans.map(plan => {
                           const active = selectedPlanId === plan.id;
                           const discount = Number(plan.discount_percent) || 0;
                           return (
@@ -837,9 +852,13 @@ export default function PaymentPage() {
                                 <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{plan.name}</span>
                                 {plan.is_popular && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', background: '#faf5ff', padding: '2px 6px', borderRadius: 8 }}>Popular</span>}
                               </div>
-                              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>{plan.billing_term?.name ?? 'Monthly'}</div>
-                              <div style={{ fontSize: 20, fontWeight: 800, color: active ? '#2563eb' : '#0f172a' }}>
-                                ${planPrice(plan).toFixed(2)}
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                                <div style={{ fontSize: 20, fontWeight: 800, color: active ? '#2563eb' : '#0f172a' }}>
+                                  ${planPrice(plan).toFixed(2)}
+                                </div>
+                                {discount > 0 && (
+                                  <span style={{ fontSize: 12, color: '#94a3b8', textDecoration: 'line-through' }}>${plan.price_usd}</span>
+                                )}
                               </div>
                               {discount > 0 && (
                                 <div style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>{discount}% off</div>
@@ -929,8 +948,6 @@ export default function PaymentPage() {
                       )}
                     </div>
                   )}
-                </>
-              )}
 
               {/* Gateway selector */}
               <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>

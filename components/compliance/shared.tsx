@@ -53,6 +53,27 @@ export const CASE_STATUS_SC: Record<string, { bg: string; color: string }> = {
     rejected: { bg: "#fef2f2", color: "#dc2626" },
 };
 
+// The PROJECT's own status (planning/active/on_hold/completed/cancelled) —
+// independent of the ComplianceCase status above (a project can be
+// Completed while its compliance review is still Pending, and vice versa).
+// Same colors as components/admin/projects/shared.tsx's STATUS_SC.
+export const PROJECT_STATUS_SC: Record<string, { bg: string; color: string }> = {
+    planning: { bg: "#eff6ff", color: "#2563eb" },
+    active: { bg: "#ecfdf5", color: "#059669" },
+    on_hold: { bg: "#fffbeb", color: "#d97706" },
+    completed: { bg: "#f0fdf4", color: "#16a34a" },
+    cancelled: { bg: "#fef2f2", color: "#dc2626" },
+};
+
+// Project priority — see App\Models\Project's 'priority' enum. Same colors
+// as components/admin/projects/shared.tsx's PRIORITY_SC.
+export const PRIORITY_SC: Record<string, { bg: string; color: string }> = {
+    low: { bg: "#eff6ff", color: "#2563eb" },
+    medium: { bg: "#fff7ed", color: "#d97706" },
+    high: { bg: "#fef2f2", color: "#dc2626" },
+    urgent: { bg: "#7f1d1d", color: "#fca5a5" },
+};
+
 // Compliance Document statuses — pending_review, approved, rejected,
 // resubmission_requested, expired.
 export const DOCUMENT_STATUS_SC: Record<string, { bg: string; color: string }> = {
@@ -231,6 +252,59 @@ export function StatCard({
     );
 }
 
+// Circular icon badge + label/value — the "Project Compliance Listing"
+// screenshot's stat-card style. A separate component from StatCard() above
+// (which many other compliance pages already use) so this doesn't change
+// their look.
+export function IconStatCard({
+    icon,
+    label,
+    value,
+    bg,
+    color,
+}: {
+    icon: React.ReactNode;
+    label: string;
+    value: string;
+    bg: string;
+    color: string;
+}) {
+    return (
+        <div
+            style={{
+                background: "#fff",
+                borderRadius: 14,
+                border: "1px solid #e2e8f0",
+                padding: "16px 18px",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+            }}
+        >
+            <div
+                style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: "50%",
+                    background: bg,
+                    color,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 20,
+                    flexShrink: 0,
+                }}
+            >
+                {icon}
+            </div>
+            <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>{label}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", lineHeight: 1.3 }}>{value}</div>
+            </div>
+        </div>
+    );
+}
+
 export function fmtFileSize(bytes?: number | null): string {
     if (!bytes) return "—";
     if (bytes < 1024) return `${bytes} B`;
@@ -241,4 +315,22 @@ export function fmtFileSize(bytes?: number | null): string {
 export function errorMessage(err: unknown, fallback: string): string {
     const ex = err as { response?: { data?: { message?: string } } };
     return ex.response?.data?.message ?? fallback;
+}
+
+// errorMessage() above can't see the real backend message on a
+// responseType:'blob' request (e.g. ZIP/file downloads) — axios hands back
+// the error body as an unparsed Blob instead of JSON, so
+// response.data.message is always undefined and callers silently fall back
+// to a generic message. This reads that Blob (when it's actually JSON) to
+// recover the real message before falling back.
+export async function blobErrorMessage(err: unknown, fallback: string): Promise<string> {
+    const ex = err as { response?: { data?: unknown } };
+    const data = ex.response?.data;
+    if (data instanceof Blob && data.type.includes("json")) {
+        try {
+            const parsed = JSON.parse(await data.text());
+            if (parsed?.message) return parsed.message;
+        } catch { /* fall through to errorMessage()/fallback below */ }
+    }
+    return errorMessage(err, fallback);
 }

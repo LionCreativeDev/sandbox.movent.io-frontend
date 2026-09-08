@@ -27,6 +27,17 @@
   to { transform: rotate(360deg); }
 }
 
+/* Keeps a container scrollable (trackpad/shift-scroll/drag still work) but
+   hides the visible scrollbar track — used by wide tables like the
+   Compliance Project Listing where the bar itself is unwanted chrome. */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/new Edge */
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html { height: 100%; }

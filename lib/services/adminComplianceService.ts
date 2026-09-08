@@ -84,6 +84,7 @@ export interface ComplianceCase {
     name: string;
     reference: string | null;
     status: string;
+    priority?: 'low' | 'medium' | 'high' | 'urgent';
     client_id: number | null;
     project_manager_id: number | null;
     seller_id: number | null;
@@ -96,13 +97,52 @@ export interface ComplianceCase {
   documents?: ComplianceDocument[];
 }
 
+// Full project summary for the "Project Name" popup on the listing — see
+// Api\Admin\ComplianceController::projectOverview().
+export interface ComplianceProjectOverview {
+  id: number;
+  name: string;
+  reference: string | null;
+  description: string | null;
+  status: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  budget: string | null;
+  start_date: string | null;
+  deadline: string | null;
+  client: { id: number; name: string; email: string | null; phone: string | null } | null;
+  project_manager: { id: number; name: string } | null;
+  seller: { id: number; name: string } | null;
+}
+
 export interface ComplianceCaseListItem {
   id: number;
   status: ComplianceCaseStatus;
-  project: { id: number; name: string; reference: string | null; status: string };
+  project: {
+    id: number; name: string; reference: string | null; status: string;
+    priority?: 'low' | 'medium' | 'high' | 'urgent';
+    project_manager?: { id: number; name: string } | null;
+    seller?: { id: number; name: string } | null;
+  };
   client: { id: number; name: string } | null;
   compliance_officer: { id: number; name: string } | null;
   requirements_count: number;
+  // Project Attachments count — NOT Compliance Documents, which has its
+  // own dedicated ZIP download.
+  project_attachments_count?: number;
+  // Compliance Comments count.
+  comments_count?: number;
+  // Project Team member count.
+  team_count?: number;
+  // Task Attachments count.
+  task_attachments_count?: number;
+  // Client Attachments count — files the client themselves sent in the
+  // project's chat.
+  client_attachments_count?: number;
+  // Invoices count.
+  invoices_count?: number;
+  // Final Delivery submissions count.
+  final_delivery_count?: number;
+  updated_at?: string;
 }
 
 export interface ComplianceChecklistItem {
@@ -150,10 +190,11 @@ export interface ComplianceRequirementPayload {
   sort_order?: number;
 }
 
-interface Paginated<T> {
+export interface Paginated<T> {
   data: T[];
   current_page: number;
   last_page: number;
+  per_page: number;
   total: number;
 }
 
@@ -238,6 +279,22 @@ export interface ComplianceTaskActivityItem {
   description: string;
   causer_name: string | null;
   created_at: string;
+}
+
+export interface ComplianceTaskAttachment {
+  id: number;
+  original_name: string;
+  file_type: string | null;
+  file_size: number | null;
+  created_at: string;
+  uploaded_by_admin: { id: number; name: string } | null;
+  uploaded_by_user: { id: number; name: string } | null;
+}
+
+// Same fields as ComplianceTaskAttachment, plus which task it belongs to —
+// used by the "Task Attachments" popup's flat, cross-task list.
+export interface ComplianceProjectTaskAttachment extends ComplianceTaskAttachment {
+  task: { id: number; title: string } | null;
 }
 
 export type ComplianceInvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'overdue' | 'cancelled';
@@ -335,8 +392,8 @@ export interface ComplianceLead {
 
 export const adminComplianceService = {
   dashboard: {
-    get: async (): Promise<ComplianceDashboard> => {
-      const res = await api.get('/admin/compliance/dashboard');
+    get: async (clientId?: number): Promise<ComplianceDashboard> => {
+      const res = await api.get('/admin/compliance/dashboard', { params: clientId ? { client_id: clientId } : undefined });
       return res.data.data;
     },
   },
@@ -353,7 +410,7 @@ export const adminComplianceService = {
   },
 
   cases: {
-    list: async (params?: { status?: string; compliance_officer_id?: number; per_page?: number }): Promise<Paginated<ComplianceCaseListItem>> => {
+    list: async (params?: { status?: string; compliance_officer_id?: number; client_id?: number; search?: string; per_page?: number; page?: number }): Promise<Paginated<ComplianceCaseListItem>> => {
       const res = await api.get('/admin/compliance/cases', { params });
       return res.data.data;
     },
@@ -372,6 +429,34 @@ export const adminComplianceService = {
     updateStatus: async (id: number, action: 'mark_under_review' | 'on_hold' | 'resume' | 'reject', reason?: string): Promise<ComplianceCase> => {
       const res = await api.patch(`/admin/compliance/cases/${id}/status`, { action, reason });
       return res.data.data;
+    },
+    // Bundles one project's compliance documents into a single ZIP.
+    downloadProjectZip: async (projectId: number, fileName: string): Promise<void> => {
+      const res = await api.get(`/admin/compliance/projects/${projectId}/documents-zip`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    // Bundles every project's documents, grouped into a per-project folder.
+    // Optional clientId narrows this to one client's projects.
+    downloadAllZip: async (fileName = 'all-compliance-documents.zip', clientId?: number): Promise<void> => {
+      const res = await api.get('/admin/compliance/projects-zip', {
+        responseType: 'blob',
+        params: clientId ? { client_id: clientId } : undefined,
+      });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     },
   },
 
@@ -487,12 +572,16 @@ export const adminComplianceService = {
   },
 
   project: {
+    overview: async (projectId: number): Promise<ComplianceProjectOverview> => {
+      const res = await api.get(`/admin/compliance/projects/${projectId}/overview`);
+      return res.data.data;
+    },
     chat: async (projectId: number): Promise<{ messages: ComplianceChatMessage[] }> => {
       const res = await api.get(`/admin/compliance/projects/${projectId}/client-chat`);
       return res.data.data;
     },
-    chatExport: async (projectId: number): Promise<void> => {
-      const res = await api.get(`/admin/compliance/projects/${projectId}/client-chat/export`, { responseType: 'blob' });
+    chatExport: async (projectId: number, range?: { start_date?: string; end_date?: string }): Promise<void> => {
+      const res = await api.get(`/admin/compliance/projects/${projectId}/client-chat/export`, { responseType: 'blob', params: range });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url;
@@ -506,8 +595,30 @@ export const adminComplianceService = {
       const res = await api.get(`/admin/compliance/projects/${projectId}/general-chat`);
       return res.data.data;
     },
+    // Files the client themselves sent in the project's chat (subset of
+    // chat() above, filtered server-side to guest_sender_name + an
+    // attachment).
+    clientAttachments: async (projectId: number): Promise<ComplianceChatMessage[]> => {
+      const res = await api.get(`/admin/compliance/projects/${projectId}/client-attachments`);
+      return res.data.data;
+    },
+    clientAttachmentDownload: async (messageId: number, fileName: string): Promise<void> => {
+      const res = await api.get(`/admin/compliance/client-attachments/${messageId}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
     attachments: async (projectId: number): Promise<ComplianceProjectAttachment[]> => {
       const res = await api.get(`/admin/compliance/projects/${projectId}/attachments`);
+      return res.data.data;
+    },
+    taskAttachments: async (projectId: number): Promise<ComplianceProjectTaskAttachment[]> => {
+      const res = await api.get(`/admin/compliance/projects/${projectId}/task-attachments`);
       return res.data.data;
     },
     attachmentDownload: async (attachmentId: number, fileName: string): Promise<void> => {
@@ -525,9 +636,20 @@ export const adminComplianceService = {
       const res = await api.get(`/admin/compliance/projects/${projectId}/tasks`);
       return res.data.data;
     },
-    taskDetail: async (taskId: number): Promise<{ comments: ComplianceTaskComment[]; activities: ComplianceTaskActivityItem[] }> => {
+    taskDetail: async (taskId: number): Promise<{ comments: ComplianceTaskComment[]; activities: ComplianceTaskActivityItem[]; attachments: ComplianceTaskAttachment[] }> => {
       const res = await api.get(`/admin/compliance/tasks/${taskId}/detail`);
       return res.data.data;
+    },
+    taskAttachmentDownload: async (attachmentId: number, fileName: string): Promise<void> => {
+      const res = await api.get(`/admin/compliance/task-attachments/${attachmentId}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     },
     deliverables: async (projectId: number): Promise<{ deliverables: ComplianceDeliverable[]; delivery_history: ComplianceDeliverySubmission[] }> => {
       const res = await api.get(`/admin/compliance/projects/${projectId}/deliverables`);
@@ -547,6 +669,17 @@ export const adminComplianceService = {
     billing: async (projectId: number): Promise<ComplianceInvoice[]> => {
       const res = await api.get(`/admin/compliance/projects/${projectId}/billing`);
       return res.data.data;
+    },
+    invoiceDownload: async (invoiceId: number, fileName: string): Promise<void> => {
+      const res = await api.get(`/admin/compliance/invoices/${invoiceId}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     },
     team: async (projectId: number): Promise<ComplianceTeamMember[]> => {
       const res = await api.get(`/admin/compliance/projects/${projectId}/team`);

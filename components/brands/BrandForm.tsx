@@ -250,14 +250,18 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
                 <img src={shownLogo} alt="" style={{ width: 60, height: 60, borderRadius: 10, objectFit: 'cover', border: '1px solid #f1f5f9', background: '#fff' }} />
               )}
               <div>
+                {/* Same set the company logo accepts (Settings > Company).
+                    SVG is deliberately not among them: Laravel's `image` rule
+                    refuses it by default because an SVG can carry script, and
+                    these files are served inline from /api/files. */}
                 <input
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  accept="image/png,image/jpeg,image/webp"
                   onChange={e => setLogo(e.target.files?.[0] ?? null)}
                   style={{ fontSize: 12.5, color: '#64748b' }}
                 />
                 <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 5 }}>
-                  PNG, JPG, WEBP or SVG, up to 2 MB.{editing ? ' Leave empty to keep the current logo.' : ''}
+                  PNG, JPG or WEBP, up to 2 MB.{editing ? ' Leave empty to keep the current logo.' : ''}
                 </div>
               </div>
             </div>

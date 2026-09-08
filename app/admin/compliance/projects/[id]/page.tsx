@@ -9,16 +9,16 @@ import {
   ComplianceActivityItem, ComplianceCaseStatus,
   ComplianceChatMessage, ComplianceProjectAttachment,
   ComplianceProjectTask, ComplianceDeliverable, ComplianceDeliverySubmission,
-  ComplianceTaskComment, ComplianceTaskActivityItem, ComplianceInvoice,
+  ComplianceTaskComment, ComplianceTaskActivityItem, ComplianceTaskAttachment, ComplianceInvoice,
   ComplianceTeamMember, ComplianceProjectComment, ComplianceLead, ComplianceTimesheet, ComplianceHistoryEvent,
   ComplianceGeneralChatThread, ComplianceDocument, ComplianceChecklistItem, ComplianceComment,
 } from '@/lib/services/adminComplianceService';
 import { adminProjectService, ProjectUserOption } from '@/lib/services/adminProjectService';
 import SubmitButton from '@/components/ui/SubmitButton';
 import {
-  card, lbl, inp, Badge, CASE_STATUS_SC,
+  card, lbl, inp, Badge, StatCard, CASE_STATUS_SC, PRIORITY_SC,
   TASK_SC, DELIVERABLE_SC, INVOICE_SC, LEAD_SC, FOLLOWUP_SC, TIMESHEET_SC,
-  DOCUMENT_STATUS_SC, REQUIREMENT_STATUS_SC, fmtDate, fmtFileSize, errorMessage,
+  DOCUMENT_STATUS_SC, REQUIREMENT_STATUS_SC, fmtDate, fmtFileSize, errorMessage, blobErrorMessage,
   paymentMethodText,
 } from '@/components/admin/compliance/shared';
 import { handleNotFound } from '@/lib/notFound';
@@ -58,6 +58,12 @@ export default function ProjectComplianceDetailPage() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [docActionBusy, setDocActionBusy] = useState<number | null>(null);
 
+  // Documents summary card at the top of the page (always visible, read-only
+  // — separate from the fuller upload/review workflow gated behind
+  // SHOW_CASE_WORKFLOW_SECTIONS below).
+  const [zipBusy, setZipBusy] = useState(false);
+  const [docDownloadBusy, setDocDownloadBusy] = useState<number | null>(null);
+
   // Compliance Checklist
   const [checklist, setChecklist] = useState<ComplianceChecklistItem[]>([]);
   const [checklistLoading, setChecklistLoading] = useState(true);
@@ -75,6 +81,8 @@ export default function ProjectComplianceDetailPage() {
 
   // Read-only project context (Chat/Attachments/Tasks/Deliverables)
   const [chatMessages, setChatMessages] = useState<ComplianceChatMessage[]>([]);
+  const [chatStartDate, setChatStartDate] = useState('');
+  const [chatEndDate, setChatEndDate] = useState('');
   const [chatLoading, setChatLoading] = useState(true);
   const [generalChatThreads, setGeneralChatThreads] = useState<ComplianceGeneralChatThread[]>([]);
   const [generalChatLoading, setGeneralChatLoading] = useState(true);
@@ -84,7 +92,7 @@ export default function ProjectComplianceDetailPage() {
   const [tasksLoading, setTasksLoading] = useState(true);
   const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState<number | null>(null);
-  const [taskDetailCache, setTaskDetailCache] = useState<Record<number, { comments: ComplianceTaskComment[]; activities: ComplianceTaskActivityItem[] }>>({});
+  const [taskDetailCache, setTaskDetailCache] = useState<Record<number, { comments: ComplianceTaskComment[]; activities: ComplianceTaskActivityItem[]; attachments: ComplianceTaskAttachment[] }>>({});
   const [deliverables, setDeliverables] = useState<ComplianceDeliverable[]>([]);
   const [deliveryHistory, setDeliveryHistory] = useState<ComplianceDeliverySubmission[]>([]);
   const [deliverablesLoading, setDeliverablesLoading] = useState(true);
@@ -224,6 +232,11 @@ export default function ProjectComplianceDetailPage() {
     catch { toast.error('Download failed'); }
   };
 
+  const downloadTaskAttachment = async (a: ComplianceTaskAttachment) => {
+    try { await adminComplianceService.project.taskAttachmentDownload(a.id, a.original_name); }
+    catch { toast.error('Download failed'); }
+  };
+
   const exportChat = async () => {
     try { await adminComplianceService.project.chatExport(projectId); }
     catch { toast.error('Export failed'); }
@@ -314,6 +327,28 @@ export default function ProjectComplianceDetailPage() {
       toast.error(errorMessage(err, 'Failed to update status'));
     } finally {
       setStatusBusy(null);
+    }
+  };
+
+  const downloadProjectZip = async () => {
+    setZipBusy(true);
+    try {
+      await adminComplianceService.cases.downloadProjectZip(caseData.project.id, `${caseData.project.name}-compliance-documents.zip`);
+    } catch (err) {
+      toast.error(await blobErrorMessage(err, 'Failed to download documents'));
+    } finally {
+      setZipBusy(false);
+    }
+  };
+
+  const downloadDocument = async (doc: ComplianceDocument) => {
+    setDocDownloadBusy(doc.id);
+    try {
+      await adminComplianceService.documents.download(doc.id, doc.original_name ?? 'document');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to download document'));
+    } finally {
+      setDocDownloadBusy(null);
     }
   };
 
@@ -453,6 +488,20 @@ export default function ProjectComplianceDetailPage() {
     return `${actor} ${item.description}`;
   };
 
+  const documents = caseData.documents ?? [];
+  const filteredChatMessages = chatMessages.filter(m => {
+    const sentAt = new Date(m.sent_at);
+    if (chatStartDate && sentAt < new Date(`${chatStartDate}T00:00:00`)) return false;
+    if (chatEndDate && sentAt > new Date(`${chatEndDate}T23:59:59`)) return false;
+    return true;
+  });
+  const reqStats = {
+    total: caseData.requirements.length,
+    pending: caseData.requirements.filter(r => r.status === 'pending').length,
+    approved: caseData.requirements.filter(r => r.status === 'approved').length,
+    rejected: caseData.requirements.filter(r => r.status === 'rejected').length,
+    expired: caseData.requirements.filter(r => r.status === 'expired').length,
+  };
 
   return (
     <DashboardLayout title="Project Compliance">
@@ -465,11 +514,67 @@ export default function ProjectComplianceDetailPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1e293b', margin: 0 }}>{caseData.project.name}</h2>
             <Badge label={caseData.status} sc={CASE_STATUS_SC[caseData.status]} />
+            {caseData.project.priority && <Badge label={caseData.project.priority} sc={PRIORITY_SC[caseData.project.priority]} />}
           </div>
           <p style={{ fontSize: 13, color: '#64748b', margin: '2px 0 0' }}>
             {caseData.project.reference ?? `Project #${caseData.project.id}`} · {caseData.client?.name ?? 'No client linked'}
           </p>
         </div>
+      </div>
+
+      {/* Compliance summary — stat cards + a read-only documents table with
+          per-project ZIP download, shown regardless of
+          SHOW_CASE_WORKFLOW_SECTIONS (that flag only hides the fuller
+          upload/review workflow further down). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14, marginBottom: 20 }}>
+        <StatCard label="Total Requirements" value={String(reqStats.total)} color="#0f172a" />
+        <StatCard label="Pending" value={String(reqStats.pending)} color={REQUIREMENT_STATUS_SC.pending.color} />
+        <StatCard label="Approved" value={String(reqStats.approved)} color={REQUIREMENT_STATUS_SC.approved.color} />
+        <StatCard label="Rejected" value={String(reqStats.rejected)} color={REQUIREMENT_STATUS_SC.rejected.color} />
+        <StatCard label="Expired" value={String(reqStats.expired)} color={REQUIREMENT_STATUS_SC.expired.color} />
+      </div>
+
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0 }}>Compliance Documents</h3>
+          {documents.length > 0 && (
+            <SubmitButton loading={zipBusy} loadingText="Preparing ZIP…" onClick={downloadProjectZip} style={{
+              padding: '7px 14px', background: '#eef2ff', color: '#4f46e5', border: '1.5px solid #e0e7ff', borderRadius: 8, fontSize: 12.5, fontWeight: 600,
+            }}>⬇ Download ZIP</SubmitButton>
+          )}
+        </div>
+        {documents.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>No documents uploaded yet.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc' }}>
+                  {['#', 'Document', 'Status', 'Expiry', 'Size', 'Download'].map(h => (
+                    <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {documents.map((doc, i) => (
+                  <tr key={doc.id} style={{ borderBottom: i < documents.length - 1 ? '1px solid #f8fafc' : 'none' }}>
+                    <td style={{ padding: '11px 12px', color: '#94a3b8', fontSize: 12 }}>{i + 1}</td>
+                    <td style={{ padding: '11px 12px', fontWeight: 600, color: '#1e293b', fontSize: 13 }}>{doc.original_name}</td>
+                    <td style={{ padding: '11px 12px' }}><Badge label={doc.status} sc={DOCUMENT_STATUS_SC[doc.status]} /></td>
+                    <td style={{ padding: '11px 12px', color: '#64748b', fontSize: 12 }}>{fmtDate(doc.expires_at)}</td>
+                    <td style={{ padding: '11px 12px', color: '#64748b', fontSize: 12 }}>{fmtFileSize(doc.file_size)}</td>
+                    <td style={{ padding: '11px 12px' }}>
+                      <button onClick={() => downloadDocument(doc)} disabled={docDownloadBusy === doc.id} style={{
+                        padding: '5px 10px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: '#f8fafc',
+                        color: '#475569', fontSize: 12, fontWeight: 500, cursor: docDownloadBusy === doc.id ? 'default' : 'pointer',
+                      }}>{docDownloadBusy === doc.id ? '…' : '⬇'}</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Officer + case actions */}
@@ -795,22 +900,36 @@ export default function ProjectComplianceDetailPage() {
 
       {/* Seller-Client Chat History (read-only) */}
       <div style={card}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0 }}>Project Chat History</h3>
-          {chatMessages.length > 0 && (
-            <button onClick={exportChat} style={{
-              padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
-              background: '#fff', color: '#2563eb', border: '1px solid #bfdbfe', flexShrink: 0,
-            }}>Export</button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: 11.5, color: '#64748b' }}>From</label>
+            <input type="date" value={chatStartDate} onChange={e => setChatStartDate(e.target.value)} style={{ ...inp, width: 140, padding: '5px 8px' }} />
+            <label style={{ fontSize: 11.5, color: '#64748b' }}>To</label>
+            <input type="date" value={chatEndDate} onChange={e => setChatEndDate(e.target.value)} style={{ ...inp, width: 140, padding: '5px 8px' }} />
+            {(chatStartDate || chatEndDate) && (
+              <button onClick={() => { setChatStartDate(''); setChatEndDate(''); }} style={{
+                padding: '4px 10px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                background: '#fff', color: '#64748b', border: '1px solid #e2e8f0', flexShrink: 0,
+              }}>Clear</button>
+            )}
+            {chatMessages.length > 0 && (
+              <button onClick={exportChat} style={{
+                padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                background: '#fff', color: '#2563eb', border: '1px solid #bfdbfe', flexShrink: 0,
+              }}>Export</button>
+            )}
+          </div>
         </div>
         {chatLoading ? (
           <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading…</div>
         ) : chatMessages.length === 0 ? (
           <div style={{ fontSize: 13, color: '#94a3b8' }}>No chat started yet.</div>
+        ) : filteredChatMessages.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#94a3b8' }}>No messages in the selected date range.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 360, overflowY: 'auto' }}>
-            {chatMessages.map(m => (
+            {filteredChatMessages.map(m => (
               <div key={m.id} style={{ padding: '8px 0', borderBottom: '1px solid #f8fafc' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>{m.sender?.name ?? m.sender_admin?.name ?? m.guest_sender_name ?? 'Unknown'}</span>
@@ -929,12 +1048,31 @@ export default function ProjectComplianceDetailPage() {
                         )}
                         <div style={{ fontSize: 11.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>History</div>
                         {(taskDetailCache[t.id]?.activities.length ?? 0) === 0 ? (
-                          <div style={{ fontSize: 12, color: '#94a3b8' }}>No activity yet.</div>
+                          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 10 }}>No activity yet.</div>
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
                             {taskDetailCache[t.id]?.activities.map(a => (
                               <div key={a.id} style={{ fontSize: 11.5, color: '#64748b' }}>
                                 {a.description} <span style={{ color: '#94a3b8', fontSize: 10.5 }}>· {fmtDate(a.created_at)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#334155', marginBottom: 6 }}>Attachments</div>
+                        {(taskDetailCache[t.id]?.attachments.length ?? 0) === 0 ? (
+                          <div style={{ fontSize: 12, color: '#94a3b8' }}>No attachments uploaded.</div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {taskDetailCache[t.id]?.attachments.map(a => (
+                              <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 11.5 }}>
+                                <div>
+                                  <span style={{ fontWeight: 600, color: '#1e293b' }}>{a.original_name}</span>
+                                  <span style={{ color: '#94a3b8', fontSize: 10.5 }}> · {fmtFileSize(a.file_size)} · {a.uploaded_by_admin?.name ?? a.uploaded_by_user?.name ?? 'Unknown'} · {fmtDate(a.created_at)}</span>
+                                </div>
+                                <button onClick={() => downloadTaskAttachment(a)} style={{
+                                  padding: '3px 10px', fontSize: 10.5, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                                  background: '#2563eb', color: '#fff', border: 'none', flexShrink: 0,
+                                }}>Download</button>
                               </div>
                             ))}
                           </div>

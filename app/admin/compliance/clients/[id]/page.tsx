@@ -5,7 +5,8 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import toast from 'react-hot-toast';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
 import { adminComplianceService, ComplianceClientDetail } from '@/lib/services/adminComplianceService';
-import { card, lbl, Badge, CASE_STATUS_SC, fmtDate } from '@/components/admin/compliance/shared';
+import { card, lbl } from '@/components/admin/compliance/shared';
+import ProjectsListing from '@/components/admin/compliance/ProjectsListing';
 import { handleNotFound } from '@/lib/notFound';
 
 export default function ComplianceClientDetailPage() {
@@ -67,46 +68,13 @@ export default function ComplianceClientDetailPage() {
         </div>
       </div>
 
-      <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
-        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', margin: 0, padding: '14px 20px', borderBottom: '1px solid #f1f5f9' }}>Projects</h3>
-        {projects.length === 0 ? (
-          <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No projects found for this client.</div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#f8fafc' }}>
-                {['Name', 'Reference', 'Status', 'PM', 'Seller', 'Compliance Status', 'Officer', 'Requirements', 'Deadline'].map(h => (
-                  <th key={h} style={{
-                    padding: '10px 16px', textAlign: 'left', fontSize: 11,
-                    fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap',
-                  }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {projects.map(p => (
-                <tr
-                  key={p.id}
-                  onClick={() => router.push(`/admin/compliance/projects/${p.id}`)}
-                  style={{ borderBottom: '1px solid #f8fafc', cursor: 'pointer' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{p.name}</td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{p.reference ?? '—'}</td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b', textTransform: 'capitalize' }}>{p.status.replace(/_/g, ' ')}</td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{p.project_manager?.name ?? '—'}</td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{p.seller?.name ?? '—'}</td>
-                  <td style={{ padding: '12px 16px' }}><Badge label={p.compliance_status} sc={CASE_STATUS_SC[p.compliance_status]} /></td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{p.compliance_officer?.name ?? '—'}</td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#1e293b' }}>{p.requirements_approved}/{p.requirements_total} approved</td>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{fmtDate(p.deadline)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <ProjectsListing
+        clientId={Number(id)}
+        title="Compliance Projects"
+        subtitle={`Projects for ${client.name}.`}
+        showClientLink={false}
+        zipFileNamePrefix={client.name}
+      />
     </DashboardLayout>
   );
 }

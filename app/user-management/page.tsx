@@ -150,7 +150,7 @@ export default function UserManagementPage() {
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 4px' }}>Users</h1>
             <div style={{ fontSize: 13, color: '#94a3b8' }}>
-              Users you added to {companies.length === 1 ? companies[0]?.name ?? 'your company' : 'the companies you belong to'} · {seatText}
+              Staff of {companies.find(c => c.id === companyId)?.name ?? 'your company'} · {seatText}
             </div>
           </div>
           {/* The Company Admin's own Add User wizard — same three steps, same
@@ -180,7 +180,7 @@ export default function UserManagementPage() {
               ))}
             </div>
             <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 8 }}>
-              Only the companies you are assigned to, and only the users you added yourself.
+              Switching company reloads the list — you only ever see the companies you are assigned to.
             </div>
           </div>
         )}
@@ -191,8 +191,8 @@ export default function UserManagementPage() {
           ) : users.length === 0 ? (
             <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>
               <div style={{ fontSize: 40, marginBottom: 10 }}>👥</div>
-              <div style={{ fontWeight: 600, color: '#64748b', marginBottom: 4 }}>You haven&apos;t added any users yet</div>
-              <div style={{ fontSize: 13 }}>This list shows the accounts you create — not the whole company roster.</div>
+              <div style={{ fontWeight: 600, color: '#64748b', marginBottom: 4 }}>No users in this company yet</div>
+              <div style={{ fontSize: 13 }}>Add one to get started.</div>
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>

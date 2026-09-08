@@ -9,7 +9,8 @@ import {
     ComplianceClientDetail,
 } from "@/lib/services/userComplianceService";
 import { can } from "@/lib/auth";
-import { Badge, CASE_STATUS_SC, card, fmtDate } from "@/components/compliance/shared";
+import { card } from "@/components/compliance/shared";
+import ProjectsListing from "@/components/compliance/ProjectsListing";
 import { handleNotFound } from "@/lib/notFound";
 import toast from "react-hot-toast";
 
@@ -147,165 +148,13 @@ export default function ComplianceClientDetailPage() {
                             </div>
                         </div>
 
-                        <div
-                            style={{
-                                background: "#fff",
-                                borderRadius: 14,
-                                border: "1px solid #f1f5f9",
-                                overflow: "hidden",
-                            }}
-                        >
-                            {detail.projects.length === 0 ? (
-                                <div
-                                    style={{
-                                        padding: 48,
-                                        textAlign: "center",
-                                        color: "#94a3b8",
-                                    }}
-                                >
-                                    No projects for this client yet.
-                                </div>
-                            ) : (
-                                <div style={{ overflowX: "auto" }}>
-                                    <table
-                                        style={{ width: "100%", borderCollapse: "collapse" }}
-                                    >
-                                        <thead>
-                                            <tr style={{ background: "#f8fafc" }}>
-                                                {[
-                                                    "Name",
-                                                    "Reference",
-                                                    "Status",
-                                                    "PM",
-                                                    "Seller",
-                                                    "Compliance Status",
-                                                    "Officer",
-                                                    "Requirements",
-                                                    "Deadline",
-                                                ].map((h) => (
-                                                    <th
-                                                        key={h}
-                                                        style={{
-                                                            padding: "12px 16px",
-                                                            textAlign: "left",
-                                                            fontSize: 11,
-                                                            fontWeight: 700,
-                                                            color: "#94a3b8",
-                                                            textTransform: "uppercase",
-                                                            letterSpacing: "0.05em",
-                                                            whiteSpace: "nowrap",
-                                                        }}
-                                                    >
-                                                        {h}
-                                                    </th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {detail.projects.map((p, i) => (
-                                                <tr
-                                                    key={p.id}
-                                                    onClick={() =>
-                                                        router.push(`/compliance/projects/${p.id}`)
-                                                    }
-                                                    style={{
-                                                        borderBottom:
-                                                            i < detail.projects.length - 1
-                                                                ? "1px solid #f8fafc"
-                                                                : "none",
-                                                        cursor: "pointer",
-                                                    }}
-                                                >
-                                                    <td
-                                                        style={{
-                                                            padding: "14px 16px",
-                                                            fontWeight: 600,
-                                                            color: "#0f172a",
-                                                            fontSize: 14,
-                                                        }}
-                                                    >
-                                                        {p.name}
-                                                    </td>
-                                                    <td
-                                                        style={{
-                                                            padding: "14px 16px",
-                                                            fontSize: 13,
-                                                            color: "#475569",
-                                                        }}
-                                                    >
-                                                        {p.reference ?? "—"}
-                                                    </td>
-                                                    <td
-                                                        style={{
-                                                            padding: "14px 16px",
-                                                            fontSize: 13,
-                                                            color: "#475569",
-                                                            textTransform: "capitalize",
-                                                        }}
-                                                    >
-                                                        {p.status.replace(/_/g, " ")}
-                                                    </td>
-                                                    <td
-                                                        style={{
-                                                            padding: "14px 16px",
-                                                            fontSize: 13,
-                                                            color: "#475569",
-                                                        }}
-                                                    >
-                                                        {p.project_manager?.name ?? "—"}
-                                                    </td>
-                                                    <td
-                                                        style={{
-                                                            padding: "14px 16px",
-                                                            fontSize: 13,
-                                                            color: "#475569",
-                                                        }}
-                                                    >
-                                                        {p.seller?.name ?? "—"}
-                                                    </td>
-                                                    <td style={{ padding: "14px 16px" }}>
-                                                        <Badge
-                                                            label={p.compliance_status}
-                                                            sc={CASE_STATUS_SC[p.compliance_status]}
-                                                        />
-                                                    </td>
-                                                    <td
-                                                        style={{
-                                                            padding: "14px 16px",
-                                                            fontSize: 13,
-                                                            color: "#475569",
-                                                        }}
-                                                    >
-                                                        {p.compliance_officer?.name ?? "Unassigned"}
-                                                    </td>
-                                                    <td
-                                                        style={{
-                                                            padding: "14px 16px",
-                                                            fontSize: 13,
-                                                            color: "#0f172a",
-                                                            whiteSpace: "nowrap",
-                                                        }}
-                                                    >
-                                                        {p.requirements_approved}/{p.requirements_total}{" "}
-                                                        approved
-                                                    </td>
-                                                    <td
-                                                        style={{
-                                                            padding: "14px 16px",
-                                                            fontSize: 13,
-                                                            color: "#475569",
-                                                            whiteSpace: "nowrap",
-                                                        }}
-                                                    >
-                                                        {fmtDate(p.deadline)}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
+                        <ProjectsListing
+                            clientId={id}
+                            title="Compliance Projects"
+                            subtitle={`Projects for ${detail.client.name}.`}
+                            showClientLink={false}
+                            zipFileNamePrefix={detail.client.name}
+                        />
                     </>
                 )}
             </div>

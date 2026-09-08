@@ -189,12 +189,9 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
   // collapseProjectPermissions() shows the right simple checkboxes checked
   // out of the box. Keep any change here mirrored in
   // App\Services\RoleDefaultPermissions::MAP on the backend.
-  // Brand keeper — the trading names the company bills under. Deliberately
-  // nothing else: an Admin maintains the brand list, they are not a second
-  // Company Admin. Mirrors RoleDefaultPermissions::MAP['admin'].
-  admin: {
-    invoice: ['canViewBrands', 'canCreateBrands', 'canEditBrands', 'canDeleteBrands'],
-  },
+  // 'admin' is absent here on purpose — like company_admin and viewer it is
+  // computed in getRoleDefaultPermissions() (everything the company has),
+  // not listed as a fixed set.
   project_manager: {
     // pm_view + pm_manage_projects + pm_view_tasks + pm_manage_tasks + pm_edit_tasks + pm_manage_team +
     // pm_manage_production + pm_manage_deliverables + pm_manage_timesheets +
@@ -475,11 +472,14 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
   compliance: {
     // Simplified 5-key model (2026-09-03) — see moduleCatalog.ts's
     // compliance entry for what each key does. Default grant is view + do-
-    // the-work + download, restricted to cases the user is tied to;
-    // canViewAllCompanyCompliance and canAssignComplianceUser are explicit
-    // Company Admin grants, not defaults.
+    // the-work + download + full visibility of their OWN company's
+    // compliance cases (2026-09-08 — canViewAllCompanyCompliance only
+    // bypasses the tied-to-case restriction within the active company; it
+    // does not span other companies, so it belongs in the default set).
+    // canAssignComplianceUser stays an explicit Company Admin grant.
     compliance: [
       'canViewCompliance', 'canChangeComplianceStatus', 'canDownloadComplianceData',
+      'canViewAllCompanyCompliance',
     ],
     account: ['canUseGeneralChat'],
   },
@@ -496,11 +496,21 @@ export function getRoleDefaultPermissions(
   catalogModules: string[],
   allModulePermissions: Record<string, string[]>, // moduleKey -> every permission key in that catalog module (for company_admin/viewer)
 ): Record<string, string[]> {
-  if (role === 'company_admin') {
+  // 'admin' is provisioned exactly like company_admin: everything the company
+  // has, so a new Admin user starts fully enabled and the Company Admin takes
+  // away what that person shouldn't have. Mirrors
+  // RoleDefaultPermissions::forRole() on the backend.
+  if (role === 'company_admin' || role === 'admin') {
     const out: Record<string, string[]> = {};
     for (const key of [...catalogModules, 'account']) {
       if (allModulePermissions[key]) out[key] = [...allModulePermissions[key]];
     }
+    // 'account' is never a purchased module and has no MODULE_CATALOG card,
+    // so allModulePermissions never carries it — its two real toggles are
+    // added by hand here. Without this the boxes render unticked while the
+    // backend's own role defaults grant them anyway on save, i.e. the form
+    // would be lying about what it is about to store.
+    out.account = [...new Set([...(out.account ?? []), 'canAddUsers', 'canUseGeneralChat'])];
     return out;
   }
 

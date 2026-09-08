@@ -74,7 +74,10 @@ function NewInvoiceForm() {
   // (detail, PDF, email, share link, payment page, client portal). The brand
   // list is server-filtered: a Company Admin gets every active brand of the
   // company, a staff member only the brands assigned to them.
-  const [invoiceType, setInvoiceType] = useState<'company' | 'brand'>('company');
+  //
+  // Starts as '' — NEITHER option pre-selected, so the choice is always a
+  // deliberate one rather than whatever the form happened to default to.
+  const [invoiceType, setInvoiceType] = useState<'' | 'company' | 'brand'>('');
   const [brandId, setBrandId]         = useState(0);
   const [brands, setBrands]           = useState<{ id: number; name: string }[]>([]);
   // The selected company's OWN currency — never a shared/admin-wide value,
@@ -211,12 +214,20 @@ function NewInvoiceForm() {
       .catch(() => setBrands([]));
   }, [companyId, isAdmin]);
 
-  // A brand that is no longer offered (company switched, or it was
-  // reassigned) must not stay silently selected on the form.
+  // One brand assigned → nothing to choose, so it's filled in and locked.
+  // Several → the dropdown stays open for a real choice. And a brand that is
+  // no longer offered (company switched, or it was reassigned) must not stay
+  // silently selected.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (brands.length === 1) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBrandId(brands[0].id);
+      return;
+    }
     if (brandId && !brands.some(b => b.id === brandId)) setBrandId(0);
   }, [brands, brandId]);
+
+  const onlyOneBrand = brands.length === 1;
 
   // Load this company's projects for the "Existing Project" picker — the
   // same visibility rule the Projects module already applies (created by
@@ -405,7 +416,8 @@ function NewInvoiceForm() {
   // Send, and Create Invoice (link-only). Returns null (having already set
   // the error state) if the form isn't ready to submit.
   const buildPayload = (): InvoicePayload | null => {
-    if (!companyId) { setError('Select a company'); return null; }
+    if (!invoiceType) { setError('Choose an invoice type — Company Invoice or Brand Invoice'); return null; }
+    if (!companyId) { setError('No company is selected. Pick one from the top bar and try again.'); return null; }
     if (invoiceType === 'brand' && !brandId) { setError('Select a brand for this Brand Invoice'); return null; }
     if (noGatewayConfigured) { setError('Please activate a payment gateway before creating an invoice.'); return null; }
     if (customerType === 'client' && !clientId) { setError('Select a client, or switch to Guest for an external customer'); return null; }
@@ -671,19 +683,44 @@ function NewInvoiceForm() {
                       invoice either way (currency, numbering and the bank
                       details stay the company's); a Brand Invoice only changes
                       the identity it is presented under. */}
-                  {invoiceType === 'company' ? (
+                  {invoiceType === 'company' && (
                     <div style={{ marginBottom: 16 }}>
-                      <label style={lbl}>Company *</label>
-                      <select style={inp} value={companyId} onChange={e => setCompanyId(Number(e.target.value))}>
-                        <option value={0}>Select company…</option>
+                      <label style={lbl}>Company</label>
+                      {/* Read-only: the invoice is raised for whichever company
+                          the dashboard's company switcher is currently on (or
+                          the ?company_id= it was opened with). Picking a
+                          different one here would silently invoice a company
+                          the rest of the screen isn't scoped to. */}
+                      <select
+                        style={{ ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }}
+                        value={companyId}
+                        disabled
+                      >
+                        <option value={0}>—</option>
                         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
+                      <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>
+                        {isAdmin
+                          ? 'Taken from the company you have selected. Switch companies from the top bar to invoice a different one.'
+                          : 'Your company.'}
+                      </div>
                     </div>
-                  ) : (
+                  )}
+
+                  {invoiceType === 'brand' && (
                     <div style={{ marginBottom: 16 }}>
                       <label style={lbl}>Brand *</label>
-                      <select style={inp} value={brandId} onChange={e => setBrandId(Number(e.target.value))}>
-                        <option value={0}>Select brand…</option>
+                      {/* One brand assigned → filled in and locked, there is
+                          nothing to choose. Several → a real dropdown. Either
+                          way the list only ever holds brands assigned to this
+                          user (the server decides that). */}
+                      <select
+                        style={onlyOneBrand ? { ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' } : inp}
+                        value={brandId}
+                        disabled={onlyOneBrand}
+                        onChange={e => setBrandId(Number(e.target.value))}
+                      >
+                        {!onlyOneBrand && <option value={0}>Select brand…</option>}
                         {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                       {brands.length === 0 && (
@@ -693,7 +730,12 @@ function NewInvoiceForm() {
                             : 'No brands are assigned to you. Ask your Company Admin to assign one.'}
                         </div>
                       )}
-                      {companies.length > 1 && isAdmin && (
+                      {onlyOneBrand && (
+                        <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>
+                          The only brand assigned to you.
+                        </div>
+                      )}
+                      {companies.length > 1 && isAdmin && brands.length > 0 && (
                         <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>
                           Brands of {companies.find(c => c.id === companyId)?.name ?? 'the selected company'}.
                         </div>

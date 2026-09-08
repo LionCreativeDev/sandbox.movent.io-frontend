@@ -55,9 +55,13 @@ export default function EditInvoicePage() {
   // brands. Same rule as creating: the list comes from the server, so a
   // staff member only ever sees brands assigned to them and the save is
   // re-checked against that.
-  const [invoiceType, setInvoiceType] = useState<'company' | 'brand'>('company');
+  // Starts unselected; the invoice's own saved type is loaded in below, so
+  // what shows here is the value on record rather than a form default.
+  const [invoiceType, setInvoiceType] = useState<'' | 'company' | 'brand'>('');
   const [brandId, setBrandId]         = useState(0);
   const [brands, setBrands]           = useState<{ id: number; name: string }[]>([]);
+  // One brand available → filled in and locked, same as the Create form.
+  const onlyOneBrand = brands.length === 1;
 
   useEffect(() => {
     adminInvoiceService.getOne(invoiceId).then(inv => {
@@ -80,7 +84,14 @@ export default function EditInvoicePage() {
       setInvoiceType(inv.invoice_type === 'brand' ? 'brand' : 'company');
       setBrandId(inv.brand_id ?? 0);
       api.get(`/admin/invoices/brands?company_id=${inv.company_id}`)
-        .then(r => setBrands(r.data.data ?? []))
+        .then(r => {
+          const list = r.data.data ?? [];
+          setBrands(list);
+          // Nothing to choose when there's a single brand — fill it in so the
+          // locked field isn't empty. An invoice already on a brand keeps its
+          // own, whatever the list holds.
+          if (!inv.brand_id && list.length === 1) setBrandId(list[0].id);
+        })
         .catch(() => setBrands([]));
 
       api.get('/admin/settings').then(r => {
@@ -122,6 +133,7 @@ export default function EditInvoicePage() {
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (items.some(r => !r.description.trim())) { setError('All items need a description'); return; }
+    if (!invoiceType) { setError('Choose an invoice type — Company Invoice or Brand Invoice'); return; }
     if (invoiceType === 'brand' && !brandId) { setError('Select a brand for this Brand Invoice'); return; }
     setSaving(true); setError('');
     try {
@@ -196,13 +208,23 @@ export default function EditInvoicePage() {
                     {invoiceType === 'brand' && (
                       <div style={{ marginTop: 12 }}>
                         <label style={lbl}>Brand *</label>
-                        <select style={inp} value={brandId} onChange={e => setBrandId(Number(e.target.value))}>
-                          <option value={0}>Select brand…</option>
+                        <select
+                          style={onlyOneBrand ? { ...inp, background: '#f1f5f9', color: '#94a3b8', cursor: 'not-allowed' } : inp}
+                          value={brandId}
+                          disabled={onlyOneBrand}
+                          onChange={e => setBrandId(Number(e.target.value))}
+                        >
+                          {!onlyOneBrand && <option value={0}>Select brand…</option>}
                           {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                         </select>
                         {brands.length === 0 && (
                           <div style={{ fontSize: 11.5, color: '#b45309', marginTop: 6 }}>
                             No brands available for this company.
+                          </div>
+                        )}
+                        {onlyOneBrand && (
+                          <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>
+                            The only brand available to you.
                           </div>
                         )}
                       </div>
