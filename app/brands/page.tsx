@@ -162,7 +162,9 @@ export default function BrandsPage() {
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 4px' }}>Brands</h1>
             <div style={{ fontSize: 13, color: '#94a3b8' }}>
-              The trading names you bill under. Inactive brands stay on their old invoices but aren&apos;t offered on new ones.
+              {perms.view_only
+                ? 'The brands assigned to you. You can select these when creating an invoice — only your Company Admin or an Admin can change them.'
+                : 'The trading names you bill under. Inactive brands stay on their old invoices but aren’t offered on new ones.'}
             </div>
           </div>
           {perms.can_create && (
@@ -203,9 +205,15 @@ export default function BrandsPage() {
             <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>
               <div style={{ fontSize: 42, marginBottom: 10 }}>🏷️</div>
               <div style={{ fontWeight: 600, color: '#64748b', marginBottom: 4 }}>
-                {query ? 'No brand matches that search' : 'No brands yet'}
+                {query ? 'No brand matches that search' : perms.view_only ? 'No brands assigned to you' : 'No brands yet'}
               </div>
-              {!query && <div style={{ fontSize: 13 }}>Add the trading names you invoice under.</div>}
+              {!query && (
+                <div style={{ fontSize: 13 }}>
+                  {perms.view_only
+                    ? 'Ask your Company Admin to assign you a brand.'
+                    : 'Add the trading names you invoice under.'}
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>

@@ -6,6 +6,9 @@ import { brandService, Brand } from '@/lib/services/brandService';
 import { getAuthType } from '@/lib/auth';
 import { handleNotFound } from '@/lib/notFound';
 import { inp, lbl, card } from '@/components/admin/projects/shared';
+import PhoneInput, { isValidPhoneNumber } from '@/components/ui/PhoneInput';
+import { ALL_COUNTRIES } from '@/lib/countries';
+import type { Country } from 'react-phone-number-input';
 import { HiArrowLeft } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
 
@@ -43,7 +46,12 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [country, setCountry] = useState('');
+  // Country is picked from the shared list (ISO code), and the phone field is
+  // bound to it: choosing a country switches the phone input to that
+  // country's format and length, and typing a number with a different dial
+  // code moves the dropdown to match. Same pairing the registration and Add
+  // Company forms already use.
+  const [countryCode, setCountryCode] = useState<Country>('US');
   const [address, setAddress] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [companyId, setCompanyId] = useState<number | undefined>(undefined);
@@ -75,7 +83,14 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
         setName(b.name);
         setEmail(b.email ?? '');
         setPhone(b.phone ?? '');
-        setCountry(b.country ?? '');
+        // Stored as the country NAME (that's what the column holds and what
+        // invoices display), so map it back to its ISO code for the picker.
+        // An older brand saved with free text that matches nothing keeps the
+        // default rather than blanking the field.
+        if (b.country) {
+          const match = ALL_COUNTRIES.find(c => c.name === b.country || c.code === b.country);
+          if (match) setCountryCode(match.code);
+        }
         setAddress(b.address ?? '');
         setIsActive(b.is_active);
         setCompanyId(b.company_id);
@@ -97,13 +112,25 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { toast.error('Brand name is required'); return; }
+    // Same check the backend's ValidPhoneNumber rule applies (both are
+    // libphonenumber) — caught here so the error lands before the save
+    // rather than as a 422 afterwards.
+    if (phone.trim() && !isValidPhoneNumber(phone.trim())) {
+      const label = ALL_COUNTRIES.find(c => c.code === countryCode)?.name ?? 'the selected country';
+      toast.error(`Enter a valid phone number for ${label}`);
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
         name: name.trim(),
         email: email.trim() || null,
+        // E.164 out of PhoneInput ("+923001234567"), which is exactly what
+        // the backend's ValidPhoneNumber rule expects.
         phone: phone.trim() || null,
-        country: country.trim() || null,
+        // The readable name, not the ISO code — this goes straight onto the
+        // invoice under the brand's address block.
+        country: ALL_COUNTRIES.find(c => c.code === countryCode)?.name ?? null,
         address: address.trim() || null,
         is_active: isActive,
         logo,
@@ -182,14 +209,31 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
             </div>
           </div>
 
+          {/* Country first, then Phone: picking a country re-formats the
+              phone field to that country's pattern and enforces its length,
+              so the number can only be entered in the right shape. Typing a
+              number that starts with another dial code moves this dropdown
+              instead — the two stay in step either way. */}
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
             <div style={{ flex: '1 1 220px' }}>
-              <label style={lbl}>Phone Number</label>
-              <input value={phone} onChange={e => setPhone(e.target.value)} style={inp} placeholder="+92 300 1234567" />
+              <label style={lbl}>Country</label>
+              <select value={countryCode} onChange={e => setCountryCode(e.target.value as Country)} style={inp}>
+                {ALL_COUNTRIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.name} (+{c.callingCode})</option>
+                ))}
+              </select>
             </div>
             <div style={{ flex: '1 1 220px' }}>
-              <label style={lbl}>Country</label>
-              <input value={country} onChange={e => setCountry(e.target.value)} style={inp} placeholder="Pakistan" />
+              <label style={lbl}>Phone Number</label>
+              {/* key={countryCode}: remounts so a country change re-applies
+                  the placeholder/format to an empty field too. */}
+              <PhoneInput
+                key={countryCode}
+                value={phone}
+                onChange={setPhone}
+                defaultCountry={countryCode}
+                onCountryChange={c => c && setCountryCode(c)}
+              />
             </div>
           </div>
 

@@ -41,8 +41,20 @@ interface BankDetails {
 
 interface PublicInvoice {
   invoice_number: string;
+  // For a Brand Invoice these carry the BRAND's name and logo — the backend
+  // resolves the issuer once (Invoice::brandingProfile()) so this page, the
+  // email and the client portal can never disagree about who is billing.
   company_name: string;
   company_logo?: string;
+  invoice_type?: "company" | "brand";
+  brand?: {
+    id: number;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    country: string | null;
+    address: string | null;
+  } | null;
   customer_name: string;
   customer_email: string;
   customer_phone?: string;
@@ -1363,6 +1375,19 @@ function PublicInvoicePayContent() {
           >
             {invoice.company_name}
           </div>
+          {/* company_name/company_logo above already carry the BRAND's
+              identity when this is a Brand Invoice (the backend resolves it
+              in Invoice::brandingProfile()). This adds the brand's own
+              contact details underneath, which the company's letterhead
+              doesn't have a place for. */}
+          {invoice.invoice_type === "brand" && invoice.brand && (
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 5, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+              {invoice.brand.email && <span>{invoice.brand.email}</span>}
+              {invoice.brand.phone && <span>{invoice.brand.phone}</span>}
+              {invoice.brand.address && <span>{invoice.brand.address}</span>}
+              {invoice.brand.country && <span>{invoice.brand.country}</span>}
+            </div>
+          )}
           <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>
             🔒 Secure Invoice Payment
           </div>

@@ -3,6 +3,11 @@ import { Invoice, InvoicePayment } from "@/types";
 
 export interface InvoicePayload {
     company_id: number;
+    // Whose name the invoice goes out under: the company's own identity, or
+    // one of its Brands (brand_id then required). Omitted = 'company', which
+    // is what the backend defaults to.
+    invoice_type?: 'company' | 'brand';
+    brand_id?: number | null;
     client_id?: number | null;
     lead_id?: number | null;
     project_id?: number | null;

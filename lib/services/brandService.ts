@@ -52,6 +52,10 @@ export interface BrandPermissions {
   can_create: boolean;
   can_edit: boolean;
   can_delete: boolean;
+  // True for anyone who isn't the brand keeper (Company Admin / Admin role):
+  // they are looking at the brands ASSIGNED to them, read-only, and can do
+  // nothing here but pick one while raising an invoice.
+  view_only?: boolean;
 }
 
 // multipart/form-data because of the logo. Booleans go over as 1/0 — PHP

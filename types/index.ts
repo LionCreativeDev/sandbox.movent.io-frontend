@@ -239,9 +239,27 @@ export interface InvoicePayment {
   created_at: string;
 }
 
+// What an invoice is presented as: the company's own identity, or one of its
+// Brands. `branding` is the resolved issuer block the backend sends with a
+// single invoice — read it rather than deciding from brand_id, so every
+// screen shows the same name/logo the email and share link do.
+export interface InvoiceBranding {
+  invoice_type: 'company' | 'brand';
+  name: string | null;
+  logo_url: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  country: string | null;
+  brand: { id: number; name: string; email: string | null; phone: string | null; country: string | null; address: string | null } | null;
+}
+
 export interface Invoice {
   id: number;
   company_id: number;
+  invoice_type?: 'company' | 'brand';
+  brand_id?: number | null;
+  branding?: InvoiceBranding;
   client_id: number;
   lead_id?: number | null;
   project_id?: number | null;

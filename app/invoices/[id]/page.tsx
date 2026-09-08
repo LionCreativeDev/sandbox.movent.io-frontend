@@ -305,6 +305,40 @@ export default function InvoiceDetailPage() {
 
         {/* Header card */}
         <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '24px 28px', marginBottom: 16 }}>
+          {/* Issuer — whose name this invoice goes out under. Resolved by the
+              backend (Invoice::brandingProfile()), so this is exactly the
+              identity the client sees on the email, share link, payment page
+              and their portal. */}
+          {invoice.branding && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 16, marginBottom: 16, borderBottom: '1px solid #f1f5f9' }}>
+              {invoice.branding.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={invoice.branding.logo_url} alt="" style={{ width: 44, height: 44, borderRadius: 9, objectFit: 'cover', border: '1px solid #f1f5f9', background: '#fff' }} />
+              ) : (
+                <div style={{ width: 44, height: 44, borderRadius: 9, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontWeight: 800 }}>
+                  {(invoice.branding.name ?? '?').charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: 14 }}>{invoice.branding.name}</span>
+                  <span style={{
+                    padding: '2px 9px', borderRadius: 20, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em',
+                    background: invoice.branding.invoice_type === 'brand' ? '#eef2ff' : '#f1f5f9',
+                    color: invoice.branding.invoice_type === 'brand' ? '#4f46e5' : '#64748b',
+                  }}>
+                    {invoice.branding.invoice_type === 'brand' ? 'BRAND INVOICE' : 'COMPANY INVOICE'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 2 }}>
+                  {invoice.branding.email   && <span style={{ fontSize: 11.5, color: '#64748b' }}>{invoice.branding.email}</span>}
+                  {invoice.branding.phone   && <span style={{ fontSize: 11.5, color: '#64748b' }}>{invoice.branding.phone}</span>}
+                  {invoice.branding.address && <span style={{ fontSize: 11.5, color: '#94a3b8' }}>{invoice.branding.address}</span>}
+                  {invoice.branding.country && <span style={{ fontSize: 11.5, color: '#94a3b8' }}>{invoice.branding.country}</span>}
+                </div>
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>

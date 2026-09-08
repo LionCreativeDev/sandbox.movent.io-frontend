@@ -51,6 +51,14 @@ export default function EditInvoicePage() {
   const [selectedGatewayIds, setSelectedGatewayIds] = useState<number[]>([]);
   const [gatewaysLoaded, setGatewaysLoaded]         = useState(false);
 
+  // Editing may switch an invoice between Company and Brand, and between
+  // brands. Same rule as creating: the list comes from the server, so a
+  // staff member only ever sees brands assigned to them and the save is
+  // re-checked against that.
+  const [invoiceType, setInvoiceType] = useState<'company' | 'brand'>('company');
+  const [brandId, setBrandId]         = useState(0);
+  const [brands, setBrands]           = useState<{ id: number; name: string }[]>([]);
+
   useEffect(() => {
     adminInvoiceService.getOne(invoiceId).then(inv => {
       setInvoice(inv);
@@ -68,6 +76,12 @@ export default function EditInvoicePage() {
         quantity:    it.quantity,
         unit_price:  it.unit_price,
       })));
+
+      setInvoiceType(inv.invoice_type === 'brand' ? 'brand' : 'company');
+      setBrandId(inv.brand_id ?? 0);
+      api.get(`/admin/invoices/brands?company_id=${inv.company_id}`)
+        .then(r => setBrands(r.data.data ?? []))
+        .catch(() => setBrands([]));
 
       api.get('/admin/settings').then(r => {
         const accounts = (r.data.data.gateways as GatewayAccountOption[]).filter(g => g.is_active);
@@ -108,9 +122,12 @@ export default function EditInvoicePage() {
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (items.some(r => !r.description.trim())) { setError('All items need a description'); return; }
+    if (invoiceType === 'brand' && !brandId) { setError('Select a brand for this Brand Invoice'); return; }
     setSaving(true); setError('');
     try {
       await adminInvoiceService.update(invoiceId, {
+        invoice_type:    invoiceType,
+        brand_id:        invoiceType === 'brand' ? brandId : null,
         tax_rate:        taxRate,
         discount_amount: discount,
         notes:    notes || null,
@@ -151,6 +168,47 @@ export default function EditInvoicePage() {
                 </div>
                 <div style={{ padding: 22 }}>
                   {error && <div style={{ marginBottom: 14, padding: '9px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, color: '#dc2626', fontSize: 13 }}>{error}</div>}
+
+                  {/* Invoice type — same first question as Create: whose name
+                      this invoice goes out under. Switching it here re-brands
+                      the invoice everywhere it is shown. */}
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={lbl}>Invoice Type</label>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {([
+                        { key: 'company' as const, label: 'Company Invoice', hint: 'Your company’s name and logo' },
+                        { key: 'brand' as const,   label: 'Brand Invoice',   hint: 'One of your brands' },
+                      ]).map(opt => (
+                        <label key={opt.key} style={{
+                          flex: '1 1 200px', display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 13px',
+                          borderRadius: 10, cursor: 'pointer',
+                          border: `1.5px solid ${invoiceType === opt.key ? '#2563eb' : '#e2e8f0'}`,
+                          background: invoiceType === opt.key ? '#eff6ff' : '#fafafa',
+                        }}>
+                          <input type="radio" checked={invoiceType === opt.key} onChange={() => setInvoiceType(opt.key)} style={{ marginTop: 2, accentColor: '#2563eb' }} />
+                          <span>
+                            <span style={{ display: 'block', fontWeight: 700, color: '#0f172a', fontSize: 13 }}>{opt.label}</span>
+                            <span style={{ display: 'block', fontSize: 11.5, color: '#64748b' }}>{opt.hint}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    {invoiceType === 'brand' && (
+                      <div style={{ marginTop: 12 }}>
+                        <label style={lbl}>Brand *</label>
+                        <select style={inp} value={brandId} onChange={e => setBrandId(Number(e.target.value))}>
+                          <option value={0}>Select brand…</option>
+                          {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                        {brands.length === 0 && (
+                          <div style={{ fontSize: 11.5, color: '#b45309', marginTop: 6 }}>
+                            No brands available for this company.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
                     <div>
                       {/* USD is the system's only supported currency now —

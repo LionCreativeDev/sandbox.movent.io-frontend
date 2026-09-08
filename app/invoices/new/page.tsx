@@ -68,6 +68,15 @@ function NewInvoiceForm() {
   // Company + settings
   const [companies, setCompanies]   = useState<ClientCompany[]>([]);
   const [companyId, setCompanyId]   = useState(0);
+
+  // Company Invoice or Brand Invoice — asked before anything else, since it
+  // decides whose name and logo the invoice carries everywhere it's shown
+  // (detail, PDF, email, share link, payment page, client portal). The brand
+  // list is server-filtered: a Company Admin gets every active brand of the
+  // company, a staff member only the brands assigned to them.
+  const [invoiceType, setInvoiceType] = useState<'company' | 'brand'>('company');
+  const [brandId, setBrandId]         = useState(0);
+  const [brands, setBrands]           = useState<{ id: number; name: string }[]>([]);
   // The selected company's OWN currency — never a shared/admin-wide value,
   // since one admin can own companies that each invoice in a different
   // currency (see Company::invoicingProfile() on the backend, same fix).
@@ -187,6 +196,27 @@ function NewInvoiceForm() {
       })
       .finally(() => setLoadingClients(false));
   }, [companyId, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Brands available for a Brand Invoice. Refetched whenever the company
+  // changes (an Admin switching companies gets that company's brands), and
+  // read fresh from the server every time — so a brand reassigned away from
+  // this user disappears from the dropdown on the next load rather than
+  // lingering and failing on save.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isAdmin && !companyId) { setBrands([]); return; }
+    const url = isAdmin ? `/admin/invoices/brands?company_id=${companyId}` : '/user/invoices/brands';
+    api.get(url)
+      .then(r => setBrands(r.data.data ?? []))
+      .catch(() => setBrands([]));
+  }, [companyId, isAdmin]);
+
+  // A brand that is no longer offered (company switched, or it was
+  // reassigned) must not stay silently selected on the form.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (brandId && !brands.some(b => b.id === brandId)) setBrandId(0);
+  }, [brands, brandId]);
 
   // Load this company's projects for the "Existing Project" picker — the
   // same visibility rule the Projects module already applies (created by
@@ -376,6 +406,7 @@ function NewInvoiceForm() {
   // the error state) if the form isn't ready to submit.
   const buildPayload = (): InvoicePayload | null => {
     if (!companyId) { setError('Select a company'); return null; }
+    if (invoiceType === 'brand' && !brandId) { setError('Select a brand for this Brand Invoice'); return null; }
     if (noGatewayConfigured) { setError('Please activate a payment gateway before creating an invoice.'); return null; }
     if (customerType === 'client' && !clientId) { setError('Select a client, or switch to Guest for an external customer'); return null; }
     if (customerType === 'guest' && !guestName.trim()) { setError('Customer name is required for guest invoices'); return null; }
@@ -390,6 +421,11 @@ function NewInvoiceForm() {
 
     return {
       company_id:      companyId,
+      // Whose name this invoice goes out under. The server re-checks the
+      // brand (a staff member's must be assigned to them), so a stale option
+      // is refused rather than quietly used.
+      invoice_type:    invoiceType,
+      brand_id:        invoiceType === 'brand' ? brandId : null,
       lead_id:         leadId || undefined,
       // Not sent — `currency` here is just a read-only preview of the
       // selected company's own currency. The backend always derives it
@@ -600,14 +636,70 @@ function NewInvoiceForm() {
                     </div>
                   )}
 
-                  {/* Company */}
+                  {/* Invoice type — asked first, because it decides whose
+                      name the invoice goes out under and therefore which
+                      dropdown follows: the company's, or one of its Brands. */}
                   <div style={{ marginBottom: 16 }}>
-                    <label style={lbl}>Company *</label>
-                    <select style={inp} value={companyId} onChange={e => setCompanyId(Number(e.target.value))}>
-                      <option value={0}>Select company…</option>
-                      {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <label style={lbl}>Invoice Type *</label>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {([
+                        { key: 'company' as const, label: 'Company Invoice', hint: 'Goes out under your company’s name and logo' },
+                        { key: 'brand' as const,   label: 'Brand Invoice',   hint: 'Goes out under one of your brands' },
+                      ]).map(opt => (
+                        <label key={opt.key} style={{
+                          flex: '1 1 220px', display: 'flex', alignItems: 'flex-start', gap: 9, padding: '11px 14px',
+                          borderRadius: 10, cursor: 'pointer',
+                          border: `1.5px solid ${invoiceType === opt.key ? '#2563eb' : '#e2e8f0'}`,
+                          background: invoiceType === opt.key ? '#eff6ff' : '#fafafa',
+                        }}>
+                          <input
+                            type="radio"
+                            checked={invoiceType === opt.key}
+                            onChange={() => setInvoiceType(opt.key)}
+                            style={{ marginTop: 2, accentColor: '#2563eb' }}
+                          />
+                          <span>
+                            <span style={{ display: 'block', fontWeight: 700, color: '#0f172a', fontSize: 13.5 }}>{opt.label}</span>
+                            <span style={{ display: 'block', fontSize: 11.5, color: '#64748b' }}>{opt.hint}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Company OR Brand — never both. The company still owns the
+                      invoice either way (currency, numbering and the bank
+                      details stay the company's); a Brand Invoice only changes
+                      the identity it is presented under. */}
+                  {invoiceType === 'company' ? (
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={lbl}>Company *</label>
+                      <select style={inp} value={companyId} onChange={e => setCompanyId(Number(e.target.value))}>
+                        <option value={0}>Select company…</option>
+                        {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={lbl}>Brand *</label>
+                      <select style={inp} value={brandId} onChange={e => setBrandId(Number(e.target.value))}>
+                        <option value={0}>Select brand…</option>
+                        {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                      {brands.length === 0 && (
+                        <div style={{ fontSize: 11.5, color: '#b45309', marginTop: 6 }}>
+                          {isAdmin
+                            ? 'No active brands in this company yet — add one under Brands first.'
+                            : 'No brands are assigned to you. Ask your Company Admin to assign one.'}
+                        </div>
+                      )}
+                      {companies.length > 1 && isAdmin && (
+                        <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>
+                          Brands of {companies.find(c => c.id === companyId)?.name ?? 'the selected company'}.
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Currency / Due Date / Notes */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 0 }}>
