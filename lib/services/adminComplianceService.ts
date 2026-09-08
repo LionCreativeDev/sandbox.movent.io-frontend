@@ -112,6 +112,7 @@ export interface ComplianceProjectOverview {
   client: { id: number; name: string; email: string | null; phone: string | null } | null;
   project_manager: { id: number; name: string } | null;
   seller: { id: number; name: string } | null;
+  company: { id: number; name: string } | null;
 }
 
 export interface ComplianceCaseListItem {

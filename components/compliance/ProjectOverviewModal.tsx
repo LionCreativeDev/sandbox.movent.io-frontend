@@ -75,6 +75,10 @@ export default function ProjectOverviewModal({
                                     <div style={{ fontSize: 13, color: "#1e293b" }}>{project.client?.name ?? "—"}</div>
                                 </div>
                                 <div>
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", marginBottom: 3 }}>Company</div>
+                                    <div style={{ fontSize: 13, color: "#1e293b" }}>{project.company?.name ?? "—"}</div>
+                                </div>
+                                <div>
                                     <div style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", marginBottom: 3 }}>Start Date</div>
                                     <div style={{ fontSize: 13, color: "#1e293b" }}>{fmtDate(project.start_date)}</div>
                                 </div>

@@ -46,6 +46,7 @@ export interface SubscriptionPlan {
 }
 
 export interface OrderSummary {
+  package_id?: number;
   package_name: string;
   mode: string;
   modules: string[];

@@ -3,10 +3,10 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
-import { brandService, Brand, BrandPermissions, AssignableUser } from '@/lib/services/brandService';
+import { brandService, Brand, BrandPermissions } from '@/lib/services/brandService';
 import { getAuthType } from '@/lib/auth';
 import {
-  HiPlusCircle, HiPencilSquare, HiTrash, HiMagnifyingGlass,
+  HiPlusCircle, HiPencilSquare, HiTrash, HiMagnifyingGlass, HiEye,
   HiCheckCircle, HiNoSymbol, HiBuildingStorefront,
 } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
@@ -59,11 +59,6 @@ export default function BrandsPage() {
   const [query, setQuery] = useState('');
   const [perms, setPerms] = useState<BrandPermissions | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
-  // Who the Assign column may offer — staff of this company holding Invoice
-  // create/manage permission. Loaded once; the same set applies to every row
-  // since the whole list is one company's brands.
-  const [assignees, setAssignees] = useState<AssignableUser[]>([]);
-  const [assigningId, setAssigningId] = useState<number | null>(null);
 
   useEffect(() => {
     if (isAdmin) {
@@ -89,26 +84,6 @@ export default function BrandsPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (perms?.can_view) load(); else if (perms) setLoading(false); }, [perms, query]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Only fetched when the dropdown can actually be used — a viewer sees the
-  // assignee as plain text and has nothing to pick from.
-  useEffect(() => {
-    if (!perms?.can_edit) return;
-    brandService.assignableUsers().then(setAssignees).catch(() => setAssignees([]));
-  }, [perms?.can_edit]);
-
-  const assign = async (b: Brand, userId: number | null) => {
-    setAssigningId(b.id);
-    try {
-      const updated = await brandService.assign(b.id, userId);
-      setBrands(prev => prev.map(x => (x.id === updated.id ? updated : x)));
-      toast.success(userId ? `Assigned to ${updated.assigned_to?.name ?? 'user'}` : 'Brand unassigned');
-    } catch (err) {
-      toast.error(errText(err, 'Failed to assign brand'));
-    } finally {
-      setAssigningId(null);
-    }
-  };
 
   const toggleStatus = async (b: Brand) => {
     setBusyId(b.id);
@@ -220,7 +195,7 @@ export default function BrandsPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 840 }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                    {['Brand', 'Email', 'Phone', 'Country', 'Assigned To', 'Status', ''].map(h => <th key={h} style={th}>{h}</th>)}
+                    {['Brand', 'Company', 'Email', 'Phone', 'Country', 'Assigned To', 'Status', ''].map(h => <th key={h} style={th}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -242,41 +217,36 @@ export default function BrandsPage() {
                           </div>
                         </div>
                       </td>
+                      {/* Which company this brand belongs to — an Admin on
+                          "All Companies" sees several companies' brands in
+                          one list, and a brand can be moved between them. */}
+                      <td style={td}>
+                        <span style={{
+                          display: 'inline-block', padding: '3px 9px', borderRadius: 6,
+                          background: '#f1f5f9', color: '#334155', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap',
+                        }}>
+                          🏢 {b.company?.name ?? '—'}
+                        </span>
+                      </td>
                       <td style={td}>{b.email ?? '—'}</td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>{b.phone ?? '—'}</td>
                       <td style={td}>{b.country ?? '—'}</td>
-                      {/* Assign — saves the moment a name is picked. The list
-                          only offers staff with Invoice create/manage rights
-                          (Seller, Lead Manager, and anyone else granted them);
-                          the server re-checks the choice against the same
-                          rule. Without canEditBrands this is read-only text. */}
+                      {/* Everyone working this brand, as pills — the same way
+                          the Users list shows a person's companies. Changing
+                          who is assigned happens on the brand's own page,
+                          where there's room for a real picker. */}
                       <td style={td}>
-                        {perms.can_edit ? (
-                          <select
-                            value={b.assigned_to?.id ?? ''}
-                            disabled={assigningId === b.id}
-                            onChange={e => assign(b, e.target.value ? Number(e.target.value) : null)}
-                            style={{
-                              padding: '6px 10px', border: '1.5px solid #e2e8f0', borderRadius: 7,
-                              fontSize: 12.5, outline: 'none', background: assigningId === b.id ? '#f8fafc' : '#fff',
-                              color: b.assigned_to ? '#0f172a' : '#94a3b8', minWidth: 150,
-                              cursor: assigningId === b.id ? 'wait' : 'pointer',
-                            }}
-                          >
-                            <option value="">Unassigned</option>
-                            {/* A previous assignee who has since lost their
-                                invoice permissions is kept as an option, or
-                                the select would silently show blank next to a
-                                brand that IS assigned. */}
-                            {b.assigned_to && !assignees.some(u => u.id === b.assigned_to!.id) && (
-                              <option value={b.assigned_to.id}>{b.assigned_to.name} (no invoice access)</option>
-                            )}
-                            {assignees.map(u => (
-                              <option key={u.id} value={u.id}>{u.name}</option>
-                            ))}
-                          </select>
+                        {b.assigned_users.length === 0 ? (
+                          <span style={{ color: '#94a3b8', fontSize: 12.5 }}>Unassigned</span>
                         ) : (
-                          b.assigned_to?.name ?? <span style={{ color: '#94a3b8' }}>Unassigned</span>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {b.assigned_users.map(u => (
+                              <span key={u.id} title={u.email ?? undefined} style={{
+                                fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 500,
+                                whiteSpace: 'nowrap', background: '#eff6ff', color: '#2563eb',
+                              }}>{u.name}</span>
+                            ))}
+                          </div>
                         )}
                       </td>
                       <td style={td}>
@@ -292,6 +262,12 @@ export default function BrandsPage() {
                       </td>
                       <td style={td}>
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {/* Everything about one brand — details, who works
+                              it, and (for an Admin with more than one company)
+                              moving it — lives on its own page. */}
+                          <button disabled={busyId === b.id} onClick={() => router.push(`${brandsRoot}/${b.id}`)} style={btn('#fff', '#64748b', '#e2e8f0')}>
+                            <HiEye size={13} /> View
+                          </button>
                           {perms.can_edit && (
                             <>
                               <button disabled={busyId === b.id} onClick={() => router.push(`${brandsRoot}/${b.id}/edit`)} style={btn('#eef2ff', '#4f46e5', '#e0e7ff')}>

@@ -1200,6 +1200,7 @@ function RegisterContent() {
           return;
         }
         localStorage.setItem('pending_order', JSON.stringify({
+          package_id: pkgToUse.id,
           package_name: pkgToUse.name,
           modules: mode === 'custom' ? selectedCats.map(c => c.label) : [],
           required_dependencies: mode === 'custom'

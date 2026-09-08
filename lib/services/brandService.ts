@@ -19,8 +19,9 @@ export interface Brand {
   address: string | null;
   logo_url: string | null;
   is_active: boolean;
-  // The staff member responsible for this brand's invoicing, if any.
-  assigned_to: { id: number; name: string } | null;
+  // Everyone working this brand — several people can share one trading name,
+  // the way a project has a team.
+  assigned_users: { id: number; name: string; email: string | null }[];
   created_by: string | null;
   created_at: string | null;
 }
@@ -74,6 +75,13 @@ const toFormData = (payload: BrandPayload): FormData => {
   return fd;
 };
 
+// The shared axios instance forces 'Content-Type: application/json' on every
+// request (see lib/axios.ts), which makes axios serialise a FormData body as
+// JSON — the File turns into an empty object and the API answers "The logo
+// field must be a file." Every other upload in this app overrides the header
+// the same way; brands must too.
+const MULTIPART = { headers: { 'Content-Type': 'multipart/form-data' } };
+
 const list = async (params?: { active?: boolean; search?: string }): Promise<Brand[]> => {
   const res = await api.get(base(), {
     params: {
@@ -90,14 +98,14 @@ const getOne = async (id: number): Promise<Brand> => {
 };
 
 const create = async (payload: BrandPayload): Promise<Brand> => {
-  const res = await api.post(base(), toFormData(payload));
+  const res = await api.post(base(), toFormData(payload), MULTIPART);
   return res.data.data;
 };
 
 // POST, not PUT: PHP doesn't parse multipart bodies on PUT, so the route is
 // declared as POST on both sides (see routes/api.php).
 const update = async (id: number, payload: BrandPayload): Promise<Brand> => {
-  const res = await api.post(`${base()}/${id}`, toFormData(payload));
+  const res = await api.post(`${base()}/${id}`, toFormData(payload), MULTIPART);
   return res.data.data;
 };
 
@@ -120,10 +128,19 @@ const assignableUsers = async (companyId?: number): Promise<AssignableUser[]> =>
   return res.data.data;
 };
 
-// null unassigns. The server re-checks the chosen user against the same rule
-// that built the dropdown, so a stale option can't slip through.
-const assign = async (id: number, userId: number | null): Promise<Brand> => {
-  const res = await api.patch(`${base()}/${id}/assign`, { user_id: userId });
+// The FULL list of people who should work this brand — an empty array
+// unassigns everyone. The server re-checks every id against the same rule
+// that built the picker, so a stale option can't slip through.
+const assign = async (id: number, userIds: number[]): Promise<Brand> => {
+  const res = await api.patch(`${base()}/${id}/assign`, { user_ids: userIds });
+  return res.data.data;
+};
+
+// Move a brand to another company the same Company Admin owns. Admin-only —
+// a staff member never works across companies here. Refused once the brand
+// has invoices raised under it.
+const transfer = async (id: number, companyId: number): Promise<Brand> => {
+  const res = await api.patch(`/admin/brands/${id}/transfer`, { company_id: companyId });
   return res.data.data;
 };
 
@@ -143,5 +160,5 @@ const permissions = async (): Promise<BrandPermissions> => {
 
 export const brandService = {
   list, getOne, create, update, toggleStatus, remove, companyOptions, permissions,
-  assignableUsers, assign,
+  assignableUsers, assign, transfer,
 };
