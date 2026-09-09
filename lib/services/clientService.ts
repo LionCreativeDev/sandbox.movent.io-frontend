@@ -16,6 +16,10 @@ export const clientService = {
     const res = await clientApi.get('/client/dashboard');
     return res.data.data;
   },
+  requestService: async (data: { service_key: string; notes?: string }) => {
+    const res = await clientApi.post('/client/dashboard/request-service', data);
+    return res.data;
+  },
   projects: async (params?: Record<string, string>) => {
     const res = await clientApi.get('/client/projects', { params });
     return res.data.data;

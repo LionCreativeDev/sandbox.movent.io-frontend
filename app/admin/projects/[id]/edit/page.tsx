@@ -21,6 +21,7 @@ import {
 import { handleNotFound } from "@/lib/notFound";
 import { Admin } from "@/types";
 import RichTextField from "@/components/ui/RichTextField";
+import { companyServiceService } from "@/lib/services/companyServiceService";
 
 interface ClientOption {
     id: number;
@@ -60,7 +61,14 @@ export default function EditProjectPage() {
         priority: "medium",
         budget: "",
         deadline: "",
+        // Which of the company's services this project delivered. Editable here
+        // so projects that predate the field can be tagged after the fact,
+        // which turns the Client Portal's guessed recommendations into exact
+        // ones (see AppServicesServiceRecommendationService).
+        company_service_id: "",
     });
+    // This project's own company only — the company is fixed on this screen.
+    const [services, setServices] = useState<{ id: number; name: string }[]>([]);
     const setF = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
     useEffect(() => {
@@ -79,7 +87,22 @@ export default function EditProjectPage() {
                     priority: p.priority,
                     budget: p.budget != null ? String(p.budget) : "",
                     deadline: p.deadline?.slice(0, 10) ?? "",
+                    company_service_id: p.company_service_id
+                        ? String(p.company_service_id)
+                        : "",
                 });
+                companyServiceService
+                    .list(p.company_id)
+                    .then((res) =>
+                        setServices(
+                            res.services
+                                .filter((s) => s.is_enabled && s.id !== null)
+                                .map((s) => ({ id: s.id as number, name: s.name })),
+                        ),
+                    )
+                    // Optional field — no services configured just means no
+                    // picker, never a blocked save.
+                    .catch(() => setServices([]));
                 // Project Manager options are scoped to THIS project's own (fixed,
                 // non-editable) company — never every company this admin owns.
                 setUsersLoading(true);
@@ -188,6 +211,9 @@ export default function EditProjectPage() {
                 status: form.status as never,
                 priority: form.priority as never,
                 budget: form.budget ? Number(form.budget) : null,
+                company_service_id: form.company_service_id
+                    ? Number(form.company_service_id)
+                    : null,
                 deadline: form.deadline || null,
             });
             toast.success("Project updated");
@@ -421,6 +447,40 @@ export default function EditProjectPage() {
                             style={inp}
                         />
                     </div>
+
+                    {/* Only when the company has enabled services — an empty
+                        dropdown would be a dead field. Tagging an existing
+                        project here is how a client with years of untagged
+                        history starts getting accurate recommendations. */}
+                    {services.length > 0 && (
+                        <div>
+                            <label style={lbl}>Service</label>
+                            <select
+                                value={form.company_service_id}
+                                onChange={(e) =>
+                                    setF("company_service_id", e.target.value)
+                                }
+                                style={inp}
+                            >
+                                <option value="">Not tied to a service</option>
+                                {services.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.name}
+                                    </option>
+                                ))}
+                            </select>
+                            <div
+                                style={{
+                                    fontSize: 11,
+                                    color: "#94a3b8",
+                                    marginTop: 4,
+                                }}
+                            >
+                                Lets this client&apos;s portal recommend the
+                                right follow-on services.
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div style={{ ...card, marginTop: 20 }}>

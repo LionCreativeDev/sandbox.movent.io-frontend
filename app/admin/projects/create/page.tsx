@@ -15,6 +15,7 @@ import { Admin } from '@/types';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
 import RichTextField from '@/components/ui/RichTextField';
+import { companyServiceService } from '@/lib/services/companyServiceService';
 
 interface Company {
     id: number;
@@ -72,9 +73,52 @@ function CreateProjectForm() {
         priority: "medium",
         budget: "",
         deadline: "",
+        // Which of the company's services this project delivers. Optional, and
+        // what makes the Client Portal's recommendations exact rather than
+        // guessed from the project's name — a project tagged Website
+        // Development is why that client is then offered SEO and Maintenance
+        // (see App\Services\ServiceRecommendationService).
+        company_service_id: "",
     });
 
+    // Only the selected company's enabled services — the picker must never
+    // offer another company's service, and the server rejects it too.
+    //
+    // Carries the company it was fetched for, so switching company can't show
+    // the previous one's services for a render. That check is what makes it
+    // safe, rather than clearing this synchronously inside the effect.
+    const [services, setServices] = useState<{
+        companyId: number;
+        rows: { id: number; name: string }[];
+    } | null>(null);
+
     const setF = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+    // Reloaded whenever the company changes.
+    useEffect(() => {
+        const companyId = Number(form.company_id);
+        if (!companyId) return;
+
+        companyServiceService
+            .list(companyId)
+            .then((res) =>
+                setServices({
+                    companyId,
+                    rows: res.services
+                        .filter((s) => s.is_enabled && s.id !== null)
+                        .map((s) => ({ id: s.id as number, name: s.name })),
+                }),
+            )
+            // Optional field — a company that has configured no services just
+            // gets no picker, which must not block creating a project.
+            .catch(() => setServices({ companyId, rows: [] }));
+    }, [form.company_id]);
+
+    // Only ever the list for the company currently selected.
+    const serviceOptions =
+        services && services.companyId === Number(form.company_id)
+            ? services.rows
+            : [];
 
     // Handed off from a won Lead — pre-fill name/client and keep the link.
     useEffect(() => {
@@ -233,6 +277,9 @@ function CreateProjectForm() {
                 priority: form.priority as never,
                 budget: form.budget ? Number(form.budget) : null,
                 deadline: form.deadline || null,
+                company_service_id: form.company_service_id
+                    ? Number(form.company_service_id)
+                    : null,
             });
 
             if (attachments.length > 0) {
@@ -459,6 +506,41 @@ function CreateProjectForm() {
                                 </div>
                             )}
                     </div>
+
+                    {/* Only rendered when the company has enabled services —
+                        an empty dropdown would just be a dead field. What it
+                        buys: the client's portal can then recommend the right
+                        follow-on services instead of guessing from the
+                        project's name. */}
+                    {serviceOptions.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                            <label style={lbl}>Service (optional)</label>
+                            <select
+                                value={form.company_service_id}
+                                onChange={(e) =>
+                                    setF("company_service_id", e.target.value)
+                                }
+                                style={inp}
+                            >
+                                <option value="">Not tied to a service</option>
+                                {serviceOptions.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.name}
+                                    </option>
+                                ))}
+                            </select>
+                            <div
+                                style={{
+                                    fontSize: 11,
+                                    color: "#94a3b8",
+                                    marginTop: 4,
+                                }}
+                            >
+                                Lets this client&apos;s portal recommend the
+                                right follow-on services.
+                            </div>
+                        </div>
+                    )}
 
                     <div style={{ marginBottom: 16 }}>
                         <label style={lbl}>Deadline</label>

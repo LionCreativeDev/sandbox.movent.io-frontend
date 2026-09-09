@@ -46,6 +46,11 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  // Shown in the "Billed From" block on every customer-facing copy of a Brand
+  // Invoice. Typed however the user likes ("acme.com" is fine) — the backend
+  // normalises it to a real URL on save (App\Support\Website), so it comes
+  // back here already carrying https://.
+  const [website, setWebsite] = useState('');
   // Country is picked from the shared list (ISO code), and the phone field is
   // bound to it: choosing a country switches the phone input to that
   // country's format and length, and typing a number with a different dial
@@ -83,6 +88,7 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
         setName(b.name);
         setEmail(b.email ?? '');
         setPhone(b.phone ?? '');
+        setWebsite(b.website ?? '');
         // Stored as the country NAME (that's what the column holds and what
         // invoices display), so map it back to its ISO code for the picker.
         // An older brand saved with free text that matches nothing keeps the
@@ -128,6 +134,7 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
         // E.164 out of PhoneInput ("+923001234567"), which is exactly what
         // the backend's ValidPhoneNumber rule expects.
         phone: phone.trim() || null,
+        website: website.trim() || null,
         // The readable name, not the ISO code — this goes straight onto the
         // invoice under the brand's address block.
         country: ALL_COUNTRIES.find(c => c.code === countryCode)?.name ?? null,
@@ -234,6 +241,15 @@ export default function BrandForm({ brandId }: { brandId?: number }) {
                 defaultCountry={countryCode}
                 onCountryChange={c => c && setCountryCode(c)}
               />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={lbl}>Website</label>
+            <input value={website} onChange={e => setWebsite(e.target.value)} style={inp} placeholder="acme.com" />
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+              Shown in the &quot;Billed From&quot; block on this brand&apos;s invoices. No need to type
+              https:// — it&apos;s added on save.
             </div>
           </div>
 

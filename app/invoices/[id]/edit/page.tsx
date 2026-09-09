@@ -231,6 +231,30 @@ export default function EditInvoicePage() {
                     )}
                   </div>
 
+                  {/* Which company this invoice is from.
+                      Read-only, and shown rather than hidden: on "All
+                      Companies" an admin has no other way to tell whose
+                      invoice they are editing, and the Create form now asks
+                      for it, so leaving it off here made the two screens
+                      disagree about whether it exists at all.
+                      Never a picker: an invoice's company is fixed once
+                      raised — the invoice number carries that company's
+                      prefix, and its currency, bank details and gateways all
+                      come from it. Api\Admin\InvoiceController::update()
+                      accordingly doesn't accept company_id. */}
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={lbl}>Company</label>
+                    <input
+                      style={{ ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }}
+                      value={invoice.company?.name ?? `Company #${invoice.company_id}`}
+                      disabled
+                    />
+                    <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>
+                      Fixed when the invoice was raised — its number, currency and bank details all come from
+                      this company.
+                    </div>
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
                     <div>
                       {/* USD is the system's only supported currency now —

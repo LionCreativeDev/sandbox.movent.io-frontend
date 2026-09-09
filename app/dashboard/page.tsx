@@ -7,6 +7,7 @@ import { getAuthType, getAuthUser } from '@/lib/auth';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { User } from '@/types';
 import { MODULE_CATALOG } from '@/lib/moduleConfig';
+import { lifecycleStatusStyle } from '@/lib/paymentStatus';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Plan {
@@ -93,7 +94,16 @@ function AlertBadge({ n, label }: { n: number; label: string }) {
   );
 }
 
-function StatusBreakdown({ title, byStatus, total }: { title: string; byStatus: Record<string, number>; total: number }) {
+function StatusBreakdown({ title, byStatus, total, statusStyle }: {
+  title: string;
+  byStatus: Record<string, number>;
+  total: number;
+  // Invoices pass lib/paymentStatus's own resolver so this card labels and
+  // colours a status the same way the invoice list, detail screen, share link
+  // and client portal do. Projects and leads have no such shared vocabulary
+  // and keep the generic sc()/cap() fallback.
+  statusStyle?: (status: string) => { label: string; color: string };
+}) {
   return (
     <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '18px 20px' }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', marginBottom: 14 }}>{title}</div>
@@ -101,11 +111,12 @@ function StatusBreakdown({ title, byStatus, total }: { title: string; byStatus: 
         ? <div style={{ color: '#94a3b8', fontSize: 12 }}>No data yet</div>
         : Object.entries(byStatus).map(([status, count]) => {
             const pct = Math.round((count / (total || 1)) * 100);
-            const c = sc(status);
+            const styled = statusStyle?.(status);
+            const c = styled ?? sc(status);
             return (
               <div key={status} style={{ marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                  <span style={{ fontSize: 11, fontWeight: 500, color: '#475569' }}>{cap(status)}</span>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: '#475569' }}>{styled?.label ?? cap(status)}</span>
                   <span style={{ fontSize: 11, fontWeight: 600, color: c.color }}>{count}</span>
                 </div>
                 <div style={{ height: 5, background: '#f1f5f9', borderRadius: 3 }}>
@@ -353,9 +364,14 @@ export default function DashboardPage() {
 
   const breakdowns = [
     has('projects') && data && data.stats.projects.total > 0 && { title: 'Projects by Status', byStatus: data.by_status.projects, total: data.stats.projects.total },
-    has('invoices') && invoiceStats.total > 0 && { title: 'Invoices by Status', byStatus: invoicesByStatus, total: Object.values(invoicesByStatus).reduce((a: number, b: number) => a + b, 0) },
+    has('invoices') && invoiceStats.total > 0 && { title: 'Invoices by Status', byStatus: invoicesByStatus, total: Object.values(invoicesByStatus).reduce((a: number, b: number) => a + b, 0), statusStyle: lifecycleStatusStyle },
     has('leads')    && data && data.stats.leads.total > 0    && { title: 'Leads by Status',    byStatus: data.by_status.leads,    total: data.stats.leads.total    },
-  ].filter(Boolean) as { title: string; byStatus: Record<string, number>; total: number }[];
+  ].filter(Boolean) as {
+    title: string;
+    byStatus: Record<string, number>;
+    total: number;
+    statusStyle?: (status: string) => { label: string; color: string };
+  }[];
 
   type RecentCol = { key: string; title: string; href: string; createHref?: string; items: React.ReactNode[] };
   const recentCols: RecentCol[] = [
@@ -528,7 +544,7 @@ export default function DashboardPage() {
       {breakdowns.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${breakdowns.length}, 1fr)`, gap: 14, marginBottom: 20 }}>
           {breakdowns.map(b => (
-            <StatusBreakdown key={b.title} title={b.title} byStatus={b.byStatus} total={b.total} />
+            <StatusBreakdown key={b.title} title={b.title} byStatus={b.byStatus} total={b.total} statusStyle={b.statusStyle} />
           ))}
         </div>
       )}

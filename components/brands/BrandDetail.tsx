@@ -242,6 +242,11 @@ export default function BrandDetail({ brandId }: { brandId: number }) {
           </div>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
             <Field label="Phone Number" value={brand.phone} />
+            {/* Stored already carrying a scheme (App\Support\Website), so it
+                is safe as an href without normalising here. */}
+            <Field label="Website" value={brand.website
+              ? <a href={brand.website} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }}>{brand.website}</a>
+              : null} />
             <Field label="Country" value={brand.country} />
           </div>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>

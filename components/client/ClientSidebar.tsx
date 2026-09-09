@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import Cookies from 'js-cookie';
 import {
   HiSquares2X2, HiFolder, HiDocumentText, HiCreditCard,
-  HiArrowDownTray, HiLifebuoy, HiChartBar,
+  HiArrowDownTray, HiLifebuoy, HiChartBar, HiSparkles,
 } from 'react-icons/hi2';
 import clientApi from '@/lib/clientAxios';
 
@@ -24,6 +24,9 @@ const NAV = [
   { key: 'documents', label: 'Documents', icon: HiArrowDownTray,       path: '/client/documents' },
   { key: 'support',   label: 'Support',   icon: HiLifebuoy,            path: '/client/support' },
   { key: 'reports',   label: 'Reports',   icon: HiChartBar,            path: '/client/reports' },
+  // The company's own services. Last on purpose: it's an offer, not part of
+  // the client's own account, so it sits below everything they came here to do.
+  { key: 'services',  label: 'Services',  icon: HiSparkles,            path: '/client/services' },
 ];
 
 const GREEN   = '#10b981';

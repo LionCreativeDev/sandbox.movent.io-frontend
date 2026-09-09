@@ -10,14 +10,24 @@ import { useModuleGuard } from '@/hooks/useModuleGuard';
 import { Invoice } from '@/types';
 import { HiPlusCircle, HiMagnifyingGlass, HiFunnel, HiPaperAirplane, HiLink, HiClipboard, HiClipboardDocumentCheck, HiXMark, HiTrash } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
+import { progressOf } from '@/lib/paymentStatus';
+import PaymentProgressBar from '@/components/invoices/PaymentProgressBar';
 
-const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  draft:          { bg: '#f8fafc', color: '#64748b', label: 'Draft' },
-  sent:           { bg: '#eff6ff', color: '#2563eb', label: 'Sent' },
-  partially_paid: { bg: '#fff7ed', color: '#ea580c', label: 'Partial' },
-  paid:           { bg: '#ecfdf5', color: '#059669', label: 'Paid' },
-  overdue:        { bg: '#fef2f2', color: '#dc2626', label: 'Overdue' },
-  cancelled:      { bg: '#f8fafc', color: '#94a3b8', label: 'Cancelled' },
+// Status STYLING now comes from lib/paymentStatus (via PaymentProgressBar), so
+// this list, the detail screen, the share link, the portal, the dashboard and
+// the reports all label the same invoice the same way.
+//
+// The filter dropdown is a separate list on purpose: it sends a value to the
+// API, which filters on `invoices.status` — the lifecycle column. Offering
+// "Refunded" or "Failed" here would send a value that column never holds and
+// silently return nothing.
+const LIFECYCLE_FILTERS: Record<string, string> = {
+  draft:          'Draft',
+  sent:           'Sent',
+  partially_paid: 'Partial',
+  paid:           'Paid',
+  overdue:        'Overdue',
+  cancelled:      'Cancelled',
 };
 
 export default function InvoicesPage() {
@@ -129,7 +139,7 @@ export default function InvoicesPage() {
               <HiFunnel size={14} color="#94a3b8" />
               <select value={status} onChange={e => setStatus(e.target.value)} style={{ padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 13, outline: 'none', background: '#fafafa' }}>
                 <option value="">All Statuses</option>
-                {Object.entries(STATUS_STYLE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                {Object.entries(LIFECYCLE_FILTERS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -162,8 +172,12 @@ export default function InvoicesPage() {
               </thead>
               <tbody>
                 {invoices.map((inv, i) => {
-                  const st      = STATUS_STYLE[inv.status] ?? STATUS_STYLE.draft;
-                  const balance = inv.total_amount - inv.paid_amount;
+                  // The backend's resolved money state, not the lifecycle
+                  // column — so this reads the same as the detail screen, the
+                  // share link and the client's portal, and can say Failed or
+                  // Refunded where `status` never could.
+                  const prog    = progressOf(inv);
+                  const balance = prog.remaining_amount;
                   const canSend = !['paid', 'cancelled'].includes(inv.status);
                   return (
                     <tr
@@ -182,8 +196,8 @@ export default function InvoicesPage() {
                       <td style={{ padding: '13px 14px', color: balance > 0 ? '#ea580c' : '#059669', fontSize: 13, fontWeight: balance > 0 ? 600 : 400 }}>
                         {balance > 0 ? fmt(balance, inv.currency) : '—'}
                       </td>
-                      <td style={{ padding: '13px 14px' }}>
-                        <span style={{ padding: '3px 10px', borderRadius: 50, fontSize: 11, fontWeight: 600, ...st }}>{st.label}</span>
+                      <td style={{ padding: '13px 14px', minWidth: 150 }}>
+                        <PaymentProgressBar progress={prog} currency={inv.currency} compact />
                       </td>
                       <td style={{ padding: '13px 14px' }} onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

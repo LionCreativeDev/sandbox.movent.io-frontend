@@ -9,6 +9,8 @@ import InlineGatewayPayment, {
 import ChatWithSellerDrawer from "@/components/invoice/ChatWithSellerDrawer";
 import { publicInvoiceChatService } from "@/lib/services/publicInvoiceChatService";
 import { fmtDateLong as fmtProjectDate } from "@/lib/date";
+import PaymentProgressBar from "@/components/invoices/PaymentProgressBar";
+import { PaymentProgress, progressOf } from "@/lib/paymentStatus";
 
 interface PublicInvoiceItem {
   description: string;
@@ -45,13 +47,25 @@ interface PublicInvoice {
   // resolves the issuer once (Invoice::brandingProfile()) so this page, the
   // email and the client portal can never disagree about who is billing.
   company_name: string;
-  company_logo?: string;
+  // A ready-to-use absolute URL, not a storage path — see PublicFile::url()
+  // and the note on this field in Api\PublicInvoiceController.
+  company_logo?: string | null;
   invoice_type?: "company" | "brand";
+  // The full "Billed From" identity, brand or company, already resolved.
+  issuer?: {
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    website: string | null;
+    address: string | null;
+    country: string | null;
+  } | null;
   brand?: {
     id: number;
     name: string;
     email: string | null;
     phone: string | null;
+    website: string | null;
     country: string | null;
     address: string | null;
   } | null;
@@ -67,6 +81,14 @@ interface PublicInvoice {
   paid_amount: number;
   currency: string;
   status: "sent" | "partially_paid" | "paid" | "overdue";
+  // Resolved server-side (Invoice::paymentProgress()) — the same block every
+  // other invoice surface reads, so the client and the company are never
+  // looking at different figures. See lib/paymentStatus.
+  payment_progress?: PaymentProgress | null;
+  // False when the tenant's Payment Policy is "Full Payment Only". This page
+  // always submits the full outstanding balance either way; the flag is what
+  // lets it say so.
+  allows_partial_payment?: boolean;
   due_date?: string;
   notes?: string;
   // What this invoice is FOR ("50% Advance Payment", "Milestone 2", …) — the
@@ -1363,8 +1385,31 @@ function PublicInvoicePayContent() {
   return (
     <div style={wrap}>
       <div style={inner}>
-        {/* Header */}
+        {/* Letterhead. company_name and company_logo already carry the
+            BRAND's identity when this is a Brand Invoice (the backend
+            resolves it once in Invoice::brandingProfile()), so nothing here
+            branches on invoice_type — a Company Invoice simply arrives with
+            the company's own name and logo.
+
+            The name stays under the logo rather than being replaced by it: a
+            logo alone doesn't tell someone who is billing them, and plenty of
+            brands have no logo on file. The full contact block lives in
+            "Billed From" further down. */}
         <div style={{ textAlign: "center", marginBottom: 28 }}>
+          {invoice.company_logo && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={invoice.company_logo}
+              alt={invoice.company_name}
+              style={{
+                maxWidth: 180,
+                maxHeight: 68,
+                objectFit: "contain",
+                display: "block",
+                margin: "0 auto 12px",
+              }}
+            />
+          )}
           <div
             style={{
               fontSize: 22,
@@ -1375,19 +1420,6 @@ function PublicInvoicePayContent() {
           >
             {invoice.company_name}
           </div>
-          {/* company_name/company_logo above already carry the BRAND's
-              identity when this is a Brand Invoice (the backend resolves it
-              in Invoice::brandingProfile()). This adds the brand's own
-              contact details underneath, which the company's letterhead
-              doesn't have a place for. */}
-          {invoice.invoice_type === "brand" && invoice.brand && (
-            <div style={{ fontSize: 12, color: "#64748b", marginTop: 5, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-              {invoice.brand.email && <span>{invoice.brand.email}</span>}
-              {invoice.brand.phone && <span>{invoice.brand.phone}</span>}
-              {invoice.brand.address && <span>{invoice.brand.address}</span>}
-              {invoice.brand.country && <span>{invoice.brand.country}</span>}
-            </div>
-          )}
           <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>
             🔒 Secure Invoice Payment
           </div>
@@ -1478,6 +1510,101 @@ function PublicInvoicePayContent() {
             )}
           </div>
         </div>
+
+        {/* Payment progress — the same paid / remaining / percentage figures
+            and the same resolved status the company sees on its own invoice
+            screens, so the client is never reading a different number than
+            whoever they call about it. */}
+        <div style={card}>
+          <PaymentProgressBar
+            progress={progressOf(invoice)}
+            currency={invoice.currency}
+          />
+          {/* This page has never offered an amount field — it always submits
+              the full outstanding balance — so under a full-payment policy
+              there is nothing to disable, only something to say. Without this
+              line a client expecting to pay a deposit has no way to know. */}
+          {invoice.allows_partial_payment === false && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "9px 13px",
+                background: "#fffbeb",
+                border: "1px solid #fde68a",
+                borderRadius: 8,
+                fontSize: 12.5,
+                color: "#92400e",
+              }}
+            >
+              This invoice must be paid in full — part payments are not
+              accepted.
+            </div>
+          )}
+        </div>
+
+        {/* Billed From — who issued this invoice: the brand for a Brand
+            Invoice, the company otherwise, resolved server-side so it matches
+            the emailed copy and the client portal exactly. Website is
+            brand-only (companies have no such field) and arrives already
+            carrying a scheme, so it is safe straight as an href. */}
+        {invoice.issuer && (
+          <div style={card}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.07em",
+                color: "#94a3b8",
+                marginBottom: 12,
+              }}
+            >
+              Billed From
+            </div>
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 600,
+                color: "#0f172a",
+                marginBottom: 4,
+              }}
+            >
+              {invoice.issuer.name ?? invoice.company_name}
+            </div>
+            {invoice.issuer.email && (
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 2 }}>
+                {invoice.issuer.email}
+              </div>
+            )}
+            {invoice.issuer.phone && (
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 2 }}>
+                {invoice.issuer.phone}
+              </div>
+            )}
+            {invoice.issuer.website && (
+              <div style={{ fontSize: 13, marginBottom: 2 }}>
+                <a
+                  href={invoice.issuer.website}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#2563eb", textDecoration: "none" }}
+                >
+                  {invoice.issuer.website}
+                </a>
+              </div>
+            )}
+            {invoice.issuer.address && (
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 2 }}>
+                {invoice.issuer.address}
+              </div>
+            )}
+            {invoice.issuer.country && (
+              <div style={{ fontSize: 13, color: "#64748b" }}>
+                {invoice.issuer.country}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Billed To */}
         <div style={card}>

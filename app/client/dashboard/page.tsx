@@ -1,7 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
+import type { AxiosError } from 'axios';
 import Link from 'next/link';
 import { clientService } from '@/lib/services/clientService';
+import RecommendedServices from '@/components/client/RecommendedServices';
 
 const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   sent:           { bg: '#eff6ff', color: '#2563eb', label: 'Sent' },
@@ -12,6 +14,52 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   active:         { bg: '#ecfdf5', color: '#059669', label: 'Active' },
   on_hold:        { bg: '#fffbeb', color: '#d97706', label: 'On Hold' },
   completed:      { bg: '#f0fdf4', color: '#16a34a', label: 'Completed' },
+};
+
+type AiService = {
+  key: string;
+  name: string;
+  category: string;
+  summary: string;
+  timeline: string;
+};
+
+type DashboardStats = {
+  total_invoices?: number;
+  paid_count?: number;
+  paid_amount?: number;
+  pending_count?: number;
+  pending_amount?: number;
+  overdue_count?: number;
+  total_projects?: number;
+  pending_projects?: number;
+  ongoing_projects?: number;
+  completed_projects?: number;
+};
+
+type RecentInvoice = {
+  id: number;
+  invoice_number: string;
+  total_amount?: number;
+  paid_amount?: number;
+  currency?: string;
+  status: string;
+  due_date?: string | null;
+};
+
+type RecentProject = {
+  id: number;
+  name: string;
+  status: string;
+};
+
+type DashboardData = {
+  stats?: DashboardStats;
+  recent_invoices?: RecentInvoice[];
+  recent_projects?: RecentProject[];
+  portal_available?: Record<string, boolean>;
+  portal_permissions?: Record<string, boolean>;
+  ai_services?: AiService[];
 };
 
 function fmt(n: number, cur = 'USD') {
@@ -35,8 +83,11 @@ function StatCard({ label, value, sub, color, href }: { label: string; value: st
 }
 
 export default function ClientDashboardPage() {
-  const [data, setData]       = useState<any>(null);
+  const [data, setData]       = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [requestingService, setRequestingService] = useState<string | null>(null);
+  const [requestedServices, setRequestedServices] = useState<Record<string, boolean>>({});
+  const [serviceMessage, setServiceMessage] = useState('');
 
   useEffect(() => {
     clientService.dashboard()
@@ -70,8 +121,26 @@ export default function ClientDashboardPage() {
   const invoicesAllowed   = allowed.invoices !== false;
   const projectsAllowed   = allowed.projects !== false;
 
-  const recentInvoices: any[] = data?.recent_invoices || [];
-  const recentProjects: any[] = data?.recent_projects || [];
+  const recentInvoices: RecentInvoice[] = data?.recent_invoices || [];
+  const recentProjects: RecentProject[] = data?.recent_projects || [];
+  const aiServices: AiService[] = data?.ai_services || [];
+  const overdueCount = s.overdue_count ?? 0;
+
+  const requestAiService = async (service: AiService) => {
+    setRequestingService(service.key);
+    setServiceMessage('');
+
+    try {
+      await clientService.requestService({ service_key: service.key });
+      setRequestedServices(prev => ({ ...prev, [service.key]: true }));
+      setServiceMessage(`${service.name} request sent to admin.`);
+    } catch (error: unknown) {
+      const apiError = error as AxiosError<{ message?: string }>;
+      setServiceMessage(apiError.response?.data?.message || 'Could not send request. Please try again.');
+    } finally {
+      setRequestingService(null);
+    }
+  };
 
   return (
     <div>
@@ -138,6 +207,58 @@ export default function ClientDashboardPage() {
         )}
       </div>
 
+      {aiServices.length > 0 && (
+        <section style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: 20, marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#1e293b' }}>AI Suggested IT Services</h2>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>Choose a service and your admin team will receive the request by email.</p>
+            </div>
+            {serviceMessage && (
+              <div style={{ fontSize: 12, color: serviceMessage.includes('Could not') ? '#dc2626' : '#059669', fontWeight: 700, textAlign: 'right' }}>
+                {serviceMessage}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+            {aiServices.map(service => {
+              const requested = requestedServices[service.key];
+              const requesting = requestingService === service.key;
+
+              return (
+                <div key={service.key} style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', minHeight: 190 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <span style={{ fontSize: 11, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: 999, fontWeight: 700 }}>{service.category}</span>
+                    <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{service.timeline}</span>
+                  </div>
+                  <h3 style={{ margin: '0 0 8px', fontSize: 15, lineHeight: 1.25, fontWeight: 800, color: '#0f172a' }}>{service.name}</h3>
+                  <p style={{ margin: 0, fontSize: 12, color: '#64748b', lineHeight: 1.55, flex: 1 }}>{service.summary}</p>
+                  <button
+                    type="button"
+                    disabled={requesting || requested}
+                    onClick={() => requestAiService(service)}
+                    style={{
+                      marginTop: 14,
+                      width: '100%',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '10px 12px',
+                      background: requested ? '#ecfdf5' : '#10b981',
+                      color: requested ? '#047857' : '#fff',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      cursor: requesting || requested ? 'default' : 'pointer',
+                    }}
+                  >
+                    {requesting ? 'Sending...' : requested ? 'Requested' : 'Request Service'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* ── No invoices yet — empty state. Suppressed when Invoices is off
           for this client: "your invoices will appear here" is a promise the
           portal can no longer keep, and the tiles above already carry the
@@ -161,7 +282,7 @@ export default function ClientDashboardPage() {
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1e293b' }}>Recent Invoices</h3>
               <Link href="/client/invoices" style={{ fontSize: 12, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}>View all →</Link>
             </div>
-            {recentInvoices.map((inv: any, i: number) => {
+            {recentInvoices.map((inv, i) => {
               const st = STATUS_STYLE[inv.status] || { bg: '#f1f5f9', color: '#64748b', label: inv.status };
               const balance = (inv.total_amount || 0) - (inv.paid_amount || 0);
               return (
@@ -196,7 +317,7 @@ export default function ClientDashboardPage() {
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1e293b' }}>Recent Projects</h3>
               <Link href="/client/projects" style={{ fontSize: 12, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}>View all →</Link>
             </div>
-            {recentProjects.map((p: any, i: number) => {
+            {recentProjects.map((p, i) => {
               const st = STATUS_STYLE[p.status] || { bg: '#f1f5f9', color: '#64748b', label: p.status };
               return (
                 <Link key={p.id} href={`/client/projects/${p.id}`} style={{ textDecoration: 'none' }}>
@@ -214,10 +335,10 @@ export default function ClientDashboardPage() {
       </div>
 
       {/* ── Overdue alert banner ── */}
-      {s.overdue_count > 0 && (
+      {overdueCount > 0 && (
         <div style={{ marginTop: 20, padding: '14px 20px', background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#dc2626' }}>⚠ {s.overdue_count} overdue invoice{s.overdue_count > 1 ? 's' : ''}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#dc2626' }}>⚠ {overdueCount} overdue invoice{overdueCount > 1 ? 's' : ''}</div>
             <div style={{ fontSize: 12, color: '#ef4444', marginTop: 2 }}>Please settle your outstanding balance to avoid service interruption</div>
           </div>
           {/* The count stays — it is a stat, like the tiles — but the CTA is
@@ -230,6 +351,17 @@ export default function ClientDashboardPage() {
           )}
         </div>
       )}
+
+      {/* ── Grow Your Business With Us ──
+          Last on the dashboard on purpose: the client came here for their own
+          projects and invoices, and an offer belongs below those. Renders
+          nothing at all when the company has enabled no services or switched
+          the section off for this client, so it never leaves an empty heading
+          behind. `compact` trims each list to three cards with a link through
+          to the full page. */}
+      <div style={{ marginTop: 28 }}>
+        <RecommendedServices compact />
+      </div>
     </div>
   );
 }

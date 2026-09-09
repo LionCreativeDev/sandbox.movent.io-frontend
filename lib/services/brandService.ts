@@ -15,6 +15,9 @@ export interface Brand {
   name: string;
   email: string | null;
   phone: string | null;
+  // Stored already carrying a scheme (App\Support\Website), so it can be used
+  // straight as an href without each screen normalising it again.
+  website: string | null;
   country: string | null;
   address: string | null;
   logo_url: string | null;
@@ -40,6 +43,7 @@ export interface BrandPayload {
   name: string;
   email?: string | null;
   phone?: string | null;
+  website?: string | null;
   country?: string | null;
   address?: string | null;
   is_active?: boolean;
@@ -67,6 +71,7 @@ const toFormData = (payload: BrandPayload): FormData => {
   fd.append('name', payload.name);
   if (payload.email   !== undefined) fd.append('email',   payload.email   ?? '');
   if (payload.phone   !== undefined) fd.append('phone',   payload.phone   ?? '');
+  if (payload.website !== undefined) fd.append('website', payload.website ?? '');
   if (payload.country !== undefined) fd.append('country', payload.country ?? '');
   if (payload.address !== undefined) fd.append('address', payload.address ?? '');
   if (payload.is_active !== undefined) fd.append('is_active', payload.is_active ? '1' : '0');

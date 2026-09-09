@@ -2,6 +2,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { clientService } from '@/lib/services/clientService';
+import InvoiceIssuer from '@/components/invoices/InvoiceIssuer';
+import PaymentProgressBar from '@/components/invoices/PaymentProgressBar';
+import { progressOf } from '@/lib/paymentStatus';
 import { handleNotFound } from '@/lib/notFound';
 
 const GREEN = '#10b981';
@@ -91,6 +94,25 @@ export default function ClientInvoiceDetailPage() {
           <div style={{ marginBottom: 24, padding: '12px 16px', background: '#eff6ff', border: '1px solid #dbeafe', borderRadius: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#60a5fa', marginBottom: 4 }}>PAYMENT FOR</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: '#1e40af' }}>{inv.invoice_purpose}</div>
+          </div>
+        )}
+
+        {/* Payment progress — the same paid / remaining / percentage and the
+            same resolved status the company sees, so the client's portal and
+            the company's invoice screen never disagree about what's left. */}
+        <div style={{ marginBottom: 24, padding: '14px 16px', background: '#f8fafc', borderRadius: 8 }}>
+          <PaymentProgressBar progress={progressOf(inv)} currency={inv.currency} />
+        </div>
+
+        {/* Billed From — who issued this: the brand for a Brand Invoice, the
+            company otherwise, resolved server-side so the portal shows the
+            same identity as the emailed copy and the share link. No BRAND
+            INVOICE badge here: that is our internal taxonomy, and the client
+            only needs to know who is billing them. */}
+        {inv.branding && (
+          <div style={{ marginBottom: 24, padding: '12px 16px', background: '#f8fafc', borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>BILLED FROM</div>
+            <InvoiceIssuer branding={inv.branding} />
           </div>
         )}
 

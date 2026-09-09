@@ -46,6 +46,10 @@ export interface Project {
   id: number;
   company_id: number;
   client_id: number | null;
+  // Which of the company's services this project delivered. Null on every
+  // project that predates the field — the Client Portal falls back to matching
+  // the project's name against the service catalogue for those.
+  company_service_id?: number | null;
   lead_id?: number | null;
   invoice_id: number | null;
   project_manager_id: number | null;
@@ -394,6 +398,12 @@ export interface ProjectPayload {
   status?: ProjectStatus;
   priority?: Priority;
   budget?: number | null;
+  // Which of the company's services this project delivers. Optional, and only
+  // ever a service of THIS project's company (the server re-checks). It is
+  // what lets the Client Portal recommend the right follow-on services
+  // instead of guessing from the project's name — see
+  // App\Services\ServiceRecommendationService.
+  company_service_id?: number | null;
   // No start_date — a project's Start Date is fixed at creation time
   // (see Api\Admin\ProjectController::store()) and is never editable.
   deadline?: string | null;

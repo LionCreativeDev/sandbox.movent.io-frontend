@@ -4,6 +4,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import api from "@/lib/axios";
 import { getAuthType } from "@/lib/auth";
 import { useAdminGuard } from "@/hooks/useAdminGuard";
+import { lifecycleStatusStyle } from "@/lib/paymentStatus";
 
 const MONTHS = [
     "Jan",
@@ -20,17 +21,11 @@ const MONTHS = [
     "Dec",
 ];
 
-const STATUS_STYLE: Record<
-    string,
-    { bg: string; color: string; label: string }
-> = {
-    draft: { bg: "#f8fafc", color: "#64748b", label: "Draft" },
-    sent: { bg: "#eff6ff", color: "#2563eb", label: "Sent" },
-    partially_paid: { bg: "#fff7ed", color: "#ea580c", label: "Partial" },
-    paid: { bg: "#ecfdf5", color: "#059669", label: "Paid" },
-    overdue: { bg: "#fef2f2", color: "#dc2626", label: "Overdue" },
-    cancelled: { bg: "#f8fafc", color: "#94a3b8", label: "Cancelled" },
-};
+// Invoice status labels/colours come from lib/paymentStatus so this report
+// reads the same as the invoice list, the detail screen, the share link and
+// the client portal. The breakdown below is grouped by the LIFECYCLE column
+// server-side, so it goes through lifecycleStatusStyle() — see the note there
+// on why 'paid'/'sent' need mapping.
 
 interface CurrencyAmount {
     currency: string;
@@ -646,8 +641,7 @@ export default function ReportsPage() {
                                             data?.by_status ?? {},
                                         ).map(([status, d]) => {
                                             const st =
-                                                STATUS_STYLE[status] ??
-                                                STATUS_STYLE.draft;
+                                                lifecycleStatusStyle(status);
                                             const pct =
                                                 s.total_count > 0
                                                     ? Math.round(

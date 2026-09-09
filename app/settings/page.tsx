@@ -28,6 +28,12 @@ interface DealWorkflowSettings {
   project_creation_trigger: string;
   allow_admin_override: boolean;
   triggers: Record<string, string>;
+  // The Payment Policy — a SEPARATE decision from the trigger above. The
+  // trigger says when a payment starts the project; this says whether a
+  // client may part-pay an invoice at all. See
+  // App\Models\CompanyDealSettings::PAYMENT_POLICIES.
+  payment_policy: string;
+  payment_policies: Record<string, string>;
 }
 interface GatewayConfig { [key: string]: string; }
 interface GatewayAccount {
@@ -797,6 +803,53 @@ export default function SettingsPage() {
                     💡 A part payment won&apos;t start anything — the client is emailed that their project begins once the invoice is paid in full.
                   </div>
                 )}
+
+                {/* ── Payment Policy ── a different question from the trigger
+                    above: not "when does a payment start the project" but
+                    "may the client pay in instalments at all". Kept in the
+                    same tab because admins think of them together, but stored
+                    and enforced separately — the default is "partial
+                    allowed", which is what every account already does. */}
+                <div style={{ paddingTop: 20, marginBottom: 22, borderTop: '1px solid #f1f5f9' }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Payment Policy</div>
+                  <p style={{ margin: '4px 0 14px', fontSize: 12, color: '#94a3b8' }}>
+                    How much of an invoice a client may settle at once. This is separate from the project
+                    trigger above — you can require the invoice to be paid in full before the project starts
+                    while still accepting a deposit now.
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {Object.entries(dealSettings.payment_policies ?? {}).map(([key, label]) => {
+                      const active = dealSettings.payment_policy === key;
+                      const [heading, detail] = label.split(' — ');
+                      return (
+                        <label key={key} style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 11, padding: '13px 16px', borderRadius: 9,
+                          cursor: 'pointer', border: `2px solid ${active ? '#2563eb' : '#e2e8f0'}`,
+                          background: active ? '#eff6ff' : '#fafafa',
+                        }}>
+                          <input
+                            type="radio"
+                            name="payment_policy"
+                            checked={active}
+                            onChange={() => setDealSettings(p => p ? { ...p, payment_policy: key } : p)}
+                            style={{ width: 16, height: 16, accentColor: '#2563eb', marginTop: 1, flexShrink: 0 }}
+                          />
+                          <span>
+                            <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: active ? '#1d4ed8' : '#374151' }}>{heading}</span>
+                            {detail && <span style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{detail}</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {dealSettings.payment_policy === 'full_only' && (
+                    <div style={{ marginTop: 12, padding: '10px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, fontSize: 12, color: '#92400e' }}>
+                      ⚠️ Clients paying through a share link will no longer be able to enter a smaller amount —
+                      the full outstanding balance is the only option they are offered, and a lesser amount is
+                      refused. Invoices already part-paid keep their balance and can still be settled.
+                    </div>
+                  )}
+                </div>
 
                 <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22, cursor: 'pointer' }}>
                   <input type="checkbox" checked={!!dealSettings.allow_admin_override} onChange={() => toggleDealSetting('allow_admin_override')}

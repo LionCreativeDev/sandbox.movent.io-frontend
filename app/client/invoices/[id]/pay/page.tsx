@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import PaymentProgressBar from '@/components/invoices/PaymentProgressBar';
+import { PaymentProgress, progressOf } from '@/lib/paymentStatus';
 import { clientService } from '@/lib/services/clientService';
 import clientApi from '@/lib/clientAxios';
 import InlineGatewayPayment, { InlineGatewayPaymentHandle } from '@/components/payments/InlineGatewayPayment';
@@ -40,7 +42,26 @@ interface GatewayPageData {
     currency: string;
     // What this payment is for — the line items aren't listed on this screen.
     invoice_purpose?: string | null;
+    // Resolved server-side (Invoice::paymentProgress()) — see
+    // lib/paymentStatus. This screen always charges the full outstanding
+    // balance, so there is no policy flag to read: the tenant's Payment
+    // Policy can only ever make that stricter, never looser.
+    payment_progress?: PaymentProgress | null;
   };
+  // Who the client is paying — the brand for a Brand Invoice, the company
+  // otherwise, resolved server-side (Invoice::brandingProfile()) so this
+  // screen names the same issuer as the invoice they clicked through from.
+  // logo is a ready-to-use absolute URL, not a storage path.
+  issuer?: {
+    name: string | null;
+    logo: string | null;
+    email: string | null;
+    phone: string | null;
+    website: string | null;
+    address: string | null;
+    country: string | null;
+    invoice_type: 'company' | 'brand';
+  } | null;
   gateways: Gateway[];
   bank: BankDetails | null;
 }
@@ -216,6 +237,41 @@ export default function ClientPaymentPage() {
         </div>
       </div>
 
+      {/* Who is being paid. The client is about to hand over money on this
+          screen, so it names the issuer explicitly rather than leaving them
+          to remember which invoice they came from — and for a Brand Invoice
+          that is the brand's logo and details, not the company's. */}
+      {data.issuer?.name && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20,
+          padding: '12px 16px', background: '#f8fafc', borderRadius: 10,
+        }}>
+          {data.issuer.logo && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={data.issuer.logo}
+              alt=""
+              style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'contain', background: '#fff', border: '1px solid #f1f5f9' }}
+            />
+          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8' }}>PAYING</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>{data.issuer.name}</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 2 }}>
+              {data.issuer.email && <span style={{ fontSize: 11.5, color: '#64748b' }}>{data.issuer.email}</span>}
+              {data.issuer.phone && <span style={{ fontSize: 11.5, color: '#64748b' }}>{data.issuer.phone}</span>}
+              {/* Brand-only, and already carries a scheme — see
+                  App\Support\Website. */}
+              {data.issuer.website && (
+                <a href={data.issuer.website} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: '#2563eb', textDecoration: 'none' }}>
+                  {data.issuer.website}
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Amount Due Banner */}
       <div style={{
         background: 'linear-gradient(135deg, #065f46, #10b981)',
@@ -230,6 +286,14 @@ export default function ClientPaymentPage() {
             {data.invoice.currency} {Number(data.invoice.paid_amount).toLocaleString()} already paid
           </div>
         )}
+      </div>
+
+      {/* Payment progress, in the same shape as every other invoice screen. */}
+      <div style={{ marginBottom: 24, padding: '14px 16px', background: '#f8fafc', borderRadius: 10 }}>
+        <PaymentProgressBar
+          progress={progressOf({ ...data.invoice, status: null })}
+          currency={data.invoice.currency}
+        />
       </div>
 
       <form onSubmit={handlePay}>

@@ -249,14 +249,24 @@ export interface InvoiceBranding {
   logo_url: string | null;
   email: string | null;
   phone: string | null;
+  // Brand-only — companies have no website field, so this is always null on a
+  // Company Invoice and the line is simply omitted.
+  website: string | null;
   address: string | null;
   country: string | null;
-  brand: { id: number; name: string; email: string | null; phone: string | null; country: string | null; address: string | null } | null;
+  brand: {
+    id: number; name: string; email: string | null; phone: string | null;
+    website: string | null; country: string | null; address: string | null;
+  } | null;
 }
 
 export interface Invoice {
   id: number;
   company_id: number;
+  // Which company raised this — sent with a single invoice so the Edit screen
+  // can name it. Distinct from `branding` below: on a Brand Invoice the
+  // branding name is the BRAND's, while this stays the owning company.
+  company?: { id: number; name: string } | null;
   invoice_type?: 'company' | 'brand';
   brand_id?: number | null;
   branding?: InvoiceBranding;

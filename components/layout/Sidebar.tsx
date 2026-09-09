@@ -7,7 +7,7 @@ import {
   HiFolderOpen, HiCheckCircle, HiBriefcase, HiClock,
   HiDocumentText, HiShieldCheck, HiChatBubbleLeftRight,
   HiCog6Tooth, HiArrowRightOnRectangle, HiChartBar,
-  HiCurrencyDollar, HiCalendarDays, HiFlag, HiBuildingStorefront,
+  HiCurrencyDollar, HiCalendarDays, HiFlag, HiBuildingStorefront, HiSparkles,
 } from 'react-icons/hi2';
 import { useAuth } from '@/hooks/useAuth';
 import { getAuthType, getAuthUser, getActiveCompany, can } from '@/lib/auth';
@@ -46,6 +46,11 @@ const ADMIN_NAV_GROUPS = [
     items: [
       { href: '/admin/clients', icon: HiUsers, label: 'Clients', module: 'client_portal' },
       { href: '/admin/support', icon: HiChatBubbleLeftRight, label: 'Support Tickets', module: 'client_portal' },
+      // The IT services offered in the Client Portal's "Grow Your Business
+      // With Us" section, and what clients have asked for. Rides the same
+      // client_portal purchase gate as the rest of this group — the section
+      // has nowhere to appear without the portal.
+      { href: '/admin/services', icon: HiSparkles, label: 'Services', module: 'client_portal' },
     ],
   },
   {

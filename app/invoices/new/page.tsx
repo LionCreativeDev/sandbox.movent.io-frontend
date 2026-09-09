@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminInvoiceService, InvoicePayload } from '@/lib/services/adminInvoiceService';
@@ -63,11 +63,42 @@ function NewInvoiceForm() {
   const [authResolved, setAuthResolved] = useState(false);
   const [leadPrefilled, setLeadPrefilled] = useState(false);
   const [dealLead, setDealLead] = useState<Lead | null>(null);
+  // How much of this Deal's budget its other invoices have already used, plus
+  // the tenant's Payment Policy. Advisory only — milestone and advance
+  // invoicing are normal, and tax legitimately pushes a total past the
+  // estimate, so going over warns and never blocks (see
+  // App\Services\LeadBudgetContext).
+  //
+  // Carries the lead_id it was fetched for, so switching Deals can't show the
+  // previous one's figures for a render — the check below is what makes that
+  // impossible, rather than clearing this synchronously in the effect.
+  const [budgetCtx, setBudgetCtx] = useState<{
+    lead_id: number;
+    budget: number | null;
+    invoiced_subtotal: number;
+    remaining_budget: number | null;
+    over_budget: boolean;
+    requires_full_payment: boolean;
+  } | null>(null);
   const [clientPrefilled, setClientPrefilled] = useState(false);
 
   // Company + settings
   const [companies, setCompanies]   = useState<ClientCompany[]>([]);
   const [companyId, setCompanyId]   = useState(0);
+  // Whether the admin has to choose the company on this form.
+  //
+  // Normally no: the top bar's company switcher already scopes the whole
+  // screen, so the field is locked to it. But on "All Companies" there is no
+  // single company to inherit — so the field becomes a real picker rather
+  // than quietly defaulting to the first company in the list.
+  //
+  // Read once into state, not on every render: getActiveCompany() reads a
+  // cookie, which doesn't exist during Next.js's server render, and reading
+  // it inline would make SSR and the first client render disagree (the same
+  // hydration trap the isAdmin comment above describes).
+  const [activeCompanyFilter, setActiveCompanyFilter] = useState<number | 'all' | null>(null);
+  useEffect(() => { queueMicrotask(() => setActiveCompanyFilter(getActiveCompany())); }, []);
+  const mustPickCompany = isAdmin && activeCompanyFilter === 'all' && companies.length > 1;
 
   // Company Invoice or Brand Invoice — asked before anything else, since it
   // decides whose name and logo the invoice carries everywhere it's shown
@@ -79,7 +110,12 @@ function NewInvoiceForm() {
   // deliberate one rather than whatever the form happened to default to.
   const [invoiceType, setInvoiceType] = useState<'' | 'company' | 'brand'>('');
   const [brandId, setBrandId]         = useState(0);
-  const [brands, setBrands]           = useState<{ id: number; name: string }[]>([]);
+  // company_id/company_name travel with each brand so the "All Companies"
+  // case can group the dropdown AND read the invoice's company straight off
+  // the brand the admin picks — a brand belongs to exactly one company.
+  const [brands, setBrands] = useState<
+    { id: number; name: string; company_id?: number; company_name?: string | null }[]
+  >([]);
   // The selected company's OWN currency — never a shared/admin-wide value,
   // since one admin can own companies that each invoice in a different
   // currency (see Company::invoicingProfile() on the backend, same fix).
@@ -171,7 +207,16 @@ function NewInvoiceForm() {
         // an invoice straight from the sidebar (no query param) always
         // defaulted to the alphabetically-first company regardless of which
         // one was actually selected as active — including its currency.
+        //
+        // 'all' is the exception: there is no single active company to
+        // inherit, so nothing is pre-selected and the field below turns into
+        // a real picker. Falling back to cs[0] here (as this used to) meant
+        // an admin working across all companies silently invoiced whichever
+        // company happened to be first — including its currency.
         const active = getActiveCompany();
+        if (active === 'all' && !companyIdParam) {
+          return;
+        }
         const fallback = typeof active === 'number' && cs.some(c => c.id === active) ? active : cs[0].id;
         setCompanyId(companyIdParam && cs.some(c => c.id === companyIdParam) ? companyIdParam : fallback);
       }).catch(() => {});
@@ -206,15 +251,26 @@ function NewInvoiceForm() {
   // this user disappears from the dropdown on the next load rather than
   // lingering and failing on save.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!authResolved) return;
+    // Only the single-company case needs a company before it can ask.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (isAdmin && !companyId) { setBrands([]); return; }
-    const url = isAdmin ? `/admin/invoices/brands?company_id=${companyId}` : '/user/invoices/brands';
+    if (isAdmin && !mustPickCompany && !companyId) { setBrands([]); return; }
+
+    // On "All Companies" the company_id is left OFF deliberately, and stays
+    // off even after a brand is picked: the server then follows the top bar's
+    // own filter and returns every company's brands, so the admin can still
+    // switch to a different company's brand. Sending the derived company_id
+    // back would narrow the list to that one company and strand them.
+    const url = !isAdmin
+      ? '/user/invoices/brands'
+      : mustPickCompany
+        ? '/admin/invoices/brands'
+        : `/admin/invoices/brands?company_id=${companyId}`;
+
     api.get(url)
       .then(r => setBrands(r.data.data ?? []))
       .catch(() => setBrands([]));
-  }, [authResolved, companyId, isAdmin]);
+  }, [authResolved, companyId, isAdmin, mustPickCompany]);
 
   // One brand assigned → nothing to choose, so it's filled in and locked.
   // Several → the dropdown stays open for a real choice. And a brand that is
@@ -222,14 +278,44 @@ function NewInvoiceForm() {
   // silently selected.
   useEffect(() => {
     if (brands.length === 1) {
+      // setCompanyId too: the auto-selected brand decides the company just as
+      // a hand-picked one does (see pickBrand below).
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setBrandId(brands[0].id);
+      if (brands[0].company_id) setCompanyId(brands[0].company_id);
       return;
     }
     if (brandId && !brands.some(b => b.id === brandId)) setBrandId(0);
   }, [brands, brandId]);
 
   const onlyOneBrand = brands.length === 1;
+
+  // On a Brand Invoice the picked brand IS the company — a brand belongs to
+  // exactly one. This is what lets "All Companies" skip the company question
+  // entirely, and it is re-derived server-side in
+  // Api\Admin\InvoiceController::resolveInvoiceBranding(), so a tampered
+  // brand/company pairing is refused rather than trusted.
+  //
+  // Set at every point brandId is assigned rather than in an effect watching
+  // it, so the two move together in one render instead of the company
+  // trailing the brand by one.
+  const pickBrand = (id: number) => {
+    setBrandId(id);
+    const company = brands.find(b => b.id === id)?.company_id;
+    if (company) setCompanyId(company);
+  };
+
+  // Brands grouped by company, for the "All Companies" dropdown. One group
+  // per company in the order the server sent them (it orders by company),
+  // so an admin can see whose brand they are choosing.
+  const brandGroups = useMemo(() => {
+    const groups = new Map<string, typeof brands>();
+    brands.forEach(b => {
+      const key = b.company_name ?? '';
+      groups.set(key, [...(groups.get(key) ?? []), b]);
+    });
+    return Array.from(groups.entries());
+  }, [brands]);
 
   // Load this company's projects for the "Existing Project" picker — the
   // same visibility rule the Projects module already applies (created by
@@ -412,6 +498,31 @@ function NewInvoiceForm() {
 
   const fmt = (n: number) => `${currency} ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  // Budget context for the Deal this invoice is for. Waits on authResolved so
+  // it hits the right portal's endpoint — the same reason the rest of this
+  // page does (a staff member calling /admin/* gets logged straight out).
+  useEffect(() => {
+    const leadIdForBudget = dealLead?.id;
+    if (!authResolved || !leadIdForBudget) return;
+
+    api.get(`${isAdmin ? '/admin' : '/user'}/invoices/lead-budget`, { params: { lead_id: leadIdForBudget } })
+      .then(r => setBudgetCtx({ ...r.data.data, lead_id: leadIdForBudget }))
+      // Advisory only — a failure here must never block raising the invoice,
+      // so the block simply doesn't render.
+      .catch(() => {});
+  }, [authResolved, isAdmin, dealLead?.id]);
+
+  // Only ever the context for the Deal currently on screen.
+  const budget = budgetCtx && budgetCtx.lead_id === dealLead?.id ? budgetCtx : null;
+
+  // Compared on SUBTOTAL, never the total: tax is added and any discount
+  // subtracted on top of the quoted work, so a 2,000 budget legitimately
+  // produces a 2,360 invoice. Checking the total would flag every taxed
+  // invoice as over budget. Same rule as LeadBudgetContext server-side.
+  const budgetAfterThis = budget?.budget != null
+    ? Number((budget.budget - budget.invoiced_subtotal - subtotal).toFixed(2))
+    : null;
+
   const [sending, setSending] = useState(false);
 
   // Shared validation + payload build — reused by Save as Draft, Create &
@@ -419,7 +530,15 @@ function NewInvoiceForm() {
   // the error state) if the form isn't ready to submit.
   const buildPayload = (): InvoicePayload | null => {
     if (!invoiceType) { setError('Choose an invoice type — Company Invoice or Brand Invoice'); return null; }
-    if (!companyId) { setError('No company is selected. Pick one from the top bar and try again.'); return null; }
+    // Two different reasons the company can be missing, so two different
+    // messages — telling someone on "All Companies" to go and use the top bar
+    // when the form itself has a picker would just send them the wrong way.
+    if (!companyId) {
+      setError(mustPickCompany
+        ? 'Select which company this invoice is from.'
+        : 'No company is selected. Pick one from the top bar and try again.');
+      return null;
+    }
     if (invoiceType === 'brand' && !brandId) { setError('Select a brand for this Brand Invoice'); return null; }
     if (noGatewayConfigured) { setError('Please activate a payment gateway before creating an invoice.'); return null; }
     if (customerType === 'client' && !clientId) { setError('Select a client, or switch to Guest for an external customer'); return null; }
@@ -647,6 +766,43 @@ function NewInvoiceForm() {
                           No kickoff amount is set on this Deal — enter the correct amount in the line item below before sending.
                         </div>
                       )}
+
+                      {/* Budget consumption + the tenant's Payment Policy.
+                          Figures are subtotals (pre-tax) on both sides, since
+                          that is what a budget is quoted in. Nothing here
+                          blocks the save — several invoices per Deal is
+                          normal, and a deal can genuinely grow past its
+                          estimate. */}
+                      {budget?.budget != null && (
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #bfdbfe', fontSize: 12, color: '#1e3a5f' }}>
+                          <div>
+                            Deal budget <strong>{fmt(budget.budget)}</strong>
+                            {budget.invoiced_subtotal > 0 && <> · already invoiced <strong>{fmt(budget.invoiced_subtotal)}</strong></>}
+                            {budgetAfterThis != null && (
+                              <> · {budgetAfterThis < 0 ? 'over by' : 'left after this'}{' '}
+                                <strong style={{ color: budgetAfterThis < 0 ? '#b45309' : '#1d4ed8' }}>
+                                  {fmt(Math.abs(budgetAfterThis))}
+                                </strong>
+                              </>
+                            )}
+                          </div>
+                          <div style={{ color: '#3b82f6', marginTop: 2 }}>
+                            Compared before tax and discount — this invoice&apos;s subtotal is {fmt(subtotal)}.
+                          </div>
+                          {budgetAfterThis != null && budgetAfterThis < 0 && (
+                            <div style={{ marginTop: 6, padding: '7px 11px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, color: '#92400e' }}>
+                              ⚠️ This takes the Deal past its budget. That&apos;s allowed — check it&apos;s intended.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {budget?.requires_full_payment && (
+                        <div style={{ marginTop: 8, fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '7px 11px' }}>
+                          Payment Policy: <strong>Full Payment Only</strong> — the client has to settle this invoice in
+                          one payment. Raise a smaller invoice if you want a deposit instead.
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -685,26 +841,41 @@ function NewInvoiceForm() {
                       invoice either way (currency, numbering and the bank
                       details stay the company's); a Brand Invoice only changes
                       the identity it is presented under. */}
+                  {/* Company Invoice only. A Brand Invoice needs no company
+                      field even on "All Companies": a brand belongs to
+                      exactly one company, so the brand the admin picks below
+                      already answers it, and asking twice invites the two
+                      answers to disagree. */}
                   {invoiceType === 'company' && (
                     <div style={{ marginBottom: 16 }}>
-                      <label style={lbl}>Company</label>
-                      {/* Read-only: the invoice is raised for whichever company
-                          the dashboard's company switcher is currently on (or
-                          the ?company_id= it was opened with). Picking a
-                          different one here would silently invoice a company
-                          the rest of the screen isn't scoped to. */}
+                      <label style={lbl}>Company{mustPickCompany ? ' *' : ''}</label>
+                      {/* Two states, decided by the top bar's company filter:
+                            one company selected → locked to it, because the
+                              rest of this screen (clients, brands, projects,
+                              currency) is already scoped to that company and
+                              invoicing a different one here would disagree
+                              with all of it.
+                            "All Companies" → a real picker. There is no single
+                              scoped company to inherit, so the old locked
+                              field silently fell back to the first company in
+                              the list and invoiced that one. */}
                       <select
-                        style={{ ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }}
+                        style={mustPickCompany
+                          ? inp
+                          : { ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }}
                         value={companyId}
-                        disabled
+                        disabled={!mustPickCompany}
+                        onChange={e => setCompanyId(Number(e.target.value))}
                       >
-                        <option value={0}>—</option>
+                        <option value={0}>{mustPickCompany ? 'Select a company…' : '—'}</option>
                         {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                       <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>
-                        {isAdmin
-                          ? 'Taken from the company you have selected. Switch companies from the top bar to invoice a different one.'
-                          : 'Your company.'}
+                        {!isAdmin
+                          ? 'Your company.'
+                          : mustPickCompany
+                            ? 'You are viewing All Companies, so pick which one this invoice is from — its currency, invoice number and bank details all come from it.'
+                            : 'Taken from the company you have selected. Switch companies from the top bar to invoice a different one.'}
                       </div>
                     </div>
                   )}
@@ -720,16 +891,44 @@ function NewInvoiceForm() {
                         style={onlyOneBrand ? { ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' } : inp}
                         value={brandId}
                         disabled={onlyOneBrand}
-                        onChange={e => setBrandId(Number(e.target.value))}
+                        onChange={e => pickBrand(Number(e.target.value))}
                       >
                         {!onlyOneBrand && <option value={0}>Select brand…</option>}
-                        {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        {/* Grouped by company only when several companies are
+                            in play — an <optgroup> around a single company's
+                            brands would just repeat the company name the top
+                            bar is already showing. */}
+                        {mustPickCompany
+                          ? brandGroups.map(([company, rows]) => (
+                              <optgroup key={company || 'other'} label={company || 'Other'}>
+                                {rows.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                              </optgroup>
+                            ))
+                          : brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                       {brands.length === 0 && (
                         <div style={{ fontSize: 11.5, color: '#b45309', marginTop: 6 }}>
                           {isAdmin
-                            ? 'No active brands in this company yet — add one under Brands first.'
+                            ? (mustPickCompany
+                                ? 'No active brands in any of your companies yet — add one under Brands first.'
+                                : 'No active brands in this company yet — add one under Brands first.')
                             : 'No brands are assigned to you. Ask your Company Admin to assign one.'}
+                        </div>
+                      )}
+                      {/* Which company the invoice will actually be raised
+                          under, once a brand is picked. Said out loud because
+                          on "All Companies" the brand is the only thing that
+                          decided it — and its currency, invoice number and
+                          bank details all follow from it. */}
+                      {mustPickCompany && brandId > 0 && (
+                        <div style={{ fontSize: 11.5, color: '#059669', marginTop: 6 }}>
+                          Invoice will be raised under{' '}
+                          <strong>
+                            {brands.find(b => b.id === brandId)?.company_name
+                              ?? companies.find(c => c.id === companyId)?.name
+                              ?? '—'}
+                          </strong>
+                          {' '}— this brand&apos;s company.
                         </div>
                       )}
                       {onlyOneBrand && (

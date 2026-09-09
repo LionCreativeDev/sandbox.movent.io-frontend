@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import InvoiceIssuer from '@/components/invoices/InvoiceIssuer';
 import { adminInvoiceService } from '@/lib/services/adminInvoiceService';
 import api from '@/lib/axios';
 import { getAuthType } from '@/lib/auth';
@@ -115,6 +116,12 @@ export default function SendInvoicePage() {
 
         {/* Invoice Summary card */}
         <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '20px 24px', marginBottom: 20 }}>
+          {/* Whose name and logo this is about to go out under. This screen
+              sends the email, so showing the resolved issuer here is the last
+              chance to notice a Brand Invoice was raised under the wrong
+              identity — the same block the detail screen shows, and the same
+              letterhead the client will receive. */}
+          {invoice.branding && <InvoiceIssuer branding={invoice.branding} showBadge />}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
