@@ -19,7 +19,9 @@ import {
   HiEye,
   HiKey,
   HiTrash,
-} from "react-icons/hi2";
+} 
+
+from "react-icons/hi2";
 import DeleteUserModal from "@/components/users/DeleteUserModal";
 import DeleteCompanyPicker from "@/components/users/DeleteCompanyPicker";
 
