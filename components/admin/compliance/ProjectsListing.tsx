@@ -19,7 +19,59 @@ import ProjectOverviewModal from '@/components/admin/compliance/ProjectOverviewM
 import {
   HiOutlineFolderOpen, HiOutlineDocument, HiOutlineClock, HiOutlineMagnifyingGlass,
   HiOutlineCheckCircle, HiOutlinePauseCircle, HiOutlineXCircle,
+  HiOutlinePaperClip, HiOutlineUserCircle, HiOutlineBanknotes,
+  HiOutlineChatBubbleBottomCenterText, HiOutlineChatBubbleLeftRight,
+  HiOutlineArchiveBox, HiOutlineArrowDownTray,
 } from 'react-icons/hi2';
+
+// One color+icon per action, so each button reads at a glance instead of
+// every column showing the same indigo pill with only a tiny header label
+// (and an emoji, which doesn't render as a distinct glyph in every
+// environment/font) to tell them apart.
+const ROW_ACTIONS = {
+  taskFiles:    { icon: HiOutlinePaperClip,                 label: 'Task Files',    color: '#4f46e5', bg: '#eef2ff', border: '#e0e7ff' },
+  projectFiles: { icon: HiOutlineFolderOpen,                label: 'Project Files', color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
+  clientFiles:  { icon: HiOutlineUserCircle,                label: 'Client Files',  color: '#059669', bg: '#ecfdf5', border: '#a7f3d0' },
+  invoices:     { icon: HiOutlineBanknotes,                 label: 'Invoices',      color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
+  comments:     { icon: HiOutlineChatBubbleBottomCenterText, label: 'Comments',      color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+  chat:         { icon: HiOutlineChatBubbleLeftRight,        label: 'Chat',          color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
+  delivery:     { icon: HiOutlineArchiveBox,                 label: 'Delivery',      color: '#e11d48', bg: '#fff1f2', border: '#fecdd3' },
+  zip:          { icon: HiOutlineArrowDownTray,              label: 'Download ZIP', color: '#475569', bg: '#f1f5f9', border: '#cbd5e1' },
+} as const;
+
+// A row's action button — icon + visible label + count, colored per action
+// (see ROW_ACTIONS) so "which button is this" never depends on reading the
+// column header or squinting at an emoji.
+function RowAction({
+  action, count, onClick, disabled, title, labelOverride,
+}: {
+  action: keyof typeof ROW_ACTIONS;
+  count?: number;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+  labelOverride?: string;
+}) {
+  const { icon: Icon, label: defaultLabel, color, bg, border } = ROW_ACTIONS[action];
+  const label = labelOverride ?? defaultLabel;
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? (count !== undefined ? `${label}: ${count}` : label)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '5px 9px', borderRadius: 7, border: `1.5px solid ${border}`, background: bg,
+        color, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+        cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1,
+      }}
+    >
+      <Icon size={13} />
+      <span>{label}</span>
+      {count !== undefined && <span style={{ opacity: 0.7 }}>({count})</span>}
+    </button>
+  );
+}
 
 const STATUS_LABEL: Record<ComplianceCaseStatus, string> = {
   not_started: 'Not Started',
@@ -206,8 +258,8 @@ export default function ProjectsListing({
               <thead>
                 <tr style={{ background: '#f8fafc' }}>
                   {(embedded
-                    ? ['#', 'Project', 'Task Attach', 'Project Attach', 'Client Attach', 'Invoices', 'Comments', 'Chat', 'Delivery', 'ZIP']
-                    : ['#', 'ID', 'Project', 'Task Attach', 'Project Attach', 'Client Attach', 'Invoices', 'Comments', 'Chat', 'Delivery', 'ZIP']
+                    ? ['#', 'Project', 'Task Files', 'Project Files', 'Client Files', 'Invoices', 'Comments', 'Chat', 'Delivery', 'Download']
+                    : ['#', 'ID', 'Project', 'Task Files', 'Project Files', 'Client Files', 'Invoices', 'Comments', 'Chat', 'Delivery', 'Download']
                   ).map(h => (
                     <th key={h} style={{
                       padding: '9px 6px', textAlign: 'left', fontSize: 10.5, fontWeight: 700,
@@ -237,102 +289,62 @@ export default function ProjectsListing({
                       </div>
                     </td>
                     <td style={{ padding: '9px 8px' }} onClick={e => e.stopPropagation()}>
-                      <button
+                      <RowAction
+                        action="taskFiles"
+                        count={c.task_attachments_count ?? 0}
                         onClick={() => setTaskAttachmentsModalProject({ id: c.project.id, name: c.project.name })}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '4px 7px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff',
-                          color: '#4f46e5', fontSize: 10.5, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        📎 ({c.task_attachments_count ?? 0})
-                      </button>
+                      />
                     </td>
                     <td style={{ padding: '9px 8px' }} onClick={e => e.stopPropagation()}>
-                      <button
+                      <RowAction
+                        action="projectFiles"
+                        count={c.project_attachments_count ?? 0}
                         onClick={() => setProjectAttachmentsModalProject({ id: c.project.id, name: c.project.name })}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '4px 7px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff',
-                          color: '#4f46e5', fontSize: 10.5, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        📎 ({c.project_attachments_count ?? 0})
-                      </button>
+                      />
                     </td>
                     <td style={{ padding: '9px 8px' }} onClick={e => e.stopPropagation()}>
-                      <button
+                      <RowAction
+                        action="clientFiles"
+                        count={c.client_attachments_count ?? 0}
                         onClick={() => setClientAttachmentsModalProject({ id: c.project.id, name: c.project.name })}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '4px 7px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff',
-                          color: '#4f46e5', fontSize: 10.5, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        📎 ({c.client_attachments_count ?? 0})
-                      </button>
+                      />
                     </td>
                     <td style={{ padding: '9px 8px' }} onClick={e => e.stopPropagation()}>
-                      <button
+                      <RowAction
+                        action="invoices"
+                        count={c.invoices_count ?? 0}
                         onClick={() => setInvoicesModalProject({ id: c.project.id, name: c.project.name })}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '4px 7px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff',
-                          color: '#4f46e5', fontSize: 10.5, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        🧾 ({c.invoices_count ?? 0})
-                      </button>
+                      />
                     </td>
                     <td style={{ padding: '9px 8px' }} onClick={e => e.stopPropagation()}>
-                      <button
+                      <RowAction
+                        action="comments"
+                        count={c.comments_count ?? 0}
                         onClick={() => setCommentsModalProject({ id: c.project.id, projectName: c.project.name })}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '4px 7px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff',
-                          color: '#4f46e5', fontSize: 10.5, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        🗨️ ({c.comments_count ?? 0})
-                      </button>
+                      />
                     </td>
                     <td style={{ padding: '9px 8px' }} onClick={e => e.stopPropagation()}>
-                      <button
+                      <RowAction
+                        action="chat"
                         onClick={() => setChatModalProject({ id: c.project.id, name: c.project.name })}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '4px 7px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff',
-                          color: '#4f46e5', fontSize: 10.5, fontWeight: 500, cursor: 'pointer',
-                        }}
-                      >
-                        💬
-                      </button>
+                        title="Open Chat"
+                      />
                     </td>
                     <td style={{ padding: '9px 8px' }} onClick={e => e.stopPropagation()}>
-                      <button
+                      <RowAction
+                        action="delivery"
+                        count={c.final_delivery_count ?? 0}
                         onClick={() => setFinalDeliveryModalProject({ id: c.project.id, name: c.project.name })}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '4px 7px', borderRadius: 7, border: '1.5px solid #e0e7ff', background: '#eef2ff',
-                          color: '#4f46e5', fontSize: 10.5, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        📦 ({c.final_delivery_count ?? 0})
-                      </button>
+                      />
                     </td>
                     <td style={{ padding: '9px 8px' }}>
-                      <button
+                      <RowAction
+                        action="zip"
                         onClick={() => downloadProjectZip(c.project.id, c.project.name)}
                         disabled={downloadingId === c.project.id}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                          padding: '4px 7px', borderRadius: 7, border: '1.5px solid #bfdbfe', background: '#eff6ff',
-                          color: '#2563eb', fontSize: 10.5, fontWeight: 500,
-                          cursor: downloadingId === c.project.id ? 'default' : 'pointer',
-                        }}
-                      >
-                        {downloadingId === c.project.id ? '…' : '⬇'}
-                      </button>
+                        labelOverride={downloadingId === c.project.id ? 'Preparing…' : undefined}
+                        title={downloadingId === c.project.id ? 'Preparing download…' : 'Download all compliance documents as a ZIP'}
+                      />
                     </td>
                   </tr>
                 ))}

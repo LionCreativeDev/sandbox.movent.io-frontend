@@ -1150,12 +1150,25 @@ function RegisterContent() {
         toast.error(prev.includes('sales') ? DEPENDENCY_ERRORS.sales : DEPENDENCY_ERRORS.finance);
         return prev;
       }
+      // Compliance needs Projects AND Invoice both present — block removing
+      // either one while Compliance itself is still selected. Removing
+      // Compliance is unaffected (that branch never touches this key), so
+      // Projects/Invoice stay if they were picked manually or by anything
+      // else that needs them.
+      if ((key === 'invoice' || key === 'projects') && prev.includes(key) && prev.includes('compliance')) {
+        toast.error(DEPENDENCY_ERRORS.compliance);
+        return prev;
+      }
 
       if (prev.includes(key)) return prev.filter(k => k !== key);
 
       const next = [...prev, key];
       if ((key === 'sales' || key === 'finance') && !next.includes('invoice')) {
         next.push('invoice');
+      }
+      if (key === 'compliance') {
+        if (!next.includes('projects')) next.push('projects');
+        if (!next.includes('invoice')) next.push('invoice');
       }
       return next;
     });
@@ -1768,7 +1781,11 @@ function RegisterContent() {
                         <div className='grid max-[420px]:grid-cols-1 grid-cols-2 md:grid-cols-3 items-center gap-2 w-full mb-10'>
                           {visibleCategories.map(cat => {
                             const active = selectedCategories.includes(cat.key);
-                            const locked = cat.key === 'invoice' && requiredDeps.includes('invoice');
+                            // requiredDeps only ever holds keys another selected
+                            // category currently depends on (Invoice for
+                            // Sales/Finance; Invoice + Projects for Compliance) —
+                            // any of them being present means this tile is locked.
+                            const locked = requiredDeps.includes(cat.key);
                             const CatIcon = cat.icon;
                             return (
                               <div key={cat.key} onClick={() => toggleCategory(cat.key)} style={{

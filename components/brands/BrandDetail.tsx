@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { brandService, Brand, BrandPermissions, AssignableUser } from '@/lib/services/brandService';
-import { getAuthType } from '@/lib/auth';
+import { getAuthType, setActiveCompany } from '@/lib/auth';
 import { handleNotFound } from '@/lib/notFound';
 import { lbl, card } from '@/components/admin/projects/shared';
 import {
@@ -12,8 +12,11 @@ import {
 } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
 
-// One brand, in full: its details, the team who work it, and — for a Company
-// Admin who owns more than one company — moving it to another of them.
+// One brand, in full: its details, the team who work it, and — for a brand
+// keeper with more than one company — moving it to another of them. The keeper
+// is the Company Admin in their own portal, and the Admin role on the staff
+// side; there the destination list is the companies they hold brand edit
+// rights in, and the switcher follows the brand across after the move.
 //
 // Assigning is a SET, not a single pick: several Sellers / Lead Managers can
 // share one trading name. Only staff holding Invoice create/manage rights in
@@ -57,7 +60,9 @@ export default function BrandDetail({ brandId }: { brandId: number }) {
   const [selected, setSelected] = useState<number[]>([]);
   const [savingAssign, setSavingAssign] = useState(false);
 
-  // Transfer panel (Company Admin, more than one company)
+  // Transfer panel — the brand keeper with more than one company: a Company
+  // Admin across the companies they own, an Admin-role staff member across
+  // the ones they hold brand edit rights in.
   const [companies, setCompanies] = useState<{ id: number; name: string }[]>([]);
   const [targetCompany, setTargetCompany] = useState<number | ''>('');
   const [transferring, setTransferring] = useState(false);
@@ -66,13 +71,24 @@ export default function BrandDetail({ brandId }: { brandId: number }) {
     if (isAdmin) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPerms(ADMIN_PERMS);
-      brandService.companyOptions().then(setCompanies).catch(() => setCompanies([]));
       return;
     }
     brandService.permissions()
       .then(setPerms)
       .catch(() => setPerms({ can_view: false, can_create: false, can_edit: false, can_delete: false }));
   }, [isAdmin]);
+
+  // Only the brand keeper moves a brand. On the staff side that's the Admin
+  // role, which is exactly what `can_edit` means there — an assigned Seller
+  // comes back view_only, so this stays false and the panel never renders.
+  const canTransfer = isAdmin || !!(perms?.can_edit && !perms?.view_only);
+
+  // Destination companies. Fetched once permissions have confirmed the
+  // keeper, so a view-only viewer never calls an endpoint that would 403.
+  useEffect(() => {
+    if (!canTransfer) return;
+    brandService.companyOptions().then(setCompanies).catch(() => setCompanies([]));
+  }, [canTransfer]);
 
   const load = () => {
     setLoading(true);
@@ -115,6 +131,7 @@ export default function BrandDetail({ brandId }: { brandId: number }) {
       `Move "${brand?.name}" to ${name}?\n\n`
       + `Anyone assigned who isn't staff of ${name} will be removed from this brand. `
       + `Invoices already raised under it stay exactly as they are.`
+      + (isAdmin ? '' : `\n\nYou will be switched to ${name} — that's where the brand lives from now on.`)
     )) return;
     setTransferring(true);
     try {
@@ -122,6 +139,16 @@ export default function BrandDetail({ brandId }: { brandId: number }) {
       setBrand(updated);
       setSelected(updated.assigned_users.map(u => u.id));
       setTargetCompany('');
+      // Every staff-side read here is scoped to whichever company the topbar
+      // switcher is on, and the brand has just left that one — so follow it
+      // across rather than leave the page holding a brand it can no longer
+      // fetch (a refresh would 404). The Company Admin needs none of this:
+      // their API spans every company they own. 'auth_refreshed' is what the
+      // topbar listens on to redraw the company it names.
+      if (!isAdmin) {
+        setActiveCompany(updated.company_id);
+        window.dispatchEvent(new Event('auth_refreshed'));
+      }
       // The API's own message carries the detail (assignees dropped, invoices
       // left behind), so it's shown rather than a generic line.
       toast.success(`Brand moved to ${name}`, { duration: 5000 });
@@ -300,17 +327,17 @@ export default function BrandDetail({ brandId }: { brandId: number }) {
           )}
         </div>
 
-        {/* Transfer — Company Admin with more than one company */}
-        {isAdmin && companies.length > 1 && (
+        {/* Transfer — brand keeper with more than one company */}
+        {canTransfer && companies.length > 1 && (
           <div style={card}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <HiArrowRightCircle size={16} color="#d97706" />
               <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Transfer to Another Company</h3>
             </div>
             <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14 }}>
-              Moves this brand to another company you own. Assignees who aren&apos;t staff of that company are
-              removed. Invoices already raised under this brand are left as they are — they keep showing the
-              same name and logo.
+              Moves this brand to {isAdmin ? 'another company you own' : 'another of your companies where you manage brands'}.
+              Assignees who aren&apos;t staff of that company are removed. Invoices already raised under this
+              brand are left as they are — they keep showing the same name and logo.
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
               <select

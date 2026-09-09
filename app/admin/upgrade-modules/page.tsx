@@ -50,7 +50,7 @@ const CATEGORY_STYLE: Record<string, { icon: IconType; color: string; bg: string
   sales:         { icon: HiDocumentText,           color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', badge: 'Requires Invoice' },
   client_portal: { icon: HiUsers,                  color: '#10b981', bg: '#ecfdf5', border: '#6ee7b7', badge: 'Requires Invoice or Project' },
   projects:      { icon: HiClipboardDocumentList,  color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc', badge: 'Can be used alone' },
-  compliance:    { icon: HiShieldCheck,             color: '#dc2626', bg: '#fef2f2', border: '#fecaca', badge: 'Can be used alone' },
+  compliance:    { icon: HiShieldCheck,             color: '#dc2626', bg: '#fef2f2', border: '#fecaca', badge: 'Requires Projects + Invoice' },
   hr:            { icon: HiUsers,                  color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', badge: 'Can be used alone' },
   finance:       { icon: HiBanknotes,               color: '#d97706', bg: '#fffbeb', border: '#fde68a', badge: 'Requires Invoice' },
   invoice:       { icon: HiDocumentText,           color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', badge: 'Can be used alone' },
@@ -61,12 +61,17 @@ const DEPENDENCY_ERRORS: Record<string, string> = {
   sales: 'Invoice module is required because Sales includes invoice features.',
   client_portal: 'Client module requires Invoice or Project.',
   finance: 'Invoice module is required because Finance depends on invoice and payment data.',
+  compliance: 'Compliance requires both the Project and Invoice modules.',
 };
 
 function requiredDependencyKeys(keys: string[]): string[] {
   const deps: string[] = [];
   if ((keys.includes('sales') || keys.includes('finance')) && keys.includes('invoice')) {
     deps.push('invoice');
+  }
+  if (keys.includes('compliance')) {
+    if (keys.includes('projects') && !deps.includes('projects')) deps.push('projects');
+    if (keys.includes('invoice') && !deps.includes('invoice')) deps.push('invoice');
   }
   return deps;
 }
@@ -77,6 +82,9 @@ function moduleDependencyErrors(keys: string[]): string[] {
   if (keys.includes('finance') && !keys.includes('invoice')) errors.push(DEPENDENCY_ERRORS.finance);
   if (keys.includes('client_portal') && !keys.includes('invoice') && !keys.includes('projects')) {
     errors.push(DEPENDENCY_ERRORS.client_portal);
+  }
+  if (keys.includes('compliance') && (!keys.includes('projects') || !keys.includes('invoice'))) {
+    errors.push(DEPENDENCY_ERRORS.compliance);
   }
   return errors;
 }
@@ -154,6 +162,14 @@ export default function UpgradeModulesPage() {
       toast.error(selected.includes('sales') ? DEPENDENCY_ERRORS.sales : DEPENDENCY_ERRORS.finance);
       return;
     }
+    // Compliance needs Projects AND Invoice both active — block removing
+    // either one (from this purchase's selection) while Compliance is still
+    // selected for purchase. Removing Compliance itself is unaffected, so
+    // Projects/Invoice stay if owned, selected manually, or needed elsewhere.
+    if ((key === 'invoice' || key === 'projects') && selected.includes(key) && selected.includes('compliance')) {
+      toast.error(DEPENDENCY_ERRORS.compliance);
+      return;
+    }
 
     if (selected.includes(key)) {
       setSelected(selected.filter(k => k !== key));
@@ -164,6 +180,12 @@ export default function UpgradeModulesPage() {
     if ((key === 'sales' || key === 'finance') && !next.includes('invoice') && !owned.includes('invoice')) {
       next.push('invoice');
       toast.success(`Invoice added automatically — required by ${key === 'sales' ? 'Sales' : 'Finance'}.`);
+    }
+    if (key === 'compliance') {
+      const added: string[] = [];
+      if (!next.includes('projects') && !owned.includes('projects')) { next.push('projects'); added.push('Project'); }
+      if (!next.includes('invoice') && !owned.includes('invoice')) { next.push('invoice'); added.push('Invoice'); }
+      if (added.length) toast.success(`${added.join(' and ')} added automatically — required by Compliance.`);
     }
     setSelected(next);
   };
@@ -618,7 +640,11 @@ export default function UpgradeModulesPage() {
                 const CatIcon = style.icon;
                 const isOwned = owned.includes(mod.key);
                 const active = selected.includes(mod.key);
-                const locked = mod.key === 'invoice' && requiredDeps.includes('invoice');
+                // requiredDeps only ever holds keys another selected module
+                // currently depends on (Invoice for Sales/Finance; Invoice +
+                // Projects for Compliance) — any of them being present means
+                // this tile is locked.
+                const locked = requiredDeps.includes(mod.key);
 
                 return (
                   <div key={mod.key} onClick={() => toggleModule(mod.key)} style={{

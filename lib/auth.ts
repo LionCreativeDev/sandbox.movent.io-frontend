@@ -30,6 +30,17 @@ export const getAuthUser = (): User | Admin | null => {
 };
 
 export const getAuthType = () => Cookies.get('auth_type') || null;
+
+// The Admin role is the Company Admin's deputy on the staff side: in the user
+// management screens it manages the whole roster (other Admins and other User
+// Managers included), assigns any role including Admin, and hands out the User
+// Management Permission — everything the tenant owner does. An ordinary
+// delegated manager (canAddUsers on some other role) does none of those four.
+//
+// This mirrors Api\User\UserManagementController::isDeputyAdmin(), which is
+// the real gate; here it only decides which controls are worth rendering.
+export const isDeputyAdmin = (): boolean =>
+  getAuthType() === 'user' && (getAuthUser() as User | null)?.role_type === 'admin';
 export const getToken    = () => Cookies.get('auth_token') || null;
 export const isAuthenticated = () => !!Cookies.get('auth_token');
 

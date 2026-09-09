@@ -207,12 +207,14 @@ function NewInvoiceForm() {
   // lingering and failing on save.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!authResolved) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isAdmin && !companyId) { setBrands([]); return; }
     const url = isAdmin ? `/admin/invoices/brands?company_id=${companyId}` : '/user/invoices/brands';
     api.get(url)
       .then(r => setBrands(r.data.data ?? []))
       .catch(() => setBrands([]));
-  }, [companyId, isAdmin]);
+  }, [authResolved, companyId, isAdmin]);
 
   // One brand assigned → nothing to choose, so it's filled in and locked.
   // Several → the dropdown stays open for a real choice. And a brand that is

@@ -522,7 +522,7 @@ import { SIMPLE_PROJECT_PERMISSIONS, collapseProjectPermissions } from '@/lib/si
 import { CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, getRoleDefaultPermissions, rolesFor } from '@/lib/roleUtils';
 import { CompanyOption } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
-import { getAuthType } from '@/lib/auth';
+import { getAuthType, isDeputyAdmin } from '@/lib/auth';
 import { HiArrowLeft, HiArrowRight, HiCheckCircle, HiClipboard, HiUserGroup, HiCheck } from 'react-icons/hi2';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
@@ -598,6 +598,11 @@ export default function NewUserPage() {
   // that second case.
   const usersRoot = getAuthType() === 'admin' ? '/admin/users' : '/user-management';
   const isAdmin = getAuthType() === 'admin';
+  // The Admin role is the Company Admin's deputy: it assigns the same roles
+  // (Admin included) and hands out the User Management Permission, so those
+  // two controls are rendered for it as well. The server is the real gate —
+  // Api\User\UserManagementController::isDeputyAdmin().
+  const ownerReach = isAdmin || isDeputyAdmin();
 
   // Steps 1-3
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -886,7 +891,7 @@ export default function NewUserPage() {
                   <label style={lbl}>Role *</label>
                   <select style={inp} value={role} onChange={e => setRole(e.target.value)}>
                     <option value="">Select a role…</option>
-                    {rolesFor(isAdmin).map(r => (
+                    {rolesFor(ownerReach).map(r => (
                       <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
                     <option value={CUSTOM_ROLE_SENTINEL}>+ Custom Role…</option>
@@ -902,7 +907,7 @@ export default function NewUserPage() {
                     <div>
                       <label style={lbl}>Behaves Like *</label>
                       <select style={inp} value={customRoleBase} onChange={e => setCustomRoleBase(e.target.value)}>
-                        {rolesFor(isAdmin, CUSTOM_ROLE_BASE_OPTIONS).map(r => (
+                        {rolesFor(ownerReach, CUSTOM_ROLE_BASE_OPTIONS).map(r => (
                           <option key={r.value} value={r.value}>{r.label}</option>
                         ))}
                       </select>
@@ -1046,10 +1051,11 @@ export default function NewUserPage() {
                 })()}
 
                 {/* Add Users — one common toggle per company, not per module.
-                    Company Admin only: a delegated manager can never pass the
+                    Owner reach only: a DELEGATED manager can never pass the
                     User Management Permission on (that would let the first
-                    manager mint more managers), so the box isn't offered. */}
-                {isAdmin && activeCompanyId !== null && (() => {
+                    manager mint more managers), so the box isn't offered to
+                    them. The Company Admin and its deputy both hand it out. */}
+                {ownerReach && activeCompanyId !== null && (() => {
                   const canThisUserAddUsers = (perms[activeCompanyId]?.['account'] ?? []).includes('canAddUsers');
                   return (
                     <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderRadius: 12, border: `1.5px solid ${canThisUserAddUsers ? '#2563eb40' : '#e2e8f0'}`, background: canThisUserAddUsers ? '#eff6ff' : '#fafafa', marginBottom: 16, cursor: 'pointer' }}>

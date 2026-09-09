@@ -9,10 +9,15 @@ import { User, Permission, CompanyOption, DataScope, UserDeleteImpact, UserCompa
 // they actually belong to. That switch is what lets the SAME Add User / Edit
 // User pages serve both without a second copy of either.
 //
-// Only the endpoints that exist on both sides go through base(). Invite,
-// resend-invite, reset-password, activity, delete-impact/reassign/permanent
-// delete stay hardcoded to /admin/users — they are Company Admin-only, and
-// the pages hide those controls for staff rather than calling them.
+// Every endpoint here now exists on both sides, so all of them go through
+// base(). Invite, resend-invite, reset-password, activity, and the
+// delete-impact / reassign / permanent-delete trio exist on the staff side
+// for the Admin ROLE only — the Company Admin's deputy — and the staff API
+// refuses an ordinary delegated User Manager (refuseUnlessDeputy()). The
+// pages gate on isDeputyAdmin() so those controls aren't rendered into a 403.
+//
+// The one exception is syncPermissions() at the bottom: legacy old-style
+// UserPermission rows, no staff counterpart, and nothing in the app calls it.
 const base = () => (getAuthType() === 'admin' ? '/admin/users' : '/user/users');
 
 export interface CompanyAssignmentPayload {
@@ -88,13 +93,17 @@ const create = async (payload: UserPayload): Promise<User> => {
   return res.data.data;
 };
 
+// Invite, reset password, the Impact Summary trio and the activity log all
+// go through base() now: the Admin role is the Company Admin's deputy and has
+// the matching /user/users/* routes, which refuse an ordinary delegated User
+// Manager (Api\User\UserManagementController::refuseUnlessDeputy()).
 const invite = async (payload: InvitePayload): Promise<User> => {
-  const res = await api.post('/admin/users/invite', payload);
+  const res = await api.post(`${base()}/invite`, payload);
   return res.data.data;
 };
 
 const resendInvite = async (id: number): Promise<User> => {
-  const res = await api.post(`/admin/users/${id}/resend-invite`);
+  const res = await api.post(`${base()}/${id}/resend-invite`);
   return res.data.data;
 };
 
@@ -104,12 +113,12 @@ const toggleStatus = async (id: number, status: 'active' | 'suspended', companyI
 };
 
 const resetPassword = async (id: number): Promise<{ password: string }> => {
-  const res = await api.post(`/admin/users/${id}/reset-password`);
+  const res = await api.post(`${base()}/${id}/reset-password`);
   return res.data.data;
 };
 
 const getActivity = async (id: number, companyId?: number): Promise<UserActivity> => {
-  const res = await api.get(`/admin/users/${id}/activity`, { params: companyId ? { company_id: companyId } : {} });
+  const res = await api.get(`${base()}/${id}/activity`, { params: companyId ? { company_id: companyId } : {} });
   return res.data.data;
 };
 
@@ -127,17 +136,17 @@ const remove = async (id: number, companyId?: number): Promise<void> => {
   await api.delete(`${base()}/${id}`, { params: companyId ? { company_id: companyId } : {} });
 };
 
-// How much this user is holding in each company the admin can act on. Feeds
+// How much this user is holding in each company the caller can act on. Feeds
 // the company picker a multi-company user gets before the Impact Summary.
 const companyWorkload = async (id: number): Promise<UserCompanyWorkload[]> => {
-  const res = await api.get(`/admin/users/${id}/company-workload`);
+  const res = await api.get(`${base()}/${id}/company-workload`);
   return res.data.data;
 };
 
 // Everything this user holds in one company, for the Impact Summary modal.
 // Read this before remove() or deletePermanently() — neither is reversible.
 const deleteImpact = async (id: number, companyId?: number): Promise<UserDeleteImpact> => {
-  const res = await api.get(`/admin/users/${id}/delete-impact`, {
+  const res = await api.get(`${base()}/${id}/delete-impact`, {
     params: companyId ? { company_id: companyId } : {},
   });
   return res.data.data;
@@ -151,7 +160,7 @@ const reassign = async (
   companyId: number | undefined,
   targets: Record<string, number>,
 ): Promise<{ moved: Record<string, number>; impact: UserDeleteImpact }> => {
-  const res = await api.post(`/admin/users/${id}/reassign`, { ...targets, company_id: companyId });
+  const res = await api.post(`${base()}/${id}/reassign`, { ...targets, company_id: companyId });
   return res.data.data;
 };
 
@@ -159,7 +168,7 @@ const reassign = async (
 // it their timesheets, team memberships, chat participation, notifications
 // and uploaded folder files. `force` is required while blockers remain.
 const deletePermanently = async (id: number, companyId?: number, force = false): Promise<void> => {
-  await api.delete(`/admin/users/${id}/permanent`, { data: { company_id: companyId, force } });
+  await api.delete(`${base()}/${id}/permanent`, { data: { company_id: companyId, force } });
 };
 
 const getCompanyPermissions = async (

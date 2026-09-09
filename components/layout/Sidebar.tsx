@@ -31,11 +31,7 @@ const ADMIN_NAV_GROUPS = [
       { href: '/admin/leads',      icon: HiUserGroup,    label: 'Leads',           module: 'leads' },
       { href: '/admin/follow-ups', icon: HiCalendarDays, label: 'Follow-ups',      module: 'leads' },
       { href: '/admin/sales/reports', icon: HiChartBar,  label: 'Sales Reports',   module: 'leads' },
-      // Deliberately ungated (no `module` key) — always visible for Company
-      // Admin, independent of whether the Sales module is purchased (see
-      // Api\Admin\SalesTargetController, itself registered outside any
-      // `module:` route middleware for the same reason).
-      { href: '/admin/sales/targets', icon: HiFlag, label: 'Target' },
+      { href: '/admin/sales/targets', icon: HiFlag, label: 'Target', module: 'leads' },
       // A "Basic Clients" admin nav item pointing at /admin/clients used to
       // live here, but every AdminClientController route requires the real
       // Client module (routes/api.php's `module:client_portal` gate) — it

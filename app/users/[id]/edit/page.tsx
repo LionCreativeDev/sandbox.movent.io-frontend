@@ -9,7 +9,7 @@ import { CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, getRoleDefaultPermissio
 import { handleNotFound } from '@/lib/notFound';
 import { CompanyOption, User } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
-import { getAuthType } from '@/lib/auth';
+import { getAuthType, isDeputyAdmin } from '@/lib/auth';
 import { HiArrowLeft } from 'react-icons/hi2';
 import PhoneInput from '@/components/ui/PhoneInput';
 import DeleteUserModal from '@/components/users/DeleteUserModal';
@@ -89,6 +89,10 @@ function EditUserPageContent() {
   // below and where Cancel/Back returns to.
   const isAdmin = getAuthType() === 'admin';
   const usersRoot = isAdmin ? '/admin/users' : '/user-management';
+  // Same reach as the Company Admin over roles and the User Management
+  // Permission — see the note in /users/new and
+  // Api\User\UserManagementController::isDeputyAdmin().
+  const ownerReach = isAdmin || isDeputyAdmin();
 
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
@@ -195,6 +199,10 @@ function EditUserPageContent() {
   // makes the same userService.remove(id, companyId) call at the end.
   const [unassignCompanyId, setUnassignCompanyId] = useState<number | null>(null);
 
+  // A deputy Admin takes a company away as well — Add Company on this screen
+  // was never gated, so leaving Remove behind made the pair one-way. It runs
+  // the same DeleteUserModal the Company Admin gets: the Impact Summary and
+  // its "reassign first" step now exist on the staff API too.
   const onCompanyUnassigned = (companyId: number) => {
     const remainingIds = assignedIds.filter(cid => cid !== companyId);
     setAssignedIds(remainingIds);
@@ -332,7 +340,7 @@ function EditUserPageContent() {
                   <label style={lbl}>Role</label>
                   <select style={inp} value={roleSelectValue} onChange={e => handleRoleSelectChange(e.target.value)}>
                     <option value="">Auto-detect from assigned modules</option>
-                    {rolesFor(isAdmin).map(r => (
+                    {rolesFor(ownerReach).map(r => (
                       <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
                     <option value={CUSTOM_ROLE_SENTINEL}>+ Custom Role…</option>
@@ -347,7 +355,7 @@ function EditUserPageContent() {
                     <div>
                       <label style={lbl}>Behaves Like *</label>
                       <select style={inp} value={form.role_type || 'team_member'} onChange={e => handleRoleChange(e.target.value)}>
-                        {rolesFor(isAdmin, CUSTOM_ROLE_BASE_OPTIONS).map(r => (
+                        {rolesFor(ownerReach, CUSTOM_ROLE_BASE_OPTIONS).map(r => (
                           <option key={r.value} value={r.value}>{r.label}</option>
                         ))}
                       </select>
@@ -417,11 +425,11 @@ function EditUserPageContent() {
                             <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', whiteSpace: 'nowrap' }}>
                               {totalSelected} permission{totalSelected === 1 ? '' : 's'} selected
                             </span>
-                            {/* Company Admin only, matching the delegated Users
-                                list where Remove is hidden too: taking someone's
-                                company away is the one action a User Manager
-                                doesn't get. */}
-                            {isAdmin && (
+                            {/* Owner reach only, matching the delegated Users
+                                list where Remove is hidden too: taking
+                                someone's company away is the one action a
+                                DELEGATED User Manager doesn't get. */}
+                            {ownerReach && (
                               <button
                                 type="button"
                                 onClick={() => setUnassignCompanyId(activeCompanyId)}
@@ -455,12 +463,13 @@ function EditUserPageContent() {
                     )}
 
                     {/* Add Users — one common toggle per company, not per
-                        module. Company Admin only: a delegated manager can
+                        module. Owner reach only: a DELEGATED manager can
                         neither grant this permission nor take it away, so the
                         box is not offered to them (the server refuses either
                         way, and refuses to open this page at all for someone
-                        who already holds it). */}
-                    {isAdmin && activeCompanyId !== null && (() => {
+                        who already holds it). The Company Admin's deputy both
+                        grants and revokes it, exactly as the owner does. */}
+                    {ownerReach && activeCompanyId !== null && (() => {
                       const canThisUserAddUsers = (perms[activeCompanyId]?.['account'] ?? []).includes('canAddUsers');
                       return (
                         <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderRadius: 10, border: `1.5px solid ${canThisUserAddUsers ? '#2563eb40' : '#e2e8f0'}`, background: canThisUserAddUsers ? '#eff6ff' : '#fafafa', marginBottom: 16, cursor: 'pointer' }}>

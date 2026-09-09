@@ -136,18 +136,20 @@ const assign = async (id: number, userIds: number[]): Promise<Brand> => {
   return res.data.data;
 };
 
-// Move a brand to another company the same Company Admin owns. Admin-only —
-// a staff member never works across companies here. Refused once the brand
-// has invoices raised under it.
+// Move a brand to another company. Both portals have it, each with its own
+// idea of "another company": a Company Admin's own companies, or — for the
+// staff-side brand keeper (the Admin role) — the companies they hold brand
+// edit rights in. Invoices already raised under the brand are left alone.
 const transfer = async (id: number, companyId: number): Promise<Brand> => {
-  const res = await api.patch(`/admin/brands/${id}/transfer`, { company_id: companyId });
+  const res = await api.patch(`${base()}/${id}/transfer`, { company_id: companyId });
   return res.data.data;
 };
 
-// Admin-only: which company to file a brand under. A staff member never
-// picks — their brands go to the company they're working in.
+// Which companies this caller may file/move a brand under — feeds the Add
+// form's picker on the admin side and the Transfer destination dropdown on
+// both. Fewer than two entries means the Transfer panel isn't shown at all.
 const companyOptions = async (): Promise<{ id: number; name: string }[]> => {
-  const res = await api.get('/admin/brands/company-options');
+  const res = await api.get(`${base()}/company-options`);
   return res.data.data;
 };
 

@@ -3,13 +3,13 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { staffUserService } from '@/lib/services/staffUserService';
-import { can, getAuthUser } from '@/lib/auth';
+import { userService } from '@/lib/services/userService';
+import { can, getAuthUser, getActiveCompany, isDeputyAdmin } from '@/lib/auth';
 import { User, CompanyOption } from '@/types';
 import { roleDisplayLabel } from '@/lib/roleUtils';
-import { lbl, card } from '@/components/admin/projects/shared';
 import {
   HiUserPlus, HiPencilSquare, HiNoSymbol, HiPlay,
-  HiCheckCircle, HiArrowPath, HiLockClosed,
+  HiCheckCircle, HiArrowPath, HiLockClosed, HiEye, HiClipboard, HiKey,
 } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
 
@@ -25,10 +25,16 @@ import toast from 'react-hot-toast';
 // manageableCompanyIds()) and the company picker below is literally built
 // from what it hands back.
 //
-// Two things a manager can never do, enforced on both sides:
+// Two things a DELEGATED manager can never do, enforced on both sides:
 //   • grant the User Management Permission to anyone (no minting more managers)
 //   • touch someone who already holds it — those rows are listed by name only,
 //     so the roster stays complete, and nothing else.
+//
+// Neither cap applies to the Admin role, which is the Company Admin's deputy
+// here: it administers the whole roster, other Admins and other User Managers
+// included. Api\User\UserManagementController::isDeputyAdmin() is the gate,
+// and it spells out what still holds (nobody edits their own account, and the
+// owner's own CompanyAdmin login is unreachable from this API either way).
 
 const STATUS_CFG: Record<string, { color: string; bg: string; label: string }> = {
   active:    { color: '#059669', bg: '#ecfdf5', label: 'Active'    },
@@ -63,6 +69,8 @@ export default function UserManagementPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
   const allowed = can('account', 'canAddUsers');
+  // A deputy Admin administers peers too, so no row is locked for them.
+  const deputy = isDeputyAdmin();
 
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [companyId, setCompanyId] = useState<number | null>(null);
@@ -75,10 +83,21 @@ export default function UserManagementPage() {
     if (mounted && !allowed) router.replace('/dashboard');
   }, [mounted, allowed, router]);
 
+  // This screen has no company picker of its own — scope follows the one
+  // company switcher in the topbar (active_company_id), so the roster here
+  // matches every other page the manager was just looking at. The cookie is
+  // still validated against the manageable list: a manager assigned to a
+  // company they hold no User Management Permission in falls back to the
+  // first company the server actually handed back.
   useEffect(() => {
     if (!allowed) return;
     staffUserService.companyOptions()
-      .then(list => { setCompanies(list); setCompanyId(prev => prev ?? list[0]?.id ?? null); })
+      .then(list => {
+        setCompanies(list);
+        const active = getActiveCompany();
+        const scoped = list.find(c => c.id === active)?.id ?? list[0]?.id ?? null;
+        setCompanyId(prev => prev ?? scoped);
+      })
       .catch(() => toast.error('Failed to load your companies'));
   }, [allowed]);
 
@@ -100,11 +119,14 @@ export default function UserManagementPage() {
 
   const assignmentsOf = (u: User) => u.company_assignments ?? [];
 
-  // Already a manager themselves — a peer, not staff to administer. Read off
-  // the permissions the list already carries (scoped to this manager's own
-  // companies), and refused server-side as well.
+  // Already a manager themselves — a peer a DELEGATED manager doesn't
+  // administer. Read off the permissions the list already carries (scoped to
+  // this manager's own companies), and refused server-side as well. A deputy
+  // has no peers in this sense: it manages managers too, so this is never
+  // true for them and no row locks.
   const isPeerManager = (u: User) =>
-    assignmentsOf(u).some(a => ((a.permissions?.account as string[] | undefined) ?? []).includes('canAddUsers'));
+    !deputy
+    && assignmentsOf(u).some(a => ((a.permissions?.account as string[] | undefined) ?? []).includes('canAddUsers'));
 
   // While one company is selected a row must report THAT company's status —
   // users.status is a rollup across every company, so someone suspended here
@@ -127,6 +149,48 @@ export default function UserManagementPage() {
       toast.success(next === 'suspended' ? 'User suspended' : 'User reactivated');
     } catch (err) {
       toast.error(errText(err, 'Failed to update status'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  const copyInviteLink = async (u: User) => {
+    if (!u.invite_url) return;
+    try {
+      await navigator.clipboard.writeText(u.invite_url);
+      setCopiedId(u.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      toast.error('Could not copy the link');
+    }
+  };
+
+  const resendInvite = async (u: User) => {
+    setBusyId(u.id);
+    try {
+      const updated = await userService.resendInvite(u.id);
+      setUsers(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+      toast.success('Invite link refreshed');
+    } catch (err) {
+      toast.error(errText(err, 'Failed to resend the invite'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // The new password is shown once and never again, so it goes in a prompt the
+  // deputy has to copy out of — same as the Company Admin's own list.
+  const resetPassword = async (u: User) => {
+    if (!window.confirm(`Reset ${u.name}'s password? They'll have to set a new one on their next login.`)) return;
+    setBusyId(u.id);
+    try {
+      const { password } = await userService.resetPassword(u.id);
+      window.prompt(`New password for ${u.name} — copy it now, it will not be shown again:`, password);
+      toast.success('Password reset');
+    } catch (err) {
+      toast.error(errText(err, 'Failed to reset the password'));
     } finally {
       setBusyId(null);
     }
@@ -163,27 +227,10 @@ export default function UserManagementPage() {
           </button>
         </div>
 
-        {/* Company scope. Shown only when there's a real choice — a
-            single-company manager has nothing to pick and the header already
-            names their company. */}
-        {companies.length > 1 && (
-          <div style={{ ...card, padding: '14px 18px', marginBottom: 14 }}>
-            <label style={lbl}>Company</label>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {companies.map(c => (
-                <button key={c.id} onClick={() => setCompanyId(c.id)} style={{
-                  padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  border: `1.5px solid ${c.id === companyId ? '#2563eb' : '#e2e8f0'}`,
-                  background: c.id === companyId ? '#eff6ff' : '#fff',
-                  color: c.id === companyId ? '#2563eb' : '#64748b',
-                }}>{c.name}</button>
-              ))}
-            </div>
-            <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 8 }}>
-              Switching company reloads the list — you only ever see the companies you are assigned to.
-            </div>
-          </div>
-        )}
+        {/* No company-scope picker here on purpose — the topbar's company
+            switcher is the single place company scope is chosen, and this
+            page reads it (see the companyOptions effect above). The header
+            line already names the company the roster belongs to. */}
 
         <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden' }}>
           {loading ? (
@@ -260,26 +307,65 @@ export default function UserManagementPage() {
                             </span>
                           ) : (
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {/* View — the read-only detail page, including
+                                  the person's activity log. Deputy only: its
+                                  activity route has no delegated-manager
+                                  equivalent. */}
+                              {deputy && (
+                                <button disabled={busy} onClick={() => router.push(`/users/${u.id}`)} style={btn('#fff', '#64748b', '#e2e8f0')}>
+                                  <HiEye size={13} /> View
+                                </button>
+                              )}
                               {/* Same Edit User page the Company Admin gets —
                                   basic info, role and the per-company
-                                  permission editor all live there. */}
+                                  permission editor all live there, and for a
+                                  deputy so does "✕ Remove company". */}
                               <button disabled={busy} onClick={() => router.push(`/users/${u.id}/edit`)} style={btn('#eef2ff', '#4f46e5', '#e0e7ff')}>
                                 <HiPencilSquare size={13} /> Edit &amp; Permissions
                               </button>
-                              {status !== 'invited' && (
-                                <button disabled={busy} onClick={() => toggleStatus(u)} style={btn(
-                                  status === 'active' ? '#fff' : '#f0fdf4',
-                                  status === 'active' ? '#dc2626' : '#059669',
-                                  status === 'active' ? '#fecaca' : '#bbf7d0',
-                                )}>
-                                  {status === 'active' ? <HiNoSymbol size={13} /> : <HiPlay size={13} />}
-                                  {status === 'active' ? 'Suspend' : 'Activate'}
-                                </button>
+                              {status === 'invited' ? (
+                                // Pending invite: the same two actions the
+                                // Company Admin's list offers. Deputy only —
+                                // resend-invite is one of the deputy routes.
+                                deputy && (
+                                  <>
+                                    {u.invite_url && (
+                                      <button disabled={busy} onClick={() => copyInviteLink(u)} style={btn(
+                                        copiedId === u.id ? '#ecfdf5' : '#fff',
+                                        copiedId === u.id ? '#059669' : '#64748b',
+                                        '#e2e8f0',
+                                      )}>
+                                        <HiClipboard size={13} /> {copiedId === u.id ? 'Copied' : 'Copy Link'}
+                                      </button>
+                                    )}
+                                    <button disabled={busy} onClick={() => resendInvite(u)} style={btn('#fffbeb', '#d97706', '#fde68a')}>
+                                      <HiArrowPath size={13} /> Resend
+                                    </button>
+                                  </>
+                                )
+                              ) : (
+                                <>
+                                  <button disabled={busy} onClick={() => toggleStatus(u)} style={btn(
+                                    status === 'active' ? '#fff' : '#f0fdf4',
+                                    status === 'active' ? '#dc2626' : '#059669',
+                                    status === 'active' ? '#fecaca' : '#bbf7d0',
+                                  )}>
+                                    {status === 'active' ? <HiNoSymbol size={13} /> : <HiPlay size={13} />}
+                                    {status === 'active' ? 'Suspend' : 'Activate'}
+                                  </button>
+                                  {deputy && (
+                                    <button disabled={busy} onClick={() => resetPassword(u)} style={btn('#fff', '#64748b', '#e2e8f0')}>
+                                      <HiKey size={13} /> Reset Password
+                                    </button>
+                                  )}
+                                </>
                               )}
-                              {/* No Remove: taking a user off a company stays
-                                  Company Admin territory. The staff API still
-                                  refuses it for a peer manager either way, and
-                                  the same button is hidden on Edit User. */}
+                              {/* No Remove here, matching the Company Admin's
+                                  own list — that screen keeps its Delete row
+                                  action switched off (SHOW_DELETE_ACTION) and
+                                  removal lives on Edit User instead, behind
+                                  the Impact Summary. Suspend covers
+                                  day-to-day offboarding and is reversible. */}
                             </div>
                           )}
                         </td>
@@ -291,6 +377,7 @@ export default function UserManagementPage() {
             </div>
           )}
         </div>
+
       </div>
     </DashboardLayout>
   );

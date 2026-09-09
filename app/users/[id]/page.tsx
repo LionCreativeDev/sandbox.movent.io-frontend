@@ -9,6 +9,7 @@ import { SIMPLE_PROJECT_PERMISSIONS, collapseProjectPermissions } from '@/lib/si
 import { handleNotFound } from '@/lib/notFound';
 import { User } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
+import { getAuthType } from '@/lib/auth';
 import { HiArrowLeft, HiPencilSquare } from 'react-icons/hi2';
 
 const STATUS_CFG: Record<string, { color: string; bg: string; label: string }> = {
@@ -36,6 +37,14 @@ export default function UserProfilePage() {
   const router = useRouter();
   const params = useParams();
   const id = Number(params.id);
+
+  // Reachable as the Company Admin (/admin/users/{id}) and, since the Admin
+  // role became the owner's deputy, as staff too (/users/{id}, linked from
+  // their own /user-management list). userService routes to whichever API
+  // that is; only where Back and Edit return to differs — same pattern as
+  // /users/{id}/edit.
+  const usersRoot = getAuthType() === 'admin' ? '/admin/users' : '/user-management';
+  const editHref = getAuthType() === 'admin' ? `/admin/users/${id}/edit` : `/users/${id}/edit`;
 
   const [user, setUser] = useState<User | null>(null);
   const [activity, setActivity] = useState<UserActivity | null>(null);
@@ -66,10 +75,10 @@ export default function UserProfilePage() {
     <DashboardLayout title="User Profile">
       <div style={{ width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <button onClick={() => router.push('/admin/users')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
+          <button onClick={() => router.push(usersRoot)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 14 }}>
             <HiArrowLeft size={16} /> Back to Users
           </button>
-          <button onClick={() => router.push(`/admin/users/${id}/edit`)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1.5px solid #e0e7ff', background: '#eef2ff', color: '#4f46e5', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          <button onClick={() => router.push(editHref)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1.5px solid #e0e7ff', background: '#eef2ff', color: '#4f46e5', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             <HiPencilSquare size={14} /> Edit User
           </button>
         </div>
