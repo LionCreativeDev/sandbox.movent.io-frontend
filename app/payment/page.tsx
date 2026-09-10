@@ -261,9 +261,7 @@ export default function PaymentPage() {
     if (order.mode === 'custom') {
       setPlanMode('custom');
       setCustomBillingTermId(matched.billing_term?.id ?? null);
-      const keys = order.modules
-        .map(label => visibleCategories.find(c => c.label === label)?.key)
-        .filter((k): k is string => !!k);
+      const keys = order.modules.filter(key => visibleCategories.some(c => c.key === key));
       if (keys.length) setSelectedCategories(keys);
     } else {
       setPlanMode('package');
@@ -471,6 +469,7 @@ export default function PaymentPage() {
               selected_modules: planMode === 'custom' ? customModules : undefined,
             });
             localStorage.removeItem('pending_order');
+            localStorage.removeItem('register_draft');
             await refreshSessionAfterPayment();
             setConfirmed(true);
           } catch (err: unknown) {
@@ -577,6 +576,7 @@ export default function PaymentPage() {
           selected_modules: isCustom ? customModules : undefined,
         });
         localStorage.removeItem('pending_order');
+        localStorage.removeItem('register_draft');
         await refreshSessionAfterPayment();
         setConfirmed(true);
       } catch (err: unknown) {
@@ -649,6 +649,7 @@ export default function PaymentPage() {
             });
             devLog('backend payment success');
             localStorage.removeItem('pending_order');
+            localStorage.removeItem('register_draft');
             await refreshSessionAfterPayment();
             setConfirmed(true);
           } catch (err: unknown) {
@@ -721,12 +722,33 @@ export default function PaymentPage() {
   const isAuthNet   = selectedGW?.name === 'authorize_net';
   const showPayBtn  = !isPayPal;  // PayPal has its own buttons
 
+  // Payment not completed yet (pending_payment) — /admin/dashboard would just
+  // bounce them straight to /login (see DashboardLayout's payment gate), so
+  // send them back to Register to change plan/modules instead. Anyone else
+  // landing here already active (e.g. changing payment method) goes to their
+  // dashboard as normal.
+  const handleBack = () => {
+    const cached = getAuthType() === 'admin' ? (getAuthUser() as Admin | null) : null;
+    router.push(cached && cached.subscription_status !== 'pending_payment' ? '/admin/dashboard' : '/register');
+  };
+
   return (
     <>
       <LoadingOverlay show={processing} message="Processing Payment…" />
       <LandingNavbar />
       <div style={{ paddingTop: 96, paddingBottom: 80, background: '#f8fafc', minHeight: '100vh' }}>
         <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 24px' }}>
+
+          <button
+            onClick={handleBack}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: '#64748b', fontSize: 13, fontWeight: 600,
+              padding: 0, marginBottom: 14,
+            }}>
+            ← Back
+          </button>
 
           <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: '0 0 4px' }}>Complete Payment</h1>
           <p style={{ color: '#64748b', fontSize: 14, marginBottom: 32 }}>Choose your payment method and activate your subscription</p>
@@ -807,7 +829,12 @@ export default function PaymentPage() {
               )}
 
               {/* ── Stripe card element ── */}
-              {isStripe && !initLoading && initData && !error && (
+              {isStripe && !initLoading && initData && !error && !canPayCustom && (
+                <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+                  Select at least one module above to continue.
+                </div>
+              )}
+              {isStripe && !initLoading && initData && !error && canPayCustom && (
                 <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 16 }}>Card Details</div>
 
@@ -855,7 +882,12 @@ export default function PaymentPage() {
               )}
 
               {/* ── Authorize.Net card form ── */}
-              {isAuthNet && !initLoading && initData && (
+              {isAuthNet && !initLoading && initData && !canPayCustom && (
+                <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+                  Select at least one module above to continue.
+                </div>
+              )}
+              {isAuthNet && !initLoading && initData && canPayCustom && (
                 <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 16 }}>Card Details</div>
 

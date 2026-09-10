@@ -126,7 +126,9 @@ export default function SuperAdminLoginPage() {
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   required
-                  placeholder="super@crm.com"
+                  // Deliberately generic — a placeholder holding the real
+                  // super admin address is the same leak as printing it.
+                  placeholder="you@example.com"
                   style={{
                     width: '100%',
                     padding: '12px 14px 12px 42px',
@@ -193,15 +195,12 @@ export default function SuperAdminLoginPage() {
             </button>
           </form>
 
-          <div style={{ marginTop: 32, padding: '16px', background: '#fdf4ff', borderRadius: 10, border: '1px solid #e9d5ff' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Default Credentials
-            </div>
-            <div style={{ fontSize: 13, color: '#6b21a8' }}>
-              <strong>Email:</strong> super@crm.com<br />
-              <strong>Password:</strong> SuperAdmin@123
-            </div>
-          </div>
+          {/* This page is public and unauthenticated. It used to print the
+              default super admin email and password in a box right here —
+              anyone who found the URL had the platform owner's credentials.
+              The account's credentials now live only in the server's .env
+              (SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD) and nothing about
+              them is rendered to the browser. */}
         </div>
       </div>
     </div>

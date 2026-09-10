@@ -34,9 +34,10 @@ const list = async (): Promise<PortalServices> => {
   return res.data.data;
 };
 
-// "Contact Support" is deliberately absent as an intent — that button routes
-// to the existing support ticket flow instead, because a support request
-// belongs in the support queue rather than the sales pipeline.
+// All three intents stay in the contract because the API accepts all three,
+// but the portal UI now only ever sends 'quote' — Start Project, Consultation
+// and Contact Support were removed from the cards. Re-adding a button is a UI
+// change only; nothing here needs to move.
 const request = async (payload: {
   company_service_id?: number | null;
   intent: ServiceIntent;

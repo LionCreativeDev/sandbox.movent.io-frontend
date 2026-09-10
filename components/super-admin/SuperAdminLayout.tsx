@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { isAuthenticated, getAuthType, getAuthUser, logout } from '@/lib/auth';
 import SuperAdminSidebar from './SuperAdminSidebar';
-import { HiBell, HiChevronDown, HiArrowRightOnRectangle, HiShieldCheck } from 'react-icons/hi2';
+import SuperAdminNotificationBell from './SuperAdminNotificationBell';
+import { HiChevronDown, HiArrowRightOnRectangle, HiShieldCheck, HiUserCircle } from 'react-icons/hi2';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
 
@@ -58,17 +59,10 @@ export default function SuperAdminLayout({ children }: Props) {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {/* Bell */}
-            <div style={{ position: 'relative', cursor: 'pointer' }}>
-              <HiBell size={22} color="#64748b" />
-              <div style={{
-                position: 'absolute', top: -2, right: -2,
-                width: 8, height: 8,
-                background: '#ef4444',
-                borderRadius: '50%',
-                border: '2px solid #fff',
-              }} />
-            </div>
+            {/* Platform-level notifications — accounts, companies, payments,
+                subscriptions and alerts. What qualifies is decided server-side;
+                tenant-internal traffic never reaches this feed. */}
+            <SuperAdminNotificationBell />
 
             {/* User dropdown */}
             <div style={{ position: 'relative' }}>
@@ -113,6 +107,22 @@ export default function SuperAdminLayout({ children }: Props) {
                     <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b' }}>{user?.name}</div>
                     <div style={{ fontSize: 12, color: '#94a3b8' }}>{user?.email}</div>
                   </div>
+                  {/* Where the password lives — the dropdown is where anyone
+                      looks for it first, so it is here as well as in the nav. */}
+                  <button
+                    onClick={() => { setDropdownOpen(false); router.push('/super-admin/profile'); }}
+                    style={{
+                      width: '100%', padding: '11px 16px',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      fontSize: 13, color: '#334155', fontWeight: 500,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      textAlign: 'left', borderBottom: '1px solid #f1f5f9',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                    <HiUserCircle size={16} />
+                    My Profile
+                  </button>
                   <button
                     onClick={handleLogout}
                     style={{

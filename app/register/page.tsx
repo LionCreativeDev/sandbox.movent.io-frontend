@@ -917,12 +917,16 @@ function RegisterContent() {
   const searchParams = useSearchParams();
   const preSelectedPkg = searchParams.get('package');
 
+  useEffect(() => {
+    router.prefetch('/payment');
+  }, [router]);
+
   const [step, setStep] = useState<number>(1);
   const [mode, setMode] = useState<Mode>('package');
   // Chosen up front on Step 1 (Create Account) instead of via two separate
   // submit buttons on Step 2 — one flow, one dropdown, same downstream
   // handleSubmit(startTypeChoice) call either way.
-  const [startTypeChoice, setStartTypeChoice] = useState<'trial' | 'paid'>('trial');
+  const [startTypeChoice, setStartTypeChoice] = useState<'trial' | 'paid' | ''>('');
   const currency: Currency = 'USD';
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [packages, setPackages] = useState<Package[]>([]);
@@ -1063,13 +1067,46 @@ function RegisterContent() {
   const [countryCode, setCountryCode] = useState<Country>('US');
   const selectedCountry = ALL_COUNTRIES.find(c => c.code === countryCode) ?? ALL_COUNTRIES[0];
 
+  // The account is already created by the time handleSubmit stashes this
+  // (see below) — restoring it is purely so clicking Back on /payment
+  // doesn't dump the admin back onto a blank Step 1, losing the company
+  // info and module picks they already entered. Never includes
+  // password/confirm — those aren't needed again and shouldn't sit in
+  // localStorage past the moment they're submitted.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('register_draft');
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft.companyName) setCompanyName(draft.companyName);
+      if (draft.name) setName(draft.name);
+      if (draft.email) setEmail(draft.email);
+      if (draft.phone) setPhone(draft.phone);
+      if (draft.countryCode) setCountryCode(draft.countryCode);
+      if (draft.mode) setMode(draft.mode);
+      if (Array.isArray(draft.selectedCategories)) setSelectedCategories(draft.selectedCategories);
+      if (typeof draft.seatIdx === 'number') setSeatIdx(draft.seatIdx);
+      if (typeof draft.companyIdx === 'number') setCompanyIdx(draft.companyIdx);
+      if (draft.startTypeChoice) setStartTypeChoice(draft.startTypeChoice);
+      // Account (Step 1) is already created — land back on plan/module picks.
+      setStep(2);
+    } catch { /* malformed/missing draft — nothing to restore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     setLoadingPackages(true);
     publicService.getPackages()
       .then((pkgs: Package[]) => {
         setPackages(pkgs);
-        if (preSelectedPkg) {
-          const found = pkgs.find(p => p.id === Number(preSelectedPkg));
+        let draftPkgId: number | null = null;
+        try {
+          const raw = localStorage.getItem('register_draft');
+          if (raw) draftPkgId = JSON.parse(raw).packageId ?? null;
+        } catch { /* ignore */ }
+        const wantedId = draftPkgId ?? (preSelectedPkg ? Number(preSelectedPkg) : null);
+        if (wantedId) {
+          const found = pkgs.find(p => p.id === wantedId);
           if (found) { setBillingTermId(found.billing_term?.id ?? null); setSelectedPackage(found); return; }
         }
         // Defaults to a monthly pick — pkgs includes every Billing Term (see
@@ -1173,7 +1210,7 @@ function RegisterContent() {
       return next;
     });
 
-  const step1Valid = !!(companyName && companyNameOk && name && email && emailOk && password.length >= 8 && password === confirm);
+  const step1Valid = !!(companyName && companyNameOk && name && email && emailOk && password.length >= 8 && password === confirm && startTypeChoice !== '');
 
   // startType 'trial' (the primary CTA) still only actually grants a trial if
   // the Super Admin's Subscription Policy has trial_enabled — a policy-off
@@ -1181,8 +1218,9 @@ function RegisterContent() {
   // Trial, Pay Now" secondary action) always skips straight to pending_payment
   // by request, letting someone who doesn't want a trial go straight to
   // checkout instead of waiting out however many trial days are configured.
-  const handleSubmit = async (startType: 'trial' | 'paid' = 'trial') => {
+  const handleSubmit = async (startType: 'trial' | 'paid' | '' = startTypeChoice) => {
     if (submitting) return; // Guards a double-click re-submit before the disabled prop re-renders.
+    if (!startType) { toast.error('Please select Start with option'); return; }
     const pkgToUse = mode === 'package' ? selectedPackage : autoPackage();
     const modulesToUse = mode === 'package' ? (selectedPackage?.modules ?? []) : customModules;
     if (mode === 'package' && !selectedPackage) { toast.error('Please select a package'); return; }
@@ -1215,13 +1253,20 @@ function RegisterContent() {
         localStorage.setItem('pending_order', JSON.stringify({
           package_id: pkgToUse.id,
           package_name: pkgToUse.name,
-          modules: mode === 'custom' ? selectedCats.map(c => c.label) : [],
+          modules: mode === 'custom' ? selectedCats.map(c => c.key) : [],
           required_dependencies: mode === 'custom'
             ? requiredDeps.map(key => visibleCategories.find(c => c.key === key)?.label ?? key)
             : [],
           mode, seats: seat.label, companies: company.label,
           total_pkr: totalPkr, total_usd: totalUsd,
           currency, trial_days: pkgToUse.trial_days,
+        }));
+        // So Back from /payment can restore this instead of landing on a blank
+        // Step 1 — never includes password/confirm (see the restore effect above).
+        localStorage.setItem('register_draft', JSON.stringify({
+          companyName, name, email, phone, countryCode, mode,
+          packageId: pkgToUse.id, billingTermId,
+          selectedCategories, seatIdx, companyIdx, startTypeChoice: startType,
         }));
         router.push('/payment');
       }
@@ -1302,11 +1347,12 @@ function RegisterContent() {
                     <label style={labelBase}>Start with</label>
                     <select
                       value={startTypeChoice}
-                      onChange={e => setStartTypeChoice(e.target.value as 'trial' | 'paid')}
+                      onChange={e => setStartTypeChoice(e.target.value as 'trial' | 'paid' | '')}
                       style={{ ...inputBase, paddingLeft: 14, paddingRight: 14, appearance: 'none' }}
                       onFocus={e => (e.target.style.borderColor = 'var(--brand-blue)')}
                       onBlur={e => (e.target.style.borderColor = 'var(--bg-blue-light1)')}
                     >
+                      <option value="" disabled>Select Type</option>
                       <option value="trial">Free Trial — {effectiveTrialDays} days, no payment now</option>
                       <option value="paid">Skip Trial — Pay Now</option>
                     </select>

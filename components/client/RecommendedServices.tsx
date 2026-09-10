@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  clientServicesService, PortalService, PortalServices, ServiceIntent,
+  clientServicesService, PortalService, PortalServices,
 } from '@/lib/services/clientServicesService';
 import { HiSparkles, HiStar, HiXMark } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
@@ -20,27 +20,21 @@ import toast from 'react-hot-toast';
 //   Popular Services     the company's own featured picks.
 //   All Services         everything else enabled, so nothing is unreachable.
 //
-// Four actions per service. Three of them raise a request (and a Lead) through
-// one endpoint separated by intent; "Contact Support" goes to the support
-// ticket flow that already exists, because a support request belongs in the
-// support queue, not the sales pipeline.
+// ONE request action per service: Request Quote.
+//
+// Start Project and Consultation used to sit beside it, and "Contact Support"
+// inside the dialog. All three are gone by request: three near-identical asks
+// is a choice the client cannot make well, and each one landed the company in
+// the same first conversation regardless. The client's job here is to say
+// they are interested; what the request turns into is the company's call.
+//
+// The backend still accepts all three intents (App\Http\Controllers\Api\
+// Client\ServiceController), so restoring a button is a UI change only — no
+// migration, no API work.
 
-const INTENT_COPY: Record<ServiceIntent, { button: string; heading: string; blurb: string }> = {
-  quote: {
-    button: 'Request Quote',
-    heading: 'Request a quote',
-    blurb: 'Tell us roughly what you need and we will come back with a price.',
-  },
-  new_project: {
-    button: 'Start New Project',
-    heading: 'Start a new project',
-    blurb: 'Describe what you want built and we will scope it with you.',
-  },
-  consultation: {
-    button: 'Schedule Consultation',
-    heading: 'Schedule a consultation',
-    blurb: 'Pick a day that suits you and we will confirm a time.',
-  },
+const QUOTE_COPY = {
+  heading: 'Request a quote',
+  blurb: 'Tell us roughly what you need and we will come back with a price.',
 };
 
 const GREEN = '#10b981';
@@ -62,7 +56,7 @@ const asList = <T,>(value: T[] | Record<string, T> | null | undefined): T[] => {
 function ServiceCard({ service, currency, onAct, expanded, onToggleExpand }: {
   service: PortalService;
   currency: string;
-  onAct: (service: PortalService, intent: ServiceIntent) => void;
+  onAct: (service: PortalService) => void;
   expanded: boolean;
   onToggleExpand: () => void;
 }) {
@@ -116,23 +110,11 @@ function ServiceCard({ service, currency, onAct, expanded, onToggleExpand }: {
         }}>
           {expanded ? 'Show Less' : 'Learn More'}
         </button>
-        <button onClick={() => onAct(service, 'quote')} style={{
+        <button onClick={() => onAct(service)} style={{
           padding: '6px 12px', borderRadius: 7, border: 'none',
           background: GREEN, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
         }}>
           Request Quote
-        </button>
-        <button onClick={() => onAct(service, 'new_project')} style={{
-          padding: '6px 12px', borderRadius: 7, border: '1.5px solid #bbf7d0',
-          background: '#f0fdf4', color: '#059669', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-        }}>
-          Start Project
-        </button>
-        <button onClick={() => onAct(service, 'consultation')} style={{
-          padding: '6px 12px', borderRadius: 7, border: '1.5px solid #e2e8f0',
-          background: '#fff', color: '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-        }}>
-          Consultation
         </button>
       </div>
     </div>
@@ -152,9 +134,8 @@ export default function RecommendedServices({
   const [data, setData]       = useState<PortalServices | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [dialog, setDialog]   = useState<{ service: PortalService; intent: ServiceIntent } | null>(null);
+  const [dialog, setDialog]   = useState<PortalService | null>(null);
   const [message, setMessage] = useState('');
-  const [preferredDate, setPreferredDate] = useState('');
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -167,10 +148,9 @@ export default function RecommendedServices({
       .finally(() => setLoading(false));
   }, []);
 
-  const openDialog = (service: PortalService, intent: ServiceIntent) => {
-    setDialog({ service, intent });
+  const openDialog = (service: PortalService) => {
+    setDialog(service);
     setMessage('');
-    setPreferredDate('');
   };
 
   const submit = async () => {
@@ -178,12 +158,14 @@ export default function RecommendedServices({
     setSending(true);
     try {
       await clientServicesService.request({
-        company_service_id: dialog.service.id,
-        intent: dialog.intent,
+        company_service_id: dialog.id,
+        intent: 'quote',
+        // Only the consultation intent ever carried a date, and that button
+        // is gone — so there is nothing to send here.
         message: message.trim() || null,
-        preferred_date: dialog.intent === 'consultation' ? (preferredDate || null) : null,
+        preferred_date: null,
       });
-      toast.success(`Request sent — the team will be in touch about ${dialog.service.name}.`);
+      toast.success(`Request sent — the team will be in touch about ${dialog.name}.`);
       setDialog(null);
     } catch (err) {
       const ex = err as { response?: { data?: { message?: string } } };
@@ -230,7 +212,12 @@ export default function RecommendedServices({
   };
 
   return (
-    <div style={{ marginTop: 8 }}>
+    // The bottom gap lives here rather than on a wrapper in the page because
+    // this component returns null whenever the company has no services
+    // enabled — a wrapper's margin would survive that and leave a phantom gap
+    // above whatever follows. Only compact (the dashboard) has anything
+    // following it; /client/services ends the page.
+    <div style={{ marginTop: 8, ...(compact ? { marginBottom: 24 } : {}) }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <HiSparkles size={18} color={GREEN} />
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1e293b' }}>Grow Your Business With Us</h2>
@@ -260,9 +247,8 @@ export default function RecommendedServices({
         </button>
       )}
 
-      {/* Request dialog. One form for all three intents — they differ in what
-          the client wants next, not in what we need from them; consultation
-          also asks for a date. */}
+      {/* Request dialog — one optional message, nothing else. The date field
+          belonged to the consultation intent and went with that button. */}
       {dialog && (
         <div
           onClick={() => setDialog(null)}
@@ -274,32 +260,14 @@ export default function RecommendedServices({
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: '100%', maxWidth: 480, padding: '22px 24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 4 }}>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
-                {INTENT_COPY[dialog.intent].heading}
+                {QUOTE_COPY.heading}
               </h3>
               <button onClick={() => setDialog(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', lineHeight: 1 }}>
                 <HiXMark size={20} />
               </button>
             </div>
-            <div style={{ fontSize: 13, color: '#475569', fontWeight: 600, marginBottom: 3 }}>{dialog.service.name}</div>
-            <p style={{ margin: '0 0 16px', fontSize: 12.5, color: '#94a3b8' }}>{INTENT_COPY[dialog.intent].blurb}</p>
-
-            {dialog.intent === 'consultation' && (
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Preferred Date
-                </label>
-                <input
-                  type="date"
-                  value={preferredDate}
-                  onChange={e => setPreferredDate(e.target.value)}
-                  // Today's date as the floor, matching the server's
-                  // after_or_equal:today — a date in the past is a typo, and
-                  // it would sit in the queue looking overdue.
-                  min={new Date().toISOString().slice(0, 10)}
-                  style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #e2e8f0', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fafafa', boxSizing: 'border-box' }}
-                />
-              </div>
-            )}
+            <div style={{ fontSize: 13, color: '#475569', fontWeight: 600, marginBottom: 3 }}>{dialog.name}</div>
+            <p style={{ margin: '0 0 16px', fontSize: 12.5, color: '#94a3b8' }}>{QUOTE_COPY.blurb}</p>
 
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -316,14 +284,6 @@ export default function RecommendedServices({
             </div>
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              {/* Not an intent — a support request belongs in the support
-                  queue, so this leaves the sales flow entirely. */}
-              <button
-                onClick={() => { setDialog(null); router.push('/client/support/create'); }}
-                style={{ padding: '9px 16px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 13, cursor: 'pointer', marginRight: 'auto' }}
-              >
-                Contact Support instead
-              </button>
               <button onClick={() => setDialog(null)} style={{ padding: '9px 16px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 13, cursor: 'pointer' }}>
                 Cancel
               </button>

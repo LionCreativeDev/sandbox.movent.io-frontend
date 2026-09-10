@@ -207,6 +207,19 @@ export default function ClientDashboardPage() {
         )}
       </div>
 
+      {/* ── Grow Your Business With Us ──
+          Directly above "AI Suggested IT Services" so the two offers read as
+          one block, this one first: these are the company's own enabled
+          services with real prices, and its top list is drawn from what this
+          client already has with us. The AI list below is generic suggestion,
+          so it reads as the weaker of the two and belongs second.
+
+          Renders nothing at all when the company has enabled no services or
+          switched the section off for this client, so it never leaves an empty
+          heading — or a gap — behind. `compact` trims each list to three cards
+          with a link through to the full page. */}
+      <RecommendedServices compact />
+
       {aiServices.length > 0 && (
         <section style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: 20, marginBottom: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
@@ -352,16 +365,6 @@ export default function ClientDashboardPage() {
         </div>
       )}
 
-      {/* ── Grow Your Business With Us ──
-          Last on the dashboard on purpose: the client came here for their own
-          projects and invoices, and an offer belongs below those. Renders
-          nothing at all when the company has enabled no services or switched
-          the section off for this client, so it never leaves an empty heading
-          behind. `compact` trims each list to three cards with a link through
-          to the full page. */}
-      <div style={{ marginTop: 28 }}>
-        <RecommendedServices compact />
-      </div>
     </div>
   );
 }

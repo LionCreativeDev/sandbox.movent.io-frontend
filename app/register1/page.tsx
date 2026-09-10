@@ -1036,7 +1036,7 @@ function RegisterContent() {
         setAuthData(res.data.token, res.data.admin, 'admin');
         localStorage.setItem('pending_order', JSON.stringify({
           package_name: pkgToUse.name,
-          modules: mode === 'custom' ? selectedCats.map(c => c.label) : [],
+          modules: mode === 'custom' ? selectedCats.map(c => c.key) : [],
           mode, seats: seat.label, companies: company.label,
           total_pkr: totalPkr, total_usd: totalUsd,
           currency, trial_days: pkgToUse.trial_days,
