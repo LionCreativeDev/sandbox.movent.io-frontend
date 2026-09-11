@@ -1,9 +1,9 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { adminLeadService, userLeadService, Lead, FollowUp, LeadActivity, CompanyUser, DealEligibility } from '@/lib/services/adminLeadService';
+import { adminLeadService, userLeadService, Lead, FollowUp, LeadActivity, CompanyUser, DealEligibility, ChatInviteState } from '@/lib/services/adminLeadService';
 import { adminSalesChatService, userSalesChatService } from '@/lib/services/salesChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
 import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
@@ -18,6 +18,18 @@ import {
   HiPhone, HiEnvelope, HiUserGroup, HiChatBubbleLeft,
   HiArrowsRightLeft, HiFolderPlus, HiBanknotes,
 } from 'react-icons/hi2';
+
+// Chat-bubble timestamp: the clock time for anything sent today, the date
+// otherwise — a conversation room wants "14:32", not a full datetime on every
+// line. Mirrors fmtShort() in frontend/app/projects/[id]/chat/page.tsx, which
+// is local to that page too; lib/date.ts has only date-level helpers.
+function fmtChatTime(d: string | null | undefined): string {
+  if (!d) return '';
+  const date = new Date(d);
+  return date.toDateString() === new Date().toDateString()
+    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString([], { day: '2-digit', month: 'short' });
+}
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   new:         { bg: '#eff6ff', color: '#2563eb' },
@@ -91,7 +103,7 @@ export default function LeadDetailPage() {
   const leadId  = Number(params.id);
   const authType = getAuthType();
   const isAdmin  = authType === 'admin';
-  const authUser = getAuthUser() as { role_type?: string } | Admin | null;
+  const authUser = getAuthUser() as { id?: number; role_type?: string } | Admin | null;
 
   // Module / permission gates
   const admin          = isAdmin ? (authUser as Admin | null) : null;
@@ -112,16 +124,22 @@ export default function LeadDetailPage() {
   const hasInvoiceMod    = isAdmin ? (admin?.modules?.includes('invoices') ?? false) : getUserModulePermissions('invoice').length > 0;
   const canCreateInvoice = isAdmin || can('invoice', 'canCreateInvoices');
   // Company Admin always sees Sales Chat, same as every other chat surface.
-  // A Lead Manager may also reach it now, but only for a lead they
-  // themselves actually own — enforced server-side in Api\User\
-  // SalesChatController::lead() (never their canViewAllCompanyLeads
-  // company-wide bypass).
-  const canUseSalesChat = isAdmin || ((!authUser || 'role_type' in authUser) && (authUser?.role_type === 'seller' || authUser?.role_type === 'lead_manager') && can('sales', 'canUseSalesChat'));
+  //
+  // For staff this is now the permission alone, with no role_type check —
+  // mirroring Api\User\SalesChatController::canActOnLeadChat() (2026-09-11).
+  // The real gate is ownership, enforced server-side in that controller's
+  // lead(): assigned to them, transferred to them, created by them, or
+  // invoiced by them. So holding canUseSalesChat is not enough to open some
+  // other Seller's lead — the request 404s — and this flag only decides
+  // whether the tab is worth rendering at all.
+  const canUseSalesChat = isAdmin || can('sales', 'canUseSalesChat');
 
   const svc = isAdmin ? adminLeadService : userLeadService;
   const chatSvc = isAdmin ? adminSalesChatService : userSalesChatService;
 
   const [lead, setLead]               = useState<Lead | null>(null);
+  const [chatInvite, setChatInvite]   = useState<ChatInviteState | null>(null);
+  const [inviteBusy, setInviteBusy]   = useState(false);
   // "Assign Lead Owner" only covers giving an unowned lead its first owner —
   // reassigning a lead that already has an owner needs "Transfer Leads"
   // specifically, matching the backend's split in Api\User\LeadController::transfer().
@@ -150,6 +168,9 @@ export default function LeadDetailPage() {
   const [chat, setChat]         = useState<ChatMessage[]>([]);
   const [chatText, setChatText] = useState('');
   const [chatFile, setChatFile] = useState<File | null>(null);
+  // Scroll anchor for the conversation room — the poll appends to the bottom,
+  // so without this a reply arriving while you read stays off-screen.
+  const chatBottomRef = useRef<HTMLDivElement>(null);
   const [sendingChat, setSendingChat] = useState(false);
 
   // Transfer Lead modal
@@ -201,6 +222,72 @@ export default function LeadDetailPage() {
   // now-abandoned Lead-anchored thread entirely, not just hide the UI.
   const chatMovedToProject = !!lead?.chat_project_id;
 
+  // ── The Lead's own no-login chat link ────────────────────────────────────
+  //
+  // Sent automatically when the lead is created; this panel exists for
+  // afterwards — a bounced address since corrected, a lead created before the
+  // feature shipped, or a forwarded link that needs killing. See
+  // App\Services\LeadChatInviteService.
+  const loadChatInvite = () => {
+    if (!canUseSalesChat || chatMovedToProject) return;
+    svc.chatInvite(leadId).then(setChatInvite).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadChatInvite();
+  }, [leadId, chatMovedToProject, canUseSalesChat]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sendChatInvite = async (regenerate: boolean) => {
+    if (regenerate && !confirm('Send a new link? The one the lead already has will stop working immediately.')) return;
+    setInviteBusy(true);
+    try {
+      setChatInvite(await svc.sendChatInvite(leadId, regenerate));
+      toast.success(regenerate ? 'New link sent — the old one is now dead' : 'Invite email sent');
+    } catch (err: unknown) {
+      const ex = err as { response?: { data?: { message?: string } } };
+      toast.error(ex.response?.data?.message ?? 'Could not send the invite');
+    } finally { setInviteBusy(false); }
+  };
+
+  const revokeChatInvite = async () => {
+    if (!confirm('Revoke this link? The lead will lose access to the conversation until you send a new invite. The conversation itself is kept.')) return;
+    setInviteBusy(true);
+    try {
+      setChatInvite(await svc.revokeChatInvite(leadId));
+      toast.success('Chat link revoked');
+    } catch {
+      toast.error('Could not revoke the link');
+    } finally { setInviteBusy(false); }
+  };
+
+  const copyChatLink = () => {
+    if (!chatInvite?.chat_url) return;
+    navigator.clipboard.writeText(chatInvite.chat_url)
+      .then(() => toast.success('Link copied'))
+      .catch(() => toast.error('Could not copy the link'));
+  };
+
+  /**
+   * Is this message the viewer's own — i.e. does it belong on the right?
+   *
+   * The two guards identify themselves on different columns: a Company Admin
+   * is a company_admins row and lands on sender_admin_id, a staff member is a
+   * users row and lands on sender_id. Comparing only one of them (as a single
+   * `sender_id === me.id` check would) puts an Admin's own messages on the
+   * stranger's side of their own conversation.
+   *
+   * A message with neither is the LEAD writing in through a public link, which
+   * is never "mine" on this screen.
+   */
+  const isOwnChatMessage = (m: ChatMessage): boolean => {
+    const meId = (authUser as { id?: number } | null)?.id;
+    if (!meId) return false;
+
+    return isAdmin
+      ? m.sender_admin_id != null && m.sender_admin_id === meId
+      : m.sender_id != null && m.sender_id === meId;
+  };
+
   const loadChat = () => {
     if (!canUseSalesChat || chatMovedToProject) return;
     chatSvc.leadMessages(leadId).then(setChat).catch(() => {});
@@ -212,6 +299,14 @@ export default function LeadDetailPage() {
     const interval = setInterval(loadChat, 8000);
     return () => clearInterval(interval);
   }, [leadId, chatMovedToProject]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keyed on length, not the array: the 8s poll replaces the whole list every
+  // time, so depending on the array itself would re-scroll on every tick and
+  // fight the reader scrolling back through history.
+  useEffect(() => {
+    if (tab !== 'chat') return;
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [chat.length, tab]);
 
   const sendChat = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -597,12 +692,21 @@ export default function LeadDetailPage() {
           </div>
         )}
 
-        {/* Tabs */}
+        {/* Tabs.
+            'chat' had a label branch below but was missing from this array, so
+            the Sales Chat button was never rendered at all — the tab existed
+            only for the ?tab=chat deep link a notification carries, and there
+            was no way to reach the conversation by hand. It is shown to anyone
+            the chat is actually open to (see canUseSalesChat), and hidden
+            otherwise rather than offered and then 403'd. */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 16, background: '#f1f5f9', borderRadius: 10, padding: 4 }}>
-          {(['details', 'followups', 'activity'] as const).map(t => (
+          {(canUseSalesChat
+            ? (['details', 'followups', 'activity', 'chat'] as const)
+            : (['details', 'followups', 'activity'] as const)
+          ).map(t => (
             <button key={t} onClick={() => setTab(t)}
               style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: 'none', background: tab === t ? '#fff' : 'transparent', color: tab === t ? '#0f172a' : '#64748b', fontSize: 13, fontWeight: tab === t ? 700 : 500, cursor: 'pointer', boxShadow: tab === t ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' }}>
-              {t === 'details' ? 'Details' : t === 'followups' ? `Follow-ups${followUps.length ? ` (${followUps.length})` : ''}` : t === 'activity' ? `Activity${activities.length ? ` (${activities.length})` : ''}` : 'Sales Chat'}
+              {t === 'details' ? 'Details' : t === 'followups' ? `Follow-ups${followUps.length ? ` (${followUps.length})` : ''}` : t === 'activity' ? `Activity${activities.length ? ` (${activities.length})` : ''}` : `Sales Chat${chat.length ? ` (${chat.length})` : ''}`}
             </button>
           ))}
         </div>
@@ -748,37 +852,152 @@ export default function LeadDetailPage() {
             </button>
           </div>
         )}
-        {tab === 'chat' && canUseSalesChat && !chatMovedToProject && (
-          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '20px 24px' }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 700 }}>Sales Chat</h3>
-            {chat.length === 0 ? (
-              <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>No messages yet.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', marginBottom: 14 }}>
-                {chat.map(m => (
-                  <div key={m.id}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
-                      {chatSenderName(m, { adminSuffix: true, guestSuffix: true })}
-                    </div>
-                    {m.content && <div style={{ fontSize: 13, color: '#475569' }}>{m.content}</div>}
-                    {m.attachment_name && (
-                      <button onClick={() => downloadChatAttachment(m)} style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 4, padding: '4px 10px',
-                        borderRadius: 6, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb',
-                        fontSize: 12, cursor: 'pointer',
-                      }}>📎 {m.attachment_name}</button>
-                    )}
-                  </div>
-                ))}
+        {/* The Lead's own no-login link into this same conversation. Shown
+            above the thread because it answers the first question a Seller has
+            when the lead has gone quiet: can they actually reach this?
+            Sending/revoking needs canEditLeads server-side, so the buttons are
+            hidden without it — the link itself stays visible to copy. */}
+        {tab === 'chat' && canUseSalesChat && !chatMovedToProject && chatInvite && (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', padding: '18px 24px', marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+              <div style={{ minWidth: 0 }}>
+                <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Lead&apos;s chat link</h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12.5, color: '#64748b', lineHeight: 1.6 }}>
+                  {!chatInvite.can_send
+                    ? 'This lead has no email address, so no invite can be sent. Add one to enable it.'
+                    : !chatInvite.has_link
+                      ? 'The link is revoked — the lead cannot reach this conversation until you send a new invite.'
+                      : chatInvite.invited_at
+                        ? `Invite last emailed ${new Date(chatInvite.invited_at).toLocaleString()}. The lead opens this conversation with no login.`
+                        : 'A link exists but no invite has been emailed yet.'}
+                </p>
+              </div>
+
+              {canEditLead && chatInvite.can_send && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button onClick={() => sendChatInvite(false)} disabled={inviteBusy}
+                    style={{ padding: '8px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#334155', fontSize: 12.5, fontWeight: 600, cursor: inviteBusy ? 'not-allowed' : 'pointer' }}>
+                    {chatInvite.invited_at ? 'Resend invite' : 'Send invite'}
+                  </button>
+                  {chatInvite.has_link && (
+                    <>
+                      <button onClick={() => sendChatInvite(true)} disabled={inviteBusy}
+                        style={{ padding: '8px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#334155', fontSize: 12.5, fontWeight: 600, cursor: inviteBusy ? 'not-allowed' : 'pointer' }}>
+                        New link
+                      </button>
+                      <button onClick={revokeChatInvite} disabled={inviteBusy}
+                        style={{ padding: '8px 14px', borderRadius: 8, border: '1.5px solid #fecaca', background: '#fff', color: '#dc2626', fontSize: 12.5, fontWeight: 600, cursor: inviteBusy ? 'not-allowed' : 'pointer' }}>
+                        Revoke
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {chatInvite.chat_url && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+                <code style={{ flex: 1, minWidth: 0, padding: '7px 11px', borderRadius: 7, background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: 11.5, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {chatInvite.chat_url}
+                </code>
+                <button onClick={copyChatLink}
+                  style={{ padding: '7px 13px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: '#fff', color: '#334155', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
+                  Copy
+                </button>
               </div>
             )}
+
+            {/* The link IS the credential — anyone holding it can read and
+                write this conversation. Worth saying plainly next to a Copy
+                button that makes sharing it one click. */}
+            {chatInvite.has_link && (
+              <p style={{ margin: '8px 0 0', fontSize: 11.5, color: '#94a3b8' }}>
+                Treat this like a password — anyone with the link can read and reply to this conversation.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Conversation room, matching the project chat's layout
+            (frontend/app/projects/[id]/chat/page.tsx): own messages right and
+            blue, the other side left with an avatar and a name, timestamps
+            under each bubble. It was a flat "name, then text" list before,
+            which gave no sense of a back-and-forth and made it impossible to
+            tell at a glance which lines were the lead's. */}
+        {tab === 'chat' && canUseSalesChat && !chatMovedToProject && (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden', display: 'flex', flexDirection: 'column', height: 540 }}>
+            <div style={{ padding: '13px 20px', borderBottom: '1px solid #f1f5f9', background: '#fafafa', flexShrink: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Sales Chat</div>
+              <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                {lead.name}{lead.email ? ` · ${lead.email}` : ''}
+              </div>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', background: '#f7f8fa', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {chat.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: 13, marginTop: 24, lineHeight: 1.6 }}>
+                  No messages yet.<br />Send the first one below, or email the lead their chat link above.
+                </div>
+              ) : chat.map(m => {
+                const isMine = isOwnChatMessage(m);
+                // A guest message here is the LEAD writing in — either from
+                // their own emailed Sales Chat link or from an invoice's
+                // public payment page. Both are simply "the lead", hence the
+                // neutral guestLabel instead of the default "via invoice
+                // link", which would be wrong for the first case.
+                const senderName = chatSenderName(m, { adminSuffix: true, guestSuffix: true, guestLabel: 'Lead' });
+                const isLead = !m.sender_id && !m.sender_admin_id;
+                return (
+                  <div key={m.id} style={{ display: 'flex', justifyContent: isMine ? 'flex-end' : 'flex-start', gap: 8 }}>
+                    {!isMine && (
+                      <div style={{
+                        width: 26, height: 26, borderRadius: '50%', flexShrink: 0, marginTop: 16,
+                        background: isLead ? '#dcfce7' : '#e0e7ff', color: isLead ? '#15803d' : '#4338ca',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
+                      }}>
+                        {senderName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div style={{ maxWidth: '68%', display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start' }}>
+                      {!isMine && (
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', marginBottom: 3, marginLeft: 4 }}>{senderName}</div>
+                      )}
+                      <div style={{
+                        padding: '9px 13px',
+                        borderRadius: isMine ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                        background: isMine ? '#2563eb' : '#fff',
+                        color: isMine ? '#fff' : '#1e293b',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                        border: isMine ? 'none' : '1px solid #f1f5f9',
+                      }}>
+                        {m.content && <div style={{ fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.content}</div>}
+                        {m.attachment_name && (
+                          <button onClick={() => downloadChatAttachment(m)} style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: m.content ? 6 : 0, padding: '4px 10px',
+                            borderRadius: 6, border: `1px solid ${isMine ? 'rgba(255,255,255,0.3)' : '#e2e8f0'}`,
+                            background: isMine ? 'rgba(255,255,255,0.1)' : '#f8fafc', color: isMine ? '#fff' : '#2563eb',
+                            fontSize: 12, cursor: 'pointer', width: 'fit-content',
+                          }}>📎 {m.attachment_name}</button>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 3, marginLeft: isMine ? 0 : 4, marginRight: isMine ? 4 : 0 }}>
+                        {fmtChatTime(m.sent_at)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={chatBottomRef} />
+            </div>
+
             {chatFile && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px', marginBottom: 8, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 12px', margin: '8px 16px 0', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, flexShrink: 0 }}>
                 <span style={{ fontSize: 12, color: '#334155' }}>📎 {chatFile.name} <span style={{ color: '#94a3b8' }}>({fmtFileSize(chatFile.size)})</span></span>
                 <button type="button" onClick={() => setChatFile(null)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Remove</button>
               </div>
             )}
-            <form onSubmit={sendChat} style={{ display: 'flex', gap: 8 }}>
+
+            <form onSubmit={sendChat} style={{ display: 'flex', gap: 8, padding: 14, borderTop: '1px solid #f1f5f9', flexShrink: 0 }}>
               <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, borderRadius: 8, border: '1.5px dashed #cbd5e1', background: '#fff', color: '#64748b', cursor: 'pointer', flexShrink: 0 }}>
                 📎
                 <input
@@ -789,11 +1008,13 @@ export default function LeadDetailPage() {
               </label>
               <input
                 value={chatText} onChange={e => setChatText(e.target.value)}
-                placeholder="Message about this lead…" style={{ ...inp, flex: 1 }}
+                placeholder={`Message ${lead.name}…`} style={{ ...inp, flex: 1, minWidth: 0 }}
               />
-              <button type="submit" disabled={sendingChat} style={{
-                padding: '9px 16px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff',
-                fontSize: 13, fontWeight: 600, cursor: sendingChat ? 'wait' : 'pointer', opacity: sendingChat ? 0.7 : 1,
+              <button type="submit" disabled={sendingChat || (!chatText.trim() && !chatFile)} style={{
+                padding: '9px 16px', borderRadius: 8, border: 'none',
+                background: sendingChat || (!chatText.trim() && !chatFile) ? '#93c5fd' : '#2563eb', color: '#fff',
+                fontSize: 13, fontWeight: 600, flexShrink: 0,
+                cursor: sendingChat ? 'wait' : (!chatText.trim() && !chatFile) ? 'not-allowed' : 'pointer',
               }}>Send</button>
             </form>
           </div>

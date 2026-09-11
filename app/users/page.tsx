@@ -79,6 +79,20 @@ function canAddUsers(user: User): boolean {
   return mergedPermissions(user)["account"]?.includes("canAddUsers") ?? false;
 }
 
+/**
+ * Whether this user holds the Settings Management Permission, i.e. can edit a
+ * company's profile, invoice defaults, bank details and payment gateways. Worth
+ * its own badge in the roster: it is never a role default, so seeing it here is
+ * always the result of a deliberate grant, and it is the most sensitive of the
+ * `account` toggles.
+ *
+ * mergedPermissions() unions every company assignment, so this is "holds it for
+ * at least one company" — the per-company detail lives on the Edit screen.
+ */
+function canManageSettings(user: User): boolean {
+  return mergedPermissions(user)["account"]?.includes("canManageSettings") ?? false;
+}
+
 function fmtDate(value?: string | null): string {
   if (!value) return "—";
   return new Date(value).toLocaleDateString("en-GB", {
@@ -682,7 +696,7 @@ export default function UsersPage() {
 
                         {/* Active modules */}
                         <td style={{ padding: "14px 16px", maxWidth: 220 }}>
-                          {modules.length > 0 || canAddUsers(user) ? (
+                          {modules.length > 0 || canAddUsers(user) || canManageSettings(user) ? (
                             <div
                               style={{
                                 display: "flex",
@@ -720,6 +734,22 @@ export default function UsersPage() {
                                   }}
                                 >
                                   + Add Users
+                                </span>
+                              )}
+                              {canManageSettings(user) && (
+                                <span
+                                  title="Can manage company settings — profile, invoice defaults, bank details, payment gateways"
+                                  style={{
+                                    fontSize: 11,
+                                    padding: "2px 8px",
+                                    borderRadius: 20,
+                                    background: "#fef3c7",
+                                    color: "#b45309",
+                                    fontWeight: 600,
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  ⚙ Settings
                                 </span>
                               )}
                             </div>

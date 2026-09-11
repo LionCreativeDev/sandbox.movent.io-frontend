@@ -354,8 +354,8 @@ export default function UserProjectDetailPage() {
 
     const handleCreateProjectInvoice = async () => {
         if (invoiceBusy) return; // Guards a double-click re-submit before the disabled prop re-renders.
-        if (!newInvAmount) {
-            toast.error("Amount is required");
+        if (!newInvAmount || Number(newInvAmount) <= 0) {
+            toast.error("Amount must be greater than 0");
             return;
         }
         if (!project?.client && !newInvEmail.trim()) {

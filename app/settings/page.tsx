@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import api from '@/lib/axios';
-import { getAuthType, getAuthUser } from '@/lib/auth';
+import { getAuthType } from '@/lib/auth';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { moduleUpgradeService, ModuleCatalog } from '@/lib/services/moduleUpgradeService';
 import PhoneInput from '@/components/ui/PhoneInput';
@@ -39,6 +39,10 @@ interface GatewayConfig { [key: string]: string; }
 interface GatewayAccount {
   id: number; gateway_type: string; label: string; mode: string;
   is_active: boolean; is_default: boolean; config: GatewayConfig;
+  // Built server-side (App\Support\SettingsPayload::webhookUrl) — the
+  // frontend cannot derive it, since the URL carries company_admin_id and a
+  // staff session only knows its own user id.
+  webhook_url: string;
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
@@ -105,9 +109,39 @@ function Toast({ msg, type }: { msg: string; type: 'success' | 'error' }) {
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
+//
+// ONE page, two callers. The Company Admin reaches it at /admin/settings and
+// talks to /api/admin/settings/*; a staff member the Company Admin granted the
+// Settings Management Permission reaches it at /settings and talks to
+// /api/user/settings/*, which serves the identical payload
+// (App\Support\SettingsPayload) for whichever company they are working under.
+// Keeping it one page is what stops the two screens drifting apart.
+//
+// Settings are PER-COMPANY: everything here belongs to exactly one company,
+// and saving never touches another. WHICH company is never chosen on this
+// page — it comes from whatever company filter the session already has:
+//   • Admin: the topbar Company filter (components/admin/CompanySelector).
+//     Its onChange reloads the page, so changing it re-reads Settings for the
+//     newly selected company with no wiring here. On "All Companies" the page
+//     asks for a single one rather than silently editing the first.
+//   • Staff: the workspace they picked at /select-company.
+// This page briefly had a picker of its own; two controls selecting the same
+// thing meant the page could sit on Company B while the topbar read Company A.
 export default function SettingsPage() {
   useAdminGuard();
   const router = useRouter();
+  // 'admin' | 'user' — decides the API prefix and whether the tenant-level
+  // Subscription actions are offered at all. Resolved post-mount (cookies are
+  // unavailable during SSR) so the first render never depends on it.
+  const [authType, setAuthType] = useState<'admin' | 'user' | null>(null);
+  const isStaff = authType === 'user';
+  // Empty string until authType resolves, which is also why loadSettings() is
+  // only ever called from inside the mount effect, after it is known.
+  const base = authType === 'admin' ? '/admin/settings' : '/user/settings';
+  const [denied, setDenied] = useState(false);
+  // The topbar company filter is on "All Companies", so there is no single
+  // company whose settings these would be.
+  const [needsCompany, setNeedsCompany] = useState(false);
   const [tab, setTab] = useState<'company' | 'invoice' | 'bank' | 'gateways' | 'dealWorkflow' | 'subscription'>('invoice');
   const [loading, setLoading] = useState(true);
   const [toast, setToast]     = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -117,6 +151,10 @@ export default function SettingsPage() {
   const [bank,     setBank]     = useState<BankSettings>({ bank_name: '', account_name: '', account_number: '', iban: '', swift: '' });
   const [gateways, setGateways] = useState<GatewayAccount[]>([]);
   const [gatewayTypes, setGatewayTypes] = useState<Record<string, string>>({});
+  // True when this company owns no gateway account but is still taking
+  // payments via the account-wide fallback (see
+  // CompanyPaymentGateway::resolveActiveGateways).
+  const [gatewaysInherited, setGatewaysInherited] = useState(false);
   const [moduleCatalog, setModuleCatalog] = useState<ModuleCatalog | null>(null);
   const [dealSettings, setDealSettings] = useState<DealWorkflowSettings | null>(null);
   const [savingDeal, setSavingDeal] = useState(false);
@@ -139,10 +177,21 @@ export default function SettingsPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const loadSettings = () => {
+  const loadSettings = (apiBase: string) => {
     setLoading(true);
-    api.get('/admin/settings').then(r => {
+    api.get(apiBase).then(r => {
       const d = r.data.data;
+
+      // "All Companies" is selected in the topbar filter, so there is no one
+      // company to configure. A normal state of the screen, not an error —
+      // hence a 200 with this flag rather than a status the generic error
+      // handler below would toast on.
+      if (d.requires_company_selection) {
+        setNeedsCompany(true);
+        return;
+      }
+      setNeedsCompany(false);
+
       setCompany({
         ...d.company,
         industry: d.company.industry ?? '',
@@ -163,24 +212,57 @@ export default function SettingsPage() {
       });
       setGateways(d.gateways ?? []);
       setGatewayTypes(d.gateway_types ?? {});
+      setGatewaysInherited(Boolean(d.gateways_inherited));
       setLogoPreview(d.company.logo_url ?? null);
       setLogoFile(null);
-    }).catch(() => showToast('Failed to load settings', 'error'))
-      .finally(() => setLoading(false));
+      setDenied(false);
+    }).catch((err: unknown) => {
+      // 403 is the real, expected answer for a staff member whose Settings
+      // Management Permission was revoked (possibly while this page was open)
+      // — show the revoked state rather than a generic failure toast.
+      if ((err as { response?: { status?: number } }).response?.status === 403) {
+        setDenied(true);
+        return;
+      }
+      showToast('Failed to load settings', 'error');
+    }).finally(() => setLoading(false));
   };
 
+  // Auth type is resolved here, post-mount, rather than during render:
+  // getAuthType() reads a cookie the server render has no access to, so
+  // resolving it any earlier (a lazy useState initializer included) would make
+  // the server and the client's first render disagree and produce a hydration
+  // mismatch — the same reason Sidebar.tsx defers its permission reads to
+  // refreshModules().
   useEffect(() => {
-    if (getAuthType() !== 'admin') { router.replace('/dashboard'); return; }
-    loadSettings();
-    moduleUpgradeService.catalog().then(setModuleCatalog).catch(() => {});
-    api.get('/admin/settings/deal-workflow').then(r => setDealSettings(r.data.data)).catch(() => {});
+    const type = getAuthType() as 'admin' | 'user' | null;
+    if (type !== 'admin' && type !== 'user') { router.replace('/login'); return; }
+    setAuthType(type);
+
+    const apiBase = type === 'admin' ? '/admin/settings' : '/user/settings';
+    loadSettings(apiBase);
+    // Module purchase is tenant-level and belongs to the account owner, so the
+    // catalog is only fetched on the admin side; a staff member's Subscription
+    // tab is not rendered at all.
+    if (type === 'admin') {
+      moduleUpgradeService.catalog().then(setModuleCatalog).catch(() => {});
+    }
+    api.get(`${apiBase}/deal-workflow`).then(r => setDealSettings(r.data.data)).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // No company selector and no company_id on any request: which company these
+  // settings belong to is decided entirely by the app-wide company filter in
+  // the topbar, which axios already sends as X-Active-Company-Id on every
+  // call. Changing that filter reloads the page (see the CompanySelector's
+  // onChange in components/layout/Navbar.tsx), so Settings picks up the new
+  // company with no wiring of its own — and there is no second control that
+  // could disagree with the topbar about which company is being edited.
 
   const saveDealSettings = async () => {
     if (!dealSettings) return;
     setSavingDeal(true);
     try {
-      await api.put('/admin/settings/deal-workflow', dealSettings);
+      await api.put(`${base}/deal-workflow`, dealSettings);
       showToast('Deal workflow settings saved', 'success');
     } catch { showToast('Failed to save deal workflow settings', 'error'); }
     finally { setSavingDeal(false); }
@@ -188,16 +270,6 @@ export default function SettingsPage() {
 
   const toggleDealSetting = (key: keyof DealWorkflowSettings) =>
     setDealSettings(p => p ? { ...p, [key]: !p[key] } : p);
-
-  // The default account of a type keeps the original 2-segment webhook URL
-  // (so anything already pasted into a live gateway dashboard before
-  // multi-account support existed keeps working); any additional account of
-  // the same type gets its own id-scoped URL.
-  const webhookUrl = (account: GatewayAccount) => {
-    const adminId = (getAuthUser() as { id?: number } | null)?.id;
-    const base = `${process.env.NEXT_PUBLIC_API_URL ?? ''}/webhooks/${account.gateway_type}/${adminId ?? ''}`;
-    return account.is_default ? base : `${base}/${account.id}`;
-  };
 
   // ── Company save ─────────────────────────────────────────────────────────
   const saveCompany = async (e: React.SyntheticEvent<HTMLFormElement>) => {
@@ -207,15 +279,17 @@ export default function SettingsPage() {
       if (logoFile) {
         const fd = new FormData();
         fd.append('logo', logoFile);
-        const lr = await api.post('/admin/settings/logo', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const lr = await api.post(`${base}/logo`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
         setLogoPreview(lr.data.data.logo_url);
         setLogoFile(null);
       }
-      await api.put('/admin/settings/company', {
+      await api.put(`${base}/company`, ({
         industry: company.industry || null,
         email: company.email || null, phone: company.phone || null,
         address: company.address || null, timezone: company.timezone,
-      });
+      }));
       showToast('Company profile saved', 'success');
     } catch (err: unknown) {
       const ex = err as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } };
@@ -228,10 +302,10 @@ export default function SettingsPage() {
   const saveInvoice = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault(); setSavingI(true);
     try {
-      await api.put('/admin/settings/invoice', {
+      await api.put(`${base}/invoice`, ({
         prefix: invoice.prefix, tax_rate: invoice.tax_rate,
         payment_terms: invoice.payment_terms, notes: invoice.notes || null,
-      });
+      }));
       showToast('Invoice settings saved', 'success');
     } catch { showToast('Failed to save invoice settings', 'error'); }
     finally { setSavingI(false); }
@@ -243,11 +317,11 @@ export default function SettingsPage() {
     try {
       const gw = gateways.find(g => g.id === id);
       if (!gw) return;
-      await api.put(`/admin/settings/gateways/${id}`, {
+      await api.put(`${base}/gateways/${id}`, ({
         label:     gw.label,
         is_active: gw.is_active,
         config:    gw.config,
-      });
+      }));
       showToast(`${gw.label} settings saved`, 'success');
     } catch { showToast('Failed to save gateway settings', 'error'); }
     finally { setSavingGW(p => ({ ...p, [id]: false })); }
@@ -269,7 +343,7 @@ export default function SettingsPage() {
     setTestingGW(p => ({ ...p, [id]: true }));
     setTestResults(p => ({ ...p, [id]: null }));
     try {
-      const res = await api.post(`/admin/settings/gateways/${id}/test`);
+      const res = await api.post(`${base}/gateways/${id}/test`, {});
       setTestResults(p => ({ ...p, [id]: { ok: true, msg: res.data.message ?? 'Connection successful' } }));
     } catch (err: unknown) {
       const ex = err as { response?: { data?: { message?: string } } };
@@ -284,7 +358,7 @@ export default function SettingsPage() {
     setBusyGW(p => ({ ...p, [id]: true }));
     try {
       const gw = gateways.find(g => g.id === id);
-      await api.patch(`/admin/settings/gateways/${id}/default`);
+      await api.patch(`${base}/gateways/${id}/default`, {});
       setGateways(p => p.map(g => g.gateway_type === gw?.gateway_type ? { ...g, is_default: g.id === id } : g));
       showToast('Default account updated', 'success');
     } catch { showToast('Failed to set default account', 'error'); }
@@ -296,7 +370,7 @@ export default function SettingsPage() {
     if (!window.confirm('Delete this gateway account? This cannot be undone.')) return;
     setBusyGW(p => ({ ...p, [id]: true }));
     try {
-      await api.delete(`/admin/settings/gateways/${id}`);
+      await api.delete(`${base}/gateways/${id}`);
       setGateways(p => p.filter(g => g.id !== id));
       showToast('Gateway account deleted', 'success');
     } catch (err: unknown) {
@@ -318,21 +392,19 @@ export default function SettingsPage() {
     if (!addingType) return;
     setSavingNew(true);
     try {
-      const res = await api.post('/admin/settings/gateways', {
+      await api.post(`${base}/gateways`, ({
         gateway_type: addingType,
         label:        newAccount.label || gatewayTypes[addingType] || addingType,
         is_active:    newAccount.is_active,
         config:       newAccount.config,
-      });
-      setGateways(p => [...p, {
-        id: res.data.data.id, gateway_type: addingType,
-        label: newAccount.label || gatewayTypes[addingType] || addingType,
-        mode: newAccount.config.mode ?? 'sandbox',
-        is_active: newAccount.is_active, is_default: p.filter(g => g.gateway_type === addingType).length === 0,
-        config: newAccount.config,
-      }]);
+      }));
       showToast('Gateway account added', 'success');
       setAddingType(null);
+      // Reload rather than patching state locally: the new row's webhook_url
+      // and is_default are both decided server-side (the first account of a
+      // type becomes that type's default), and the old local patch guessed
+      // both — leaving the Webhook URL field blank on the row just added.
+      loadSettings(base);
     } catch (err: unknown) {
       const ex = err as { response?: { data?: { message?: string } } };
       showToast(ex.response?.data?.message ?? 'Failed to add gateway account', 'error');
@@ -343,11 +415,11 @@ export default function SettingsPage() {
   const saveBank = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault(); setSavingB(true);
     try {
-      await api.put('/admin/settings/bank', {
+      await api.put(`${base}/bank`, ({
         bank_name: bank.bank_name || null, account_name: bank.account_name || null,
         account_number: bank.account_number || null, iban: bank.iban || null,
         swift: bank.swift || null,
-      });
+      }));
       showToast('Bank details saved', 'success');
     } catch { showToast('Failed to save bank details', 'error'); }
     finally { setSavingB(false); }
@@ -366,19 +438,85 @@ export default function SettingsPage() {
     </DashboardLayout>
   );
 
+  // A staff member whose Settings Management Permission was never granted, or
+  // was revoked (possibly while they had this page open). The sidebar link can
+  // outlive the revoke until the next /user/me refresh, so this state is what
+  // they actually land on.
+  if (denied) return (
+    <DashboardLayout title="Settings">
+      <div style={{ maxWidth: 520, margin: '60px auto', padding: 32, background: '#fff', border: '1px solid #f1f5f9', borderRadius: 14, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>🔒</div>
+        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#0f172a' }}>Settings access not available</h2>
+        <p style={{ margin: '8px 0 0', fontSize: 13, color: '#64748b', lineHeight: 1.6 }}>
+          You don&apos;t have the Settings Management Permission for this company. Ask your Company Admin to enable it, or switch to a company you manage settings for.
+        </p>
+      </div>
+    </DashboardLayout>
+  );
+
+  // The topbar company filter is on "All Companies". Settings belong to one
+  // company, so rather than silently editing whichever one the backend would
+  // have fallen back to, say so and let the admin narrow the filter. The
+  // filter's own onChange reloads the page, so picking one lands straight here.
+  if (needsCompany) return (
+    <DashboardLayout title="Settings">
+      <div style={{ maxWidth: 520, margin: '60px auto', padding: 32, background: '#fff', border: '1px solid #f1f5f9', borderRadius: 14, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>🏢</div>
+        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#0f172a' }}>Choose a company</h2>
+        <p style={{ margin: '8px 0 0', fontSize: 13, color: '#64748b', lineHeight: 1.6 }}>
+          Settings belong to one company — profile, invoice defaults, bank details and payment gateways are kept separately for each. Pick a single company in the <strong style={{ color: '#475569' }}>Company</strong> filter at the top of the page to manage its settings.
+        </p>
+      </div>
+    </DashboardLayout>
+  );
+
+  const activeCompanyName = company.name;
+
   return (
     <DashboardLayout title="Settings">
       <div style={{ width: '100%' }}>
-        <div style={{ marginBottom: 24 }}>
+        {/* No company selector here on purpose. Which company these settings
+            belong to is decided by the app-wide Company filter in the topbar
+            (components/admin/CompanySelector) — a second control on this page
+            could disagree with it, which is exactly the confusion that caused.
+            Changing that filter reloads the page, so Settings follows it. */}
+        <div style={{ marginBottom: 20 }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Settings</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#94a3b8' }}>
-            One shared profile, invoice defaults, and payment details for your whole account — every company you own uses the same settings.
-          </p>
+
+          {/* Which company is being edited, stated loudly.
+              Every company starts out holding IDENTICAL values — the
+              per-company migration seeded each one from the account's single
+              old shared profile, so nothing changed on the day it shipped.
+              The consequence is that switching company shows the same numbers
+              until someone actually edits one, which reads as "the filter
+              isn't doing anything". This banner is the feedback that was
+              missing: the name changes even when no field does. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '10px 0 0', padding: '10px 14px', borderRadius: 10, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#1d4ed8' }}>Editing</span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>🏢 {activeCompanyName || 'this company'}</span>
+            <span style={{ fontSize: 12, color: '#1d4ed8' }}>
+              {isStaff
+                ? '— these settings apply to this company only.'
+                : '— these settings apply to this company only. Use the Company filter at the top to edit another.'}
+            </span>
+          </div>
         </div>
 
-        {/* Tab bar */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#f8fafc', padding: 6, borderRadius: 12, width: 'fit-content', border: '1px solid #f1f5f9' }}>
-          {([['invoice','Invoice'], ['bank','Bank / Payment'], ['gateways','Gateways'], ['dealWorkflow','Deal Workflow'], ['subscription','Subscription']] as const).map(([k, l]) => (
+        {/* Tab bar. 'company' had no button at all until settings became
+            per-company — the Company Profile panel below was rendered but
+            unreachable, so industry/email/phone/address/timezone and the logo
+            could never be edited. Subscription is admin-only: buying modules
+            spends money on the tenant's account, which is the owner's call,
+            not a delegated staff member's. */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#f8fafc', padding: 6, borderRadius: 12, width: 'fit-content', border: '1px solid #f1f5f9', flexWrap: 'wrap' }}>
+          {([
+            ['company','Company'],
+            ['invoice','Invoice'],
+            ['bank','Bank / Payment'],
+            ['gateways','Gateways'],
+            ['dealWorkflow','Deal Workflow'],
+            ...(isStaff ? [] : [['subscription','Subscription'] as const]),
+          ] as const).map(([k, l]) => (
             <Tab key={k} label={l} active={tab === k} onClick={() => setTab(k)} />
           ))}
         </div>
@@ -561,8 +699,19 @@ export default function SettingsPage() {
         {tab === 'gateways' && (
           <div>
             <p style={{ margin: '0 0 16px', fontSize: 13, color: '#64748b' }}>
-              Add and configure the payment gateway accounts you want to offer clients — you can add more than one account per gateway (e.g. two Stripe accounts). This is one shared configuration for your whole account — every company you own uses the same accounts, there is nothing to set up per company.
+              Add and configure the payment gateway accounts you want to offer clients — you can add more than one account per gateway (e.g. two Stripe accounts). These accounts belong to <strong style={{ color: '#475569' }}>{activeCompanyName || 'this company'}</strong> only: changing them here never affects any other company&apos;s gateways.
             </p>
+
+            {/* This company owns no gateway account of its own yet, but its
+                invoices are still payable through the account-wide accounts
+                configured before settings became per-company. Without saying
+                so, the empty lists below read as "payments are not set up",
+                which is the opposite of what is true. */}
+            {gatewaysInherited && (
+              <div style={{ margin: '0 0 16px', padding: '10px 14px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12.5, color: '#1d4ed8', lineHeight: 1.6 }}>
+                ℹ This company has no gateway account of its own yet, so it is currently taking payments through your account-wide gateway settings. Adding an account below gives this company its own — independent of every other company from then on.
+              </div>
+            )}
 
             {Object.keys(gatewayTypes).map(type => {
               const accounts = gateways.filter(g => g.gateway_type === type);
@@ -667,7 +816,7 @@ export default function SettingsPage() {
                               Webhook URL <span style={{ fontWeight: 400, color: '#94a3b8', textTransform: 'none' }}>(paste into this {gatewayTypes[type]} account&apos;s dashboard for automatic payment confirmation)</span>
                             </div>
                             <div style={{ padding: '8px 12px', borderRadius: 7, background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: 12, fontFamily: 'monospace', color: '#475569', wordBreak: 'break-all' }}>
-                              {webhookUrl(gw)}
+                              {gw.webhook_url}
                             </div>
                           </div>
                           {type === 'authorize_net' && (
@@ -872,7 +1021,11 @@ export default function SettingsPage() {
         )}
 
         {/* ── Subscription ── */}
-        {tab === 'subscription' && (
+        {/* Admin-only, matching the tab bar above — a staff member can never
+            select this tab, and the `!isStaff` guard keeps the panel from
+            rendering even if `tab` were somehow left on 'subscription' (e.g.
+            a revoke-and-regrant reload). */}
+        {tab === 'subscription' && !isStaff && (
           <div style={card}>
             <div style={cardHead}>
               <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Active Modules</div>

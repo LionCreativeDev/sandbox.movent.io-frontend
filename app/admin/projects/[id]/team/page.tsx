@@ -169,7 +169,7 @@ export default function ProjectTeamPage() {
 
         <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8' }}>
           Don&apos;t see who you&apos;re looking for?{' '}
-          <Link href="/admin/users" style={{ color: '#2563eb' }}>Create user first from Users &amp; Permissions.</Link>
+          <Link href="/users/new" style={{ color: '#2563eb' }}>+ Add New User</Link>
         </div>
       </form>
       )}

@@ -101,7 +101,7 @@ export default function ProjectBillingPage() {
 
   const handleCreateProjectInvoice = async () => {
     if (invoiceBusy) return;
-    if (!newInvAmount) { toast.error('Amount is required'); return; }
+    if (!newInvAmount || Number(newInvAmount) <= 0) { toast.error('Amount must be greater than 0'); return; }
     if (!project?.client && !newInvEmail.trim()) { toast.error('This project has no linked client — enter an email to send the invoice to'); return; }
     setInvoiceBusy(true);
     try {

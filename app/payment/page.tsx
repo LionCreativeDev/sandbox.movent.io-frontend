@@ -14,7 +14,17 @@ import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
 import {
   CATEGORIES, moduleToCategory, moduleDependencyErrors, requiredDependencyKeys,
+  toggleCategorySelection,
 } from '@/lib/moduleCategories';
+
+// Statuses that must go through the module/package picker below before
+// checkout — an account that lost access and is reactivating, not a fresh
+// registration or a mid-checkout continuation (pending_payment covers those,
+// and must keep landing on payment-only exactly as before — see the register
+// page's own handleSubmit(), which pushes here with the choice already made
+// seconds ago). 'trial' (still active, paying early) and 'active' (changing
+// payment method) also don't show it, for the same reason.
+const PICKER_STATUSES = ['trial_expired', 'grace_period', 'suspended', 'cancelled'];
 
 // Augment window for PayPal SDK and Accept.js
 declare global {
@@ -118,10 +128,12 @@ export default function PaymentPage() {
   const [plans,        setPlans]        = useState<SubscriptionPlan[]>([]);
   const [plansLoading,  setPlansLoading] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
-  // Billing term for "Build Your Own Plan" — null = Monthly. Custom mode has
-  // no package row of its own, so this drives its own discount math (see
-  // customTotalUsd below) independently of selectedPlanId (package mode).
-  const [customBillingTermId, setCustomBillingTermId] = useState<number | null>(null);
+  // Billing term for BOTH package cards and "Build Your Own Plan" — null =
+  // Monthly. Shared between the two modes (same as the register page's own
+  // billingTermId), since a custom bundle has no package row of its own to
+  // read a term off of, and switching term while picking a package card
+  // should filter which cards are shown the same way.
+  const [billingTermId, setBillingTermId] = useState<number | null>(null);
 
   // "Build Your Own Plan" — an alternative to picking one of the plan cards
   // above, same custom-module concept as the registration page. Toggling this
@@ -130,6 +142,15 @@ export default function PaymentPage() {
   const [planMode, setPlanMode] = useState<'package' | 'custom'>('package');
   const [liveModules, setLiveModules] = useState<PublicModule[] | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+
+  // Whether an account reactivating from a lost-access status (as opposed to
+  // a fresh registration or mid-checkout continuation) gets to change plan/
+  // modules here before paying — see PICKER_STATUSES above. Starts false
+  // (matches server render — reading the auth cookie here would cause a
+  // hydration mismatch, same trap noted elsewhere in this codebase) and is
+  // set client-side from the cached admin in the mount effect below, then
+  // corrected once /admin/me confirms it fresh.
+  const [showPlanPicker, setShowPlanPicker] = useState(false);
 
   const [gateways,     setGateways]     = useState<ActiveGateway[]>([]);
   const [loadingGW,    setLoadingGW]    = useState(true);
@@ -186,19 +207,30 @@ export default function PaymentPage() {
   useEffect(() => {
     if (getAuthType() !== 'admin') return;
 
+    // effective_subscription_status reflects what the daily lifecycle cron
+    // would have set by now even if it hasn't run yet (see
+    // CompanyAdmin::effectiveSubscriptionStatus()) — preferred over the raw
+    // column so this can't lag a status change by up to a day, same as
+    // DashboardLayout already does.
     const cached = getAuthUser() as Admin | null;
-    if (cached && cached.subscription_status === 'active') {
+    const cachedStatus = cached?.effective_subscription_status ?? cached?.subscription_status;
+    if (cachedStatus === 'active') {
       router.replace('/admin/dashboard');
       return;
     }
+    if (cachedStatus) setShowPlanPicker(PICKER_STATUSES.includes(cachedStatus));
 
     api.get('/admin/me').then(res => {
       const fresh = res.data?.data;
-      if (fresh && fresh.subscription_status === 'active') {
+      if (!fresh) return;
+      const freshStatus = fresh.effective_subscription_status ?? fresh.subscription_status;
+      if (freshStatus === 'active') {
         const token = getToken();
         if (token) setAuthData(token, fresh, 'admin');
         router.replace('/admin/dashboard');
+        return;
       }
+      setShowPlanPicker(PICKER_STATUSES.includes(freshStatus));
     }).catch(() => {});
   }, [router]);
 
@@ -258,9 +290,9 @@ export default function PaymentPage() {
     const matched = plans.find(p => p.id === order.package_id);
     if (!matched) return;
 
+    setBillingTermId(matched.billing_term?.id ?? null);
     if (order.mode === 'custom') {
       setPlanMode('custom');
-      setCustomBillingTermId(matched.billing_term?.id ?? null);
       const keys = order.modules.filter(key => visibleCategories.some(c => c.key === key));
       if (keys.length) setSelectedCategories(keys);
     } else {
@@ -269,6 +301,21 @@ export default function PaymentPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plans, plansLoading, order]);
+
+  // Every plan row for the currently toggled Billing Term — package-mode
+  // card grid filters to these, same as the register page's visiblePackages.
+  const visiblePlans = plans.filter(p => (p.billing_term?.id ?? null) === billingTermId);
+
+  // Switching term keeps the same tier selected (Business monthly → Business
+  // yearly) rather than dropping the selection — mirrors the register page's
+  // switchBillingTerm().
+  const switchBillingTerm = (termId: number | null) => {
+    setBillingTermId(termId);
+    const current = plans.find(p => p.id === selectedPlanId);
+    if (!current) return;
+    const match = plans.find(p => (p.billing_term?.id ?? null) === termId && p.tier === current.tier);
+    if (match) setSelectedPlanId(match.id);
+  };
 
   // ── Custom module picker (mirrors the registration page's own logic) ──────
   const visibleCategories = liveModules ? liveModules.map(moduleToCategory) : CATEGORIES;
@@ -286,11 +333,11 @@ export default function PaymentPage() {
     ...new Map(plans.filter(p => p.billing_term).map(p => [p.billing_term!.id, p.billing_term!])).values(),
   ].sort((a, b) => a.months - b.months);
 
-  const customTermMonths = customBillingTermId !== null
-    ? (availableBillingTerms.find(t => t.id === customBillingTermId)?.months ?? 1) : 1;
-  const customTermDiscountPercent = customBillingTermId !== null
-    ? Number(plans.find(p => p.billing_term?.id === customBillingTermId)?.discount_percent ?? 0) : 0;
-  const customTotalUsd = customBillingTermId === null
+  const customTermMonths = billingTermId !== null
+    ? (availableBillingTerms.find(t => t.id === billingTermId)?.months ?? 1) : 1;
+  const customTermDiscountPercent = billingTermId !== null
+    ? Number(plans.find(p => p.billing_term?.id === billingTermId)?.discount_percent ?? 0) : 0;
+  const customTotalUsd = billingTermId === null
     ? customMonthlyTotalUsd
     : Math.round(customMonthlyTotalUsd * customTermMonths * (1 - customTermDiscountPercent / 100) * 100) / 100;
 
@@ -300,11 +347,10 @@ export default function PaymentPage() {
   // needs a real package row so SubscriptionPaymentController::process()
   // knows what billing_cycle/term to renew at next time.
   const resolveCustomPackageId = (): number | undefined => {
-    const inTerm = plans.filter(p => (p.billing_term?.id ?? null) === customBillingTermId);
-    const covering = inTerm
+    const covering = visiblePlans
       .filter(p => customModules.every(m => p.modules.includes(m)))
       .sort((a, b) => Number(a.price_usd) - Number(b.price_usd));
-    return covering[0]?.id ?? inTerm[0]?.id ?? undefined;
+    return covering[0]?.id ?? visiblePlans[0]?.id ?? undefined;
   };
 
   // Custom selection overrides the plan-derived order summary/amount, same
@@ -346,7 +392,7 @@ export default function PaymentPage() {
     ? customTermMonths
     : (selectedPlanObj?.billing_term?.months ?? 1);
   const orderTermName = planMode === 'custom'
-    ? (customBillingTermId !== null ? availableBillingTerms.find(t => t.id === customBillingTermId)?.name ?? null : null)
+    ? (billingTermId !== null ? availableBillingTerms.find(t => t.id === billingTermId)?.name ?? null : null)
     : (selectedPlanObj?.billing_term?.name ?? null);
   const orderDiscountPercent = planMode === 'custom'
     ? customTermDiscountPercent
@@ -724,12 +770,17 @@ export default function PaymentPage() {
 
   // Payment not completed yet (pending_payment) — /admin/dashboard would just
   // bounce them straight to /login (see DashboardLayout's payment gate), so
-  // send them back to Register to change plan/modules instead. Anyone else
-  // landing here already active (e.g. changing payment method) goes to their
-  // dashboard as normal.
+  // send them back to Register to change plan/modules instead. A reactivating
+  // account (PICKER_STATUSES) goes back to My Plan, not the dashboard — that
+  // API call would just 402 and bounce them right back here via the axios
+  // interceptor. Anyone else landing here already active (e.g. changing
+  // payment method) goes to their dashboard as normal.
   const handleBack = () => {
     const cached = getAuthType() === 'admin' ? (getAuthUser() as Admin | null) : null;
-    router.push(cached && cached.subscription_status !== 'pending_payment' ? '/admin/dashboard' : '/register');
+    const status = cached?.effective_subscription_status ?? cached?.subscription_status;
+    if (status === 'pending_payment') { router.push('/register'); return; }
+    if (status && PICKER_STATUSES.includes(status)) { router.push('/admin/plan'); return; }
+    router.push('/admin/dashboard');
   };
 
   return (
@@ -758,11 +809,166 @@ export default function PaymentPage() {
             {/* ── Left: Gateway selection + payment form ── */}
             <div>
 
-              {/* Package/module choice is made at registration (or already set
-                  on the account) — this page is payment only, no re-picking.
-                  planMode/selectedPlanId are still set (via the auto-select
-                  effect above) so Order Summary and handlePay's payload stay
-                  correct; there's just no UI here to change them. */}
+              {/* Package/module choice for a fresh registration or a
+                  mid-checkout continuation is made at registration (or
+                  already set on the account) — this page stays payment-only
+                  for those, no re-picking. planMode/selectedPlanId are still
+                  set (via the auto-select effect above) so Order Summary and
+                  handlePay's payload stay correct either way.
+
+                  An account reactivating from trial_expired/grace_period/
+                  suspended/cancelled (PICKER_STATUSES) gets this section
+                  instead — same module/package selection registration uses,
+                  reusing the exact same plans/live-modules data and pricing/
+                  dependency logic this page already computes above. */}
+              {showPlanPicker && (
+                <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 4 }}>Choose Your Plan</div>
+                  <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>Select a ready-made package or build your own</div>
+
+                  {/* Mode toggle */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
+                    {([
+                      { val: 'package' as const, label: 'Choose a Package', sub: 'Pre-built plans with fixed pricing' },
+                      { val: 'custom' as const, label: 'Build Your Own Plan', sub: 'Pick only what you need' },
+                    ]).map(opt => {
+                      const active = planMode === opt.val;
+                      return (
+                        <button
+                          key={opt.val}
+                          type="button"
+                          onClick={() => setPlanMode(opt.val)}
+                          style={{
+                            textAlign: 'left', padding: '12px 16px', borderRadius: 10, cursor: 'pointer',
+                            border: `1.5px solid ${active ? '#2563eb' : '#e2e8f0'}`,
+                            background: active ? '#eff6ff' : '#fafafa',
+                          }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: active ? '#1d4ed8' : '#0f172a' }}>{opt.label}</div>
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{opt.sub}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Billing-term toggle applies to BOTH modes — a custom
+                      bundle has no package row of its own to read a term off
+                      of, so without this it silently stayed on Monthly
+                      (0% discount) no matter what was picked. Mirrors the
+                      register page, where this same toggle lives in the
+                      Order Summary sidebar independent of package/custom. */}
+                  {availableBillingTerms.length > 0 && (
+                    <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, padding: 3, gap: 3, marginBottom: 16, flexWrap: 'wrap' }}>
+                      {[{ id: null as number | null, name: 'Monthly' }, ...availableBillingTerms].map(term => {
+                        const active = billingTermId === term.id;
+                        const termPlan = term.id !== null ? plans.find(p => p.billing_term?.id === term.id) : null;
+                        return (
+                          <button
+                            key={term.id ?? 'monthly'}
+                            type="button"
+                            onClick={() => switchBillingTerm(term.id)}
+                            style={{
+                              flex: 1, minWidth: 70, padding: '7px 0', borderRadius: 6, border: 'none',
+                              background: active ? '#fff' : 'transparent',
+                              color: active ? '#0f172a' : '#64748b',
+                              fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                              boxShadow: active ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                            }}>
+                            {term.name}
+                            {termPlan && Number(termPlan.discount_percent) > 0 && (
+                              <span style={{ fontSize: 9, fontWeight: 800, color: active ? '#16a34a' : '#94a3b8' }}>
+                                -{Number(termPlan.discount_percent)}%
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {planMode === 'package' && (
+                    <>
+                      {plansLoading ? (
+                        <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>Loading plans…</div>
+                      ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                          {visiblePlans.map(plan => {
+                            const active = selectedPlanId === plan.id;
+                            return (
+                              <div
+                                key={plan.id}
+                                onClick={() => setSelectedPlanId(plan.id)}
+                                style={{
+                                  padding: '16px 18px', borderRadius: 12, cursor: 'pointer', position: 'relative',
+                                  border: active ? '2px solid #2563eb' : '1.5px solid #e2e8f0',
+                                  background: active ? '#eff6ff' : '#fff',
+                                }}>
+                                {plan.is_popular && (
+                                  <div style={{ position: 'absolute', top: -10, right: 14, background: 'linear-gradient(135deg,#2563eb,#3b82f6)', color: '#fff', fontSize: 9, fontWeight: 700, padding: '3px 10px', borderRadius: 9999, letterSpacing: '0.05em' }}>
+                                    POPULAR
+                                  </div>
+                                )}
+                                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{plan.name}</div>
+                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+                                  <span style={{ fontSize: 22, fontWeight: 800, color: '#0f172a' }}>${planPrice(plan)}</span>
+                                  {Number(plan.discount_percent) > 0 && (
+                                    <span style={{ fontSize: 12, color: '#94a3b8', textDecoration: 'line-through' }}>${plan.price_usd}</span>
+                                  )}
+                                  <span style={{ fontSize: 11, color: '#94a3b8' }}>/{plan.billing_term ? plan.billing_term.name : 'month'}</span>
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 10 }}>
+                                  {(plan.modules ?? []).map(m => (
+                                    <span key={m} style={{ padding: '3px 8px', background: '#f0f9ff', color: '#1e40af', fontSize: 10.5, borderRadius: 8, fontWeight: 500 }}>
+                                      {m.replace(/_/g, ' ')}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {planMode === 'custom' && (
+                    <div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                        {visibleCategories.map(cat => {
+                          const active = selectedCategories.includes(cat.key);
+                          const locked = customRequiredDeps.includes(cat.key);
+                          const CatIcon = cat.icon;
+                          return (
+                            <div
+                              key={cat.key}
+                              onClick={() => setSelectedCategories(prev => toggleCategorySelection(prev, cat.key))}
+                              style={{
+                                padding: '14px 12px', borderRadius: 10, cursor: locked ? 'not-allowed' : 'pointer',
+                                border: `1.5px solid ${active ? cat.color : '#e2e8f0'}`,
+                                background: active ? cat.bg : '#fff',
+                                position: 'relative', userSelect: 'none',
+                              }}>
+                              <CatIcon size={20} style={{ color: active ? cat.color : '#94a3b8', marginBottom: 6 }} />
+                              <div style={{ fontSize: 12.5, fontWeight: 700, color: active ? cat.color : '#0f172a' }}>{cat.label}</div>
+                              <div style={{ fontSize: 10, color: active ? cat.color : '#94a3b8', marginTop: 2, lineHeight: 1.3 }}>
+                                {locked ? 'Required dependency' : cat.badge}
+                              </div>
+                              <div style={{ fontWeight: 700, fontSize: 12, color: active ? cat.color : '#64748b', marginTop: 6 }}>
+                                ${cat.price_usd}<span style={{ fontSize: 9, fontWeight: 400 }}>/mo</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {customDependencyErrors.length > 0 && (
+                        <div style={{ marginTop: 12, padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 12, color: '#dc2626', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {customDependencyErrors.map(message => <span key={message}>{message}</span>)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Gateway selector */}
               <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>

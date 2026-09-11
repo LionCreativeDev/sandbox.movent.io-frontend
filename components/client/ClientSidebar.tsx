@@ -11,11 +11,13 @@ import clientApi from '@/lib/clientAxios';
 
 // Module key → nav item map (Dashboard is always visible)
 //
-// No standalone "Chat" entry — a Client only ever chats within a Project's
-// own Chat tab (Api\Client\ProjectChatController); the separate
-// account-level Sales Chat (Api\Client\ChatController, /client/chat) stays
-// reachable directly (e.g. a pre-project "Chat with Seller" notification
-// link) but is deliberately not surfaced as its own nav item anymore.
+// No "Chat" entry — a Client only ever chats within a Project's own Chat tab
+// (Api\Client\ProjectChatController). The separate account-level Sales Chat
+// was removed outright on 2026-09-11 (page, routes and Api\Client\
+// ChatController all deleted): a sales conversation belongs to the LEAD
+// stage, where it runs in the CRM's Lead → Sales Chat tab and on the lead's
+// own no-login link, and anyone who has become a Client has by definition
+// paid — so a Project exists and its chat is the live conversation.
 const NAV = [
   { key: null,        label: 'Dashboard', icon: HiSquares2X2,         path: '/client/dashboard' },
   { key: 'projects',  label: 'Projects',  icon: HiFolder,              path: '/client/projects' },

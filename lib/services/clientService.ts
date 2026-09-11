@@ -96,18 +96,11 @@ export const clientService = {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
-  // One single Sales Chat conversation (Seller <-> Client <-> Company
-  // Admin) — no thread picker, matching Api\Client\ChatController.
-  chatMessages: async () => {
-    const res = await clientApi.get('/client/chat/messages');
-    return res.data.data;
-  },
-  chatReply: async (data: FormData) => {
-    const res = await clientApi.post('/client/chat/reply', data, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return res.data;
-  },
+  // The account-level Sales Chat (chatMessages/chatReply) was removed on
+  // 2026-09-11 along with Api\Client\ChatController and the /client/chat page:
+  // a sales conversation belongs to the LEAD stage, and by the time someone is
+  // a Client they have a Project, whose own chat below is the one that matters.
+  //
   // Per-PROJECT chat — a separate conversation for each project, between the
   // client, that project's own Seller and Company Admin (see
   // Api\Client\ProjectChatController). Unrelated to the account-level Sales

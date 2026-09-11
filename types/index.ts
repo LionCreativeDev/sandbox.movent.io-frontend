@@ -123,6 +123,16 @@ export interface Client {
   // migrateChatHistory()); the frontend uses this to point Sales Chat at
   // Project Chat instead of the old, now-abandoned Client-anchored thread.
   chat_project_id?: number | null;
+  // Who created this client — a staff user (type 'user') or the Company
+  // Admin (type 'admin', since Admin isn't a `users` row). Null for older
+  // rows where neither could be attributed. See
+  // Api\Admin\ClientController::show()/Api\User\ClientController::show().
+  creator?: { id: number; name: string; type: 'user' | 'admin' } | null;
+  // Owning Seller — set at creation (Api\User\ClientController::store()) or
+  // via Client Transfer (Api\Admin\ClientController::transfer()). Null means
+  // unassigned.
+  account_manager?: number | null;
+  accountManager?: { id: number; name: string } | null;
 }
 
 // GET /{admin|user}/clients/{id}/delete-summary — every record a delete would

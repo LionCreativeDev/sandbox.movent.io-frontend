@@ -1,5 +1,6 @@
 import api from '@/lib/axios';
 import { Client, ClientDeleteSummary } from '@/types';
+import { CompanyUser } from './adminLeadService';
 
 export interface ClientPayload {
   company_id: number;
@@ -70,5 +71,16 @@ export const adminClientService = {
 
   updatePermissions: async (id: number, permissions: Record<string, boolean>): Promise<void> => {
     await api.put(`/admin/clients/${id}/permissions`, { permissions });
+  },
+
+  transfer: async (id: number, toUserId: number, reason?: string): Promise<Client> => {
+    const res = await api.post(`/admin/clients/${id}/transfer`, { to_user_id: toUserId, reason: reason || null });
+    return res.data.data;
+  },
+
+  // Picker list for the Transfer Client modal — active Sellers only.
+  companyUsers: async (companyId: number): Promise<CompanyUser[]> => {
+    const res = await api.get('/admin/clients/company-users', { params: { company_id: companyId } });
+    return res.data.data;
   },
 };

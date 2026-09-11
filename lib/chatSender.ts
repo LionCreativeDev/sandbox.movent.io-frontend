@@ -32,15 +32,25 @@ export interface ChatSenderOptions {
    *  client in client-facing conversations. */
   adminSuffix?: boolean;
   /** Render a guest as "Name (via invoice link)" — marks messages that came
-   *  in through the public invoice page rather than from a real account. */
+   *  in through a public, no-login page rather than from a real account. */
   guestSuffix?: boolean;
+  /**
+   * Overrides the parenthetical `guestSuffix` adds.
+   *
+   * The default names the public invoice page because that was the only way a
+   * guest message could exist. A Lead now has a second one — their own emailed
+   * Sales Chat link (Api\PublicLeadChatController) — and on the Lead screen
+   * both sources are simply "the lead", so that screen passes 'Lead' rather
+   * than mislabelling a sales-chat message as having come via an invoice.
+   */
+  guestLabel?: string;
   /** Shown only when no sender record exists at all. */
   fallback?: string;
 }
 
 export function chatSenderName(
   message: ChatSenderLike,
-  { adminSuffix = false, guestSuffix = false, fallback = 'Deleted user' }: ChatSenderOptions = {},
+  { adminSuffix = false, guestSuffix = false, guestLabel = 'via invoice link', fallback = 'Deleted user' }: ChatSenderOptions = {},
 ): string {
   const adminName = message.sender_admin?.name;
   if (adminName) {
@@ -54,7 +64,7 @@ export function chatSenderName(
 
   const guestName = message.guest_sender_name;
   if (guestName) {
-    return guestSuffix ? `${guestName} (via invoice link)` : guestName;
+    return guestSuffix ? `${guestName} (${guestLabel})` : guestName;
   }
 
   return fallback;

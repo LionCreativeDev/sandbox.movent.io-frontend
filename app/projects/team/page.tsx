@@ -5,15 +5,12 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { userProjectService, CompanyUserOption } from '@/lib/services/userProjectService';
 import { Project, TeamMember, TeamRole } from '@/lib/services/adminProjectService';
-import { can, getUserModulePermissions, getAuthUser } from '@/lib/auth';
+import { can, getAuthUser } from '@/lib/auth';
 import { User } from '@/types';
-import { MODULE_CATALOG } from '@/lib/moduleCatalog';
 import { inp, lbl, card, TEAM_ROLE_LABEL } from '@/components/admin/projects/shared';
 import { ROLE_LABELS } from '@/lib/roleUtils';
 import toast from 'react-hot-toast';
 import { HiMagnifyingGlass } from 'react-icons/hi2';
-
-const PROJECT_MODULE = MODULE_CATALOG.find(m => m.key === 'project_management');
 
 // Mirrors frontend/app/admin/projects/[id]/team/page.tsx's TEAM_ELIGIBLE_ROLES
 // — every role that can meaningfully sit on a project team, except Seller
@@ -46,36 +43,6 @@ function UserTeamPageInner() {
 
   const canAssign   = can('project_management', 'canAssignTeamResources');
   const canAddUsers = can('account', 'canAddUsers');
-  const myGrantablePerms = getUserModulePermissions('project_management');
-
-  // New-user form — only shown to staff with canAddUsers; can only grant
-  // permissions the PM themselves already holds (enforced again server-side).
-  const [showAddUser, setShowAddUser]   = useState(false);
-  const [newName, setNewName]           = useState('');
-  const [newEmail, setNewEmail]         = useState('');
-  const [newPassword, setNewPassword]   = useState('');
-  const [newPerms, setNewPerms]         = useState<string[]>([]);
-  const [creatingUser, setCreatingUser] = useState(false);
-
-  const toggleNewPerm = (key: string) =>
-    setNewPerms(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
-
-  const createUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim() || !newEmail.trim() || !newPassword) { toast.error('Name, email and password are required'); return; }
-    setCreatingUser(true);
-    try {
-      await userProjectService.team.createUser({
-        name: newName.trim(), email: newEmail.trim(), password: newPassword,
-        permissions: newPerms.length ? { project_management: newPerms } : {},
-      });
-      toast.success('User created');
-      setNewName(''); setNewEmail(''); setNewPassword(''); setNewPerms([]); setShowAddUser(false);
-      userProjectService.team.companyUsers().then(setUsers).catch(() => {});
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to create user');
-    } finally { setCreatingUser(false); }
-  };
 
   const load = async () => {
     setLoading(true);
@@ -299,64 +266,15 @@ function UserTeamPageInner() {
               </div>
             )}
 
-            {!canAddUsers && (
-              <div style={{ marginTop: 10, fontSize: 12, color: '#94a3b8' }}>
-                Don&apos;t see who you&apos;re looking for? Ask your Company Admin to create the user first from Users &amp; Permissions.
-              </div>
-            )}
           </form>
         )}
 
-        {/* "Add New User" toggle — gated purely on canAddUsers, independent of
-            canAssign (a staff member can be able to add users without also
-            being able to assign the project team, and vice versa). */}
-        {projectId && canAddUsers && (
+        {projectId && (
           <div style={{ margin: canAssign ? '-8px 0 10px' : '0 0 10px', fontSize: 12, color: '#94a3b8' }}>
-            <button type="button" onClick={() => setShowAddUser(v => !v)} style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 600, cursor: 'pointer', fontSize: 12, padding: 0 }}>
-              {showAddUser ? 'Cancel' : "Don't see who you're looking for? + Add New User"}
+            <button type="button" onClick={() => router.push('/users/new')} style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 600, cursor: 'pointer', fontSize: 12, padding: 0 }}>
+              Don&apos;t see who you&apos;re looking for? + Add New User
             </button>
           </div>
-        )}
-
-        {projectId && canAddUsers && showAddUser && (
-          <form onSubmit={createUser} style={card}>
-            <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 14, marginBottom: 12 }}>Add New User</div>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-              <div style={{ flex: '1 1 200px' }}>
-                <label style={lbl}>Name</label>
-                <input value={newName} onChange={e => setNewName(e.target.value)} style={inp} placeholder="Full name" />
-              </div>
-              <div style={{ flex: '1 1 220px' }}>
-                <label style={lbl}>Email</label>
-                <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} style={inp} placeholder="email@company.com" />
-              </div>
-              <div style={{ flex: '1 1 180px' }}>
-                <label style={lbl}>Password</label>
-                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={inp} placeholder="Min 8 characters" />
-              </div>
-            </div>
-
-            {myGrantablePerms.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <label style={lbl}>Project Management Permissions</label>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>You can only grant permissions you yourself have.</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 4 }}>
-                  {(PROJECT_MODULE?.permissions ?? [])
-                    .filter(p => myGrantablePerms.includes(p.key))
-                    .map(p => (
-                      <label key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#475569', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={newPerms.includes(p.key)} onChange={() => toggleNewPerm(p.key)} />
-                        {p.label}
-                      </label>
-                    ))}
-                </div>
-              </div>
-            )}
-
-            <button type="submit" disabled={creatingUser} style={{ padding: '9px 20px', background: creatingUser ? '#93c5fd' : '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: creatingUser ? 'not-allowed' : 'pointer' }}>
-              {creatingUser ? 'Creating…' : 'Create User'}
-            </button>
-          </form>
         )}
 
         <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden' }}>

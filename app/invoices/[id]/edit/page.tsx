@@ -135,6 +135,7 @@ export default function EditInvoicePage() {
     if (items.some(r => !r.description.trim())) { setError('All items need a description'); return; }
     if (!invoiceType) { setError('Choose an invoice type — Company Invoice or Brand Invoice'); return; }
     if (invoiceType === 'brand' && !brandId) { setError('Select a brand for this Brand Invoice'); return; }
+    if (subtotal <= 0) { setError('Invoice amount must be greater than 0'); return; }
     setSaving(true); setError('');
     try {
       await adminInvoiceService.update(invoiceId, {

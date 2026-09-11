@@ -551,6 +551,7 @@ function NewInvoiceForm() {
       setError('Enter the amount for this invoice');
       return null;
     }
+    if (subtotal <= 0) { setError('Invoice amount must be greater than 0'); return null; }
 
     return {
       company_id:      companyId,

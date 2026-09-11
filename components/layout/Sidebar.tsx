@@ -221,6 +221,23 @@ const USER_NAV_GROUPS = [
       { href: '/user-management', icon: HiUserGroup, label: 'Users', permAny: ['canAddUsers'] },
     ],
   },
+  {
+    // Per-company Settings for a staff member the Company Admin granted the
+    // Settings Management Permission. Gated on the common 'account' module's
+    // canManageSettings, same pattern as canAddUsers above, and never on a
+    // purchased module. Points at '/settings', which serves the Company
+    // Admin's own Settings screen in staff mode (it talks to
+    // /api/user/settings/* instead of /api/admin/settings/*) so both sides
+    // stay one page.
+    //
+    // permAny reads the session cookie, so this link can outlive a revoke
+    // until the next /user/me refresh — the endpoints behind it already
+    // answer 403, and the page itself re-checks on load.
+    label: 'System',
+    items: [
+      { href: '/settings', icon: HiCog6Tooth, label: 'Settings', permAny: ['canManageSettings'] },
+    ],
+  },
 ];
 
 export default function Sidebar() {

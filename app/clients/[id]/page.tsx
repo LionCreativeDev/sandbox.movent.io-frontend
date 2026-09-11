@@ -3,13 +3,14 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminClientService } from '@/lib/services/adminClientService';
+import { CompanyUser } from '@/lib/services/adminLeadService';
 import { adminInvoiceService, ClientInvoiceStats } from '@/lib/services/adminInvoiceService';
 import { userClientService } from '@/lib/services/userClientService';
 import { adminProjectService, Project } from '@/lib/services/adminProjectService';
 import { userProjectService } from '@/lib/services/userProjectService';
 import { adminSalesChatService, userSalesChatService } from '@/lib/services/salesChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
-import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize, inp, Badge, STATUS_SC, PRIORITY_SC, fmtDate } from '@/components/admin/projects/shared';
+import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize, inp, lbl, Badge, STATUS_SC, PRIORITY_SC, fmtDate } from '@/components/admin/projects/shared';
 import api from '@/lib/axios';
 import { getAuthType, getAuthUser, can } from '@/lib/auth';
 import { Client, Invoice } from '@/types';
@@ -18,7 +19,7 @@ import toast from 'react-hot-toast';
 import { chatSenderName } from '@/lib/chatSender';
 import {
   HiArrowLeft, HiPencilSquare, HiCheckCircle, HiXCircle,
-  HiDocumentText, HiPlusCircle, HiTrash
+  HiDocumentText, HiPlusCircle, HiTrash, HiArrowsRightLeft
 } from 'react-icons/hi2';
 
 const INVOICE_STATUS: Record<string, { bg: string; color: string; label: string }> = {
@@ -117,6 +118,15 @@ export default function ClientProfilePage() {
   const [portalSaving, setPortalSaving]   = useState(false);
   const [portalError, setPortalError]     = useState('');
   const [portalSuccess, setPortalSuccess] = useState('');
+
+  // Transfer Client modal (Admin only — see Api\Admin\ClientController::
+  // transfer()). Mirrors frontend/app/leads/[id]/page.tsx's Transfer Lead modal.
+  const [transferModal, setTransferModal]       = useState(false);
+  const [companyUsers, setCompanyUsers]         = useState<CompanyUser[]>([]);
+  const [transferToUserId, setTransferToUserId] = useState('');
+  const [transferReason, setTransferReason]     = useState('');
+  const [transferring, setTransferring]         = useState(false);
+  const [transferError, setTransferError]       = useState('');
 
   useEffect(() => {
     if (isSubUser) {
@@ -342,6 +352,28 @@ export default function ClientProfilePage() {
     await clientSvc.updatePermissions(clientId, mapped).catch(() => {});
   };
 
+  const openTransferModal = () => {
+    setTransferModal(true);
+    setTransferError('');
+    if (companyUsers.length > 0 || !client) return;
+    adminClientService.companyUsers(client.company_id).then(setCompanyUsers).catch(() => setTransferError('Failed to load users'));
+  };
+
+  const handleTransfer = async () => {
+    if (!client || !transferToUserId) { setTransferError('Select a user to transfer to'); return; }
+    setTransferring(true); setTransferError('');
+    try {
+      const updated = await adminClientService.transfer(client.id, Number(transferToUserId), transferReason.trim() || undefined);
+      setClient(current => current ? { ...current, ...updated } : updated);
+      toast.success('Client transferred');
+      setTransferModal(false);
+      setTransferToUserId(''); setTransferReason('');
+    } catch (err: unknown) {
+      const ex = err as { response?: { data?: { message?: string } } };
+      setTransferError(ex.response?.data?.message ?? 'Failed to transfer client');
+    } finally { setTransferring(false); }
+  };
+
   const fmt = (n: number, cur = 'USD') => `${cur} ${n.toLocaleString('en-US', { minimumFractionDigits: 0 })}`;
 
   if (loading) return <DashboardLayout title="Client"><div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Loading…</div></DashboardLayout>;
@@ -383,11 +415,20 @@ export default function ClientProfilePage() {
             </div>
             {client.company_name && <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>{client.company_name}</p>}
           </div>
-          {canEditClient && (
-            <button onClick={() => router.push(`/clients/${clientId}/edit`)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#2563eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-              <HiPencilSquare size={14} /> Edit Client
-            </button>
-          )}
+          <div style={{ display: 'flex', gap: 10 }}>
+            {/* Admin only — Api\Admin\ClientController::transfer() has no
+                staff-side equivalent, same as Lead Transfer's Admin path. */}
+            {!isSubUser && (
+              <button onClick={openTransferModal} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                <HiArrowsRightLeft size={14} /> Transfer
+              </button>
+            )}
+            {canEditClient && (
+              <button onClick={() => router.push(`/clients/${clientId}/edit`)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#2563eb', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                <HiPencilSquare size={14} /> Edit Client
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Tabs */}
@@ -411,8 +452,10 @@ export default function ClientProfilePage() {
                 ['Status', client.status],
                 ['Portal Access', client.portal_access ? 'Enabled' : 'Disabled'],
                 ['Address', client.address ?? '—'],
+                ['Account Manager', client.accountManager?.name ?? '—'],
                 ['Notes', client.notes ?? '—'],
                 ['Created', new Date(client.created_at).toLocaleDateString('en-GB')],
+                ['Created By', client.creator?.name ?? '—'],
               ].map(([label, value]) => (
                 <div key={label}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
@@ -759,6 +802,40 @@ export default function ClientProfilePage() {
                   </form>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Transfer Client modal — mirrors frontend/app/leads/[id]/page.tsx's
+            Transfer Lead modal. */}
+        {transferModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: 420, maxWidth: '95vw' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700 }}>Transfer Client</h3>
+              <p style={{ margin: '0 0 18px', fontSize: 12, color: '#94a3b8' }}>
+                Currently assigned to {client.accountManager?.name ?? 'no one'}.
+              </p>
+              {transferError && <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fef2f2', borderRadius: 7, color: '#dc2626', fontSize: 12 }}>{transferError}</div>}
+              <div style={{ marginBottom: 14 }}>
+                <label style={lbl}>Transfer To *</label>
+                <select style={inp} value={transferToUserId} onChange={e => setTransferToUserId(e.target.value)}>
+                  <option value="">Select user…</option>
+                  {companyUsers.filter(u => u.id !== client.account_manager).map(u => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={lbl}>Reason (optional)</label>
+                <textarea style={{ ...inp, height: 64, resize: 'vertical' }} value={transferReason} onChange={e => setTransferReason(e.target.value)} placeholder="Why is this client being transferred?" />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setTransferModal(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={handleTransfer} disabled={transferring}
+                  style={{ flex: 2, padding: '10px 0', borderRadius: 8, border: 'none', background: transferring ? '#93c5fd' : 'linear-gradient(135deg, #2563eb, #3b82f6)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: transferring ? 'not-allowed' : 'pointer' }}>
+                  {transferring ? 'Transferring…' : 'Transfer Client'}
+                </button>
+              </div>
             </div>
           </div>
         )}

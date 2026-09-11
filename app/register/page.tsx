@@ -714,7 +714,8 @@ import { publicService, PublicModule } from '../../lib/services/publicService';
 import { setAuthData } from '../../lib/auth';
 import {
   CATEGORIES, moduleToCategory, moduleDependencyErrors,
-  moduleKeysToCategoryKeys, requiredDependencyKeys, DEPENDENCY_ERRORS,
+  moduleKeysToCategoryKeys, requiredDependencyKeys,
+  toggleCategorySelection,
 } from '../../lib/moduleCategories';
 import toast from 'react-hot-toast';
 import Container from '../../components/ui/Conatiner';
@@ -1182,33 +1183,7 @@ function RegisterContent() {
   }, [companyName, checkCompanyName]);
 
   const toggleCategory = (key: string) =>
-    setSelectedCategories(prev => {
-      if (key === 'invoice' && prev.includes('invoice') && (prev.includes('sales') || prev.includes('finance'))) {
-        toast.error(prev.includes('sales') ? DEPENDENCY_ERRORS.sales : DEPENDENCY_ERRORS.finance);
-        return prev;
-      }
-      // Compliance needs Projects AND Invoice both present — block removing
-      // either one while Compliance itself is still selected. Removing
-      // Compliance is unaffected (that branch never touches this key), so
-      // Projects/Invoice stay if they were picked manually or by anything
-      // else that needs them.
-      if ((key === 'invoice' || key === 'projects') && prev.includes(key) && prev.includes('compliance')) {
-        toast.error(DEPENDENCY_ERRORS.compliance);
-        return prev;
-      }
-
-      if (prev.includes(key)) return prev.filter(k => k !== key);
-
-      const next = [...prev, key];
-      if ((key === 'sales' || key === 'finance') && !next.includes('invoice')) {
-        next.push('invoice');
-      }
-      if (key === 'compliance') {
-        if (!next.includes('projects')) next.push('projects');
-        if (!next.includes('invoice')) next.push('invoice');
-      }
-      return next;
-    });
+    setSelectedCategories(prev => toggleCategorySelection(prev, key));
 
   const step1Valid = !!(companyName && companyNameOk && name && email && emailOk && password.length >= 8 && password === confirm && startTypeChoice !== '');
 

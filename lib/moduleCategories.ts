@@ -3,6 +3,7 @@ import {
   HiClipboardDocumentList,
 } from 'react-icons/hi2';
 import { IconType } from 'react-icons';
+import toast from 'react-hot-toast';
 import { PublicModule } from './services/publicService';
 
 export type Category = {
@@ -84,6 +85,39 @@ export function moduleDependencyErrors(selected: string[]): string[] {
     errors.push(DEPENDENCY_ERRORS.compliance);
   }
   return errors;
+}
+
+// Toggling one category on/off in the "Build Your Own Plan" picker — shared
+// by the registration flow and the payment/reactivation page's custom-module
+// picker, so both enforce the exact same dependency rules (Sales/Finance
+// need Invoice; Compliance needs Projects AND Invoice) rather than two copies
+// silently drifting apart.
+export function toggleCategorySelection(prev: string[], key: string): string[] {
+  if (key === 'invoice' && prev.includes('invoice') && (prev.includes('sales') || prev.includes('finance'))) {
+    toast.error(prev.includes('sales') ? DEPENDENCY_ERRORS.sales : DEPENDENCY_ERRORS.finance);
+    return prev;
+  }
+  // Compliance needs Projects AND Invoice both present — block removing
+  // either one while Compliance itself is still selected. Removing
+  // Compliance is unaffected (that branch never touches this key), so
+  // Projects/Invoice stay if they were picked manually or by anything
+  // else that needs them.
+  if ((key === 'invoice' || key === 'projects') && prev.includes(key) && prev.includes('compliance')) {
+    toast.error(DEPENDENCY_ERRORS.compliance);
+    return prev;
+  }
+
+  if (prev.includes(key)) return prev.filter(k => k !== key);
+
+  const next = [...prev, key];
+  if ((key === 'sales' || key === 'finance') && !next.includes('invoice')) {
+    next.push('invoice');
+  }
+  if (key === 'compliance') {
+    if (!next.includes('projects')) next.push('projects');
+    if (!next.includes('invoice')) next.push('invoice');
+  }
+  return next;
 }
 
 export function moduleKeysToCategoryKeys(moduleKeys: string[]): string[] {

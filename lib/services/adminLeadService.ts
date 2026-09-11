@@ -180,6 +180,24 @@ export interface SalesDashboard {
   year: number;
 }
 
+/**
+ * State of a Lead's no-login Sales Chat link — the one emailed to them when
+ * the lead is created (App\Mail\LeadSalesChatInviteMail).
+ *
+ * `chat_url` is the whole credential: anyone holding it can read and write
+ * that conversation, which is why the Lead screen labels it as private and
+ * offers "Revoke" rather than treating it as an ordinary share link.
+ */
+export interface ChatInviteState {
+  /** False once revoked — the link is dead until a new invite is sent. */
+  has_link: boolean;
+  chat_url: string | null;
+  /** When an invite was last actually delivered; null if never sent. */
+  invited_at: string | null;
+  /** False when the lead has no email address to send to. */
+  can_send: boolean;
+}
+
 export const adminLeadService = {
   list: async (params?: Record<string, string>): Promise<Lead[]> => {
     const res = await api.get('/admin/leads', { params });
@@ -208,6 +226,21 @@ export const adminLeadService = {
 
   projectEligibility: async (id: number): Promise<DealEligibility> => {
     const res = await api.get(`/admin/leads/${id}/project-eligibility`);
+    return res.data.data;
+  },
+
+  chatInvite: async (id: number): Promise<ChatInviteState> => {
+    const res = await api.get(`/admin/leads/${id}/chat-invite`);
+    return res.data.data;
+  },
+
+  sendChatInvite: async (id: number, regenerate = false): Promise<ChatInviteState> => {
+    const res = await api.post(`/admin/leads/${id}/chat-invite`, { regenerate });
+    return res.data.data;
+  },
+
+  revokeChatInvite: async (id: number): Promise<ChatInviteState> => {
+    const res = await api.delete(`/admin/leads/${id}/chat-invite`);
     return res.data.data;
   },
 
@@ -322,6 +355,21 @@ export const userLeadService = {
 
   projectEligibility: async (id: number): Promise<DealEligibility> => {
     const res = await api.get(`/user/leads/${id}/project-eligibility`);
+    return res.data.data;
+  },
+
+  chatInvite: async (id: number): Promise<ChatInviteState> => {
+    const res = await api.get(`/user/leads/${id}/chat-invite`);
+    return res.data.data;
+  },
+
+  sendChatInvite: async (id: number, regenerate = false): Promise<ChatInviteState> => {
+    const res = await api.post(`/user/leads/${id}/chat-invite`, { regenerate });
+    return res.data.data;
+  },
+
+  revokeChatInvite: async (id: number): Promise<ChatInviteState> => {
+    const res = await api.delete(`/user/leads/${id}/chat-invite`);
     return res.data.data;
   },
 

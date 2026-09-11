@@ -486,6 +486,37 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
 };
 
 /**
+ * Permissions that are NEVER part of any role's defaults — not even
+ * company_admin's or admin's, whose defaults are otherwise "everything the
+ * company has". A Company Admin ticks these by hand, per company, for each
+ * person who should hold them.
+ *
+ * Mirrors RoleDefaultPermissions::ALWAYS_EXPLICIT_PERMISSIONS on the backend,
+ * which is the real gate — this copy only keeps the Add/Edit User form from
+ * rendering a box ticked that the backend is about to leave off. Keep the two
+ * in step.
+ *
+ * account.canManageSettings: the Settings Management Permission. Settings
+ * hands over the company's invoicing identity, bank details and live payment
+ * gateway credentials, so "off unless someone deliberately turned it on" is
+ * the whole point of it.
+ */
+export const ALWAYS_EXPLICIT_PERMISSIONS: Record<string, string[]> = {
+  account: ['canManageSettings'],
+};
+
+function stripAlwaysExplicit(permissions: Record<string, string[]>): Record<string, string[]> {
+  for (const [moduleKey, excluded] of Object.entries(ALWAYS_EXPLICIT_PERMISSIONS)) {
+    const current = permissions[moduleKey];
+    if (!current) continue;
+    const kept = current.filter(p => !excluded.includes(p));
+    if (kept.length > 0) permissions[moduleKey] = kept;
+    else delete permissions[moduleKey];
+  }
+  return permissions;
+}
+
+/**
  * Default permission map for a role, filtered to the catalog module keys the
  * company actually has active. `catalogModules` are already-resolved catalog
  * keys (e.g. from getAvailableModules(rawDb).map(m => m.key)), not raw DB
@@ -510,8 +541,12 @@ export function getRoleDefaultPermissions(
     // added by hand here. Without this the boxes render unticked while the
     // backend's own role defaults grant them anyway on save, i.e. the form
     // would be lying about what it is about to store.
+    //
+    // canManageSettings is deliberately NOT in this list — it is never a
+    // default for any role, this one included (stripAlwaysExplicit() below
+    // enforces that even if allModulePermissions were to start carrying it).
     out.account = [...new Set([...(out.account ?? []), 'canAddUsers', 'canUseGeneralChat'])];
-    return out;
+    return stripAlwaysExplicit(out);
   }
 
   if (role === 'viewer') {
@@ -520,7 +555,7 @@ export function getRoleDefaultPermissions(
       const viewKeys = (allModulePermissions[key] ?? []).filter(p => p.startsWith('canView'));
       if (viewKeys.length > 0) out[key] = viewKeys;
     }
-    return out;
+    return stripAlwaysExplicit(out);
   }
 
   const raw = ROLE_DEFAULT_PERMISSIONS[role] ?? {};
@@ -538,7 +573,7 @@ export function getRoleDefaultPermissions(
     const valid = permKeys.filter(p => (allModulePermissions[moduleKey] ?? []).includes(p));
     if (valid.length > 0) filtered[moduleKey] = valid;
   }
-  return filtered;
+  return stripAlwaysExplicit(filtered);
 }
 
 /** Given a Record<moduleKey, permissionKey[]>, return a concise role label. */

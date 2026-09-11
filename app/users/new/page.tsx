@@ -561,6 +561,7 @@ function visibleSelectedCount(
 
   const accountPerms = modPermsFor['account'] ?? [];
   if (accountPerms.includes('canAddUsers')) total += 1;
+  if (accountPerms.includes('canManageSettings')) total += 1;
   if (accountPerms.includes('canUseGeneralChat')) total += 1;
 
   const co = companies.find(c => c.id === companyId);
@@ -1068,6 +1069,39 @@ export default function NewUserPage() {
                       <div>
                         <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13.5 }}>User Management Permission</div>
                         <div style={{ fontSize: 12, color: '#64748b' }}>Gives this user their own &quot;Users&quot; page for this company: add, edit, assign roles, manage permissions, suspend/activate and remove staff. Limited to this company, and they can never grant a permission they don&apos;t hold themselves.</div>
+                      </div>
+                    </label>
+                  );
+                })()}
+
+                {/* Settings Management — one common toggle per company, same
+                    "account module" pattern as Add Users above.
+
+                    Owner reach only: this hands over the company's invoicing
+                    identity, bank details and live payment gateway
+                    credentials, so a delegated manager can never pass it on —
+                    only the Company Admin and its deputy hand it out.
+
+                    Never ticked by default for ANY role, the Admin deputy
+                    included (see ALWAYS_EXPLICIT_PERMISSIONS in
+                    lib/roleUtils.ts and RoleDefaultPermissions::
+                    ALWAYS_EXPLICIT_PERMISSIONS on the backend, which is the
+                    real gate) — so selecting a role never pre-checks this
+                    box, and unticking it revokes the access on the staff
+                    member's very next request. */}
+                {ownerReach && activeCompanyId !== null && (() => {
+                  const canThisUserManageSettings = (perms[activeCompanyId]?.['account'] ?? []).includes('canManageSettings');
+                  return (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderRadius: 12, border: `1.5px solid ${canThisUserManageSettings ? '#2563eb40' : '#e2e8f0'}`, background: canThisUserManageSettings ? '#eff6ff' : '#fafafa', marginBottom: 16, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={canThisUserManageSettings}
+                        onChange={() => togglePerm(activeCompanyId, 'account', 'canManageSettings')}
+                        style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: 'pointer' }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13.5 }}>Settings Management Permission</div>
+                        <div style={{ fontSize: 12, color: '#64748b' }}>Gives this user their own &quot;Settings&quot; page for this company: company profile and logo, invoice defaults, bank details, payment gateway accounts and the deal workflow. Limited to this company — settings for every other company stay untouched and unreachable. Buying modules or seats stays with you.</div>
                       </div>
                     </label>
                   );

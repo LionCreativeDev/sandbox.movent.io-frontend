@@ -6,7 +6,9 @@ import api from '@/lib/axios';
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
 import { adminSalesChatService } from '@/lib/services/salesChatService';
+import { adminClientService } from '@/lib/services/adminClientService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
+import { CompanyUser } from '@/lib/services/adminLeadService';
 import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
 import PhoneInput from '@/components/ui/PhoneInput';
 import { ALL_COUNTRIES } from '@/lib/countries';
@@ -18,6 +20,11 @@ interface ClientData {
   portal_access: boolean; status: string; created_at: string;
   user: { id: number; email: string; is_active: boolean } | null;
   company: { id: number; name: string } | null;
+  // Who created this client, and who currently owns it — see
+  // Api\Admin\ClientController::show()/transfer().
+  creator?: { id: number; name: string; type: 'user' | 'admin' } | null;
+  account_manager?: number | null;
+  accountManager?: { id: number; name: string } | null;
 }
 interface ModulePerm { label: string; is_enabled: boolean; purchased: boolean }
 interface Seat { limit: number | null; users_used: number; clients_total: number; can_add: boolean }
@@ -89,6 +96,14 @@ export default function ClientDetailPage() {
   const [savingPortal, setSavingPortal] = useState(false);
   const [loginUrl,    setLoginUrl]      = useState('');
   const [loginUrlCopied, setLoginUrlCopied] = useState(false);
+
+  // Transfer Client modal — see Api\Admin\ClientController::transfer().
+  const [transferModal, setTransferModal]       = useState(false);
+  const [companyUsers, setCompanyUsers]         = useState<CompanyUser[]>([]);
+  const [transferToUserId, setTransferToUserId] = useState('');
+  const [transferReason, setTransferReason]     = useState('');
+  const [transferring, setTransferring]         = useState(false);
+  const [transferError, setTransferError]       = useState('');
 
   useEffect(() => {
     setLoginUrl(`${window.location.origin}/client/login`);
@@ -265,6 +280,27 @@ export default function ClientDetailPage() {
     } catch { toast.error('Failed'); }
   };
 
+  const openTransferModal = () => {
+    setTransferModal(true);
+    setTransferError('');
+    if (companyUsers.length > 0 || !client?.company) return;
+    adminClientService.companyUsers(client.company.id).then(setCompanyUsers).catch(() => setTransferError('Failed to load users'));
+  };
+
+  const handleTransfer = async () => {
+    if (!transferToUserId) { setTransferError('Select a user to transfer to'); return; }
+    setTransferring(true); setTransferError('');
+    try {
+      await adminClientService.transfer(Number(id), Number(transferToUserId), transferReason.trim() || undefined);
+      toast.success('Client transferred');
+      setTransferModal(false);
+      setTransferToUserId(''); setTransferReason('');
+      load();
+    } catch (err: any) {
+      setTransferError(err?.response?.data?.message ?? 'Failed to transfer client');
+    } finally { setTransferring(false); }
+  };
+
   if (loading) return (
     <DashboardLayout title="Client">
       <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>Loading…</div>
@@ -310,8 +346,16 @@ export default function ClientDetailPage() {
           <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>
             {client.company?.name} {client.company_name ? `· ${client.company_name}` : ''}
           </p>
+          <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>
+            Account Manager: <strong style={{ color: '#475569' }}>{client.accountManager?.name ?? 'Unassigned'}</strong>
+            {' · '}Created By: <strong style={{ color: '#475569' }}>{client.creator?.name ?? '—'}</strong>
+          </p>
         </div>
 
+        <button onClick={openTransferModal} style={{
+          background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: 8,
+          padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#475569',
+        }}>⇄ Transfer</button>
       </div>
 
       {/* Tabs */}
@@ -674,6 +718,39 @@ export default function ClientDetailPage() {
                 </form>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Client modal — see Api\Admin\ClientController::transfer(). */}
+      {transferModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: 420, maxWidth: '95vw' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700 }}>Transfer Client</h3>
+            <p style={{ margin: '0 0 18px', fontSize: 12, color: '#94a3b8' }}>
+              Currently assigned to {client.accountManager?.name ?? 'no one'}.
+            </p>
+            {transferError && <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fef2f2', borderRadius: 7, color: '#dc2626', fontSize: 12 }}>{transferError}</div>}
+            <div style={{ marginBottom: 14 }}>
+              <label style={lbl}>Transfer To *</label>
+              <select style={inp} value={transferToUserId} onChange={e => setTransferToUserId(e.target.value)}>
+                <option value="">Select user…</option>
+                {companyUsers.filter(u => u.id !== client.account_manager).map(u => (
+                  <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={lbl}>Reason (optional)</label>
+              <textarea style={{ ...inp, height: 64, resize: 'vertical' }} value={transferReason} onChange={e => setTransferReason(e.target.value)} placeholder="Why is this client being transferred?" />
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setTransferModal(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleTransfer} disabled={transferring}
+                style={{ flex: 2, padding: '10px 0', borderRadius: 8, border: 'none', background: transferring ? '#93c5fd' : '#2563eb', color: '#fff', fontSize: 14, fontWeight: 700, cursor: transferring ? 'not-allowed' : 'pointer' }}>
+                {transferring ? 'Transferring…' : 'Transfer Client'}
+              </button>
+            </div>
           </div>
         </div>
       )}
