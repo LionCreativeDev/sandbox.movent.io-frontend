@@ -59,6 +59,10 @@ export default function ProjectChatPage() {
   const [sellerId, setSellerId] = useState<number | null>(null);
   const [thread, setThread] = useState<ProjectMessengerThread | null>(null);
   const [canManageParticipants, setCanManageParticipants] = useState(false);
+  // This project's own Seller managing its chat roster ("Upseller"). Their
+  // picker lists company Sellers only, and they alone get the per-Seller
+  // "can message client" toggle — see Api\User\ProjectMessengerController.
+  const [isUpseller, setIsUpseller] = useState(false);
   // Literal PM only. Delegated participant managers still cannot @mention a
   // Seller unless they are the actual PM, matching the backend send() gate.
   const [isLiteralPm, setIsLiteralPm] = useState(false);
@@ -72,6 +76,10 @@ export default function ProjectChatPage() {
   const [eligibleUsers, setEligibleUsers] = useState<ProjectMessengerEligibleUser[]>([]);
   const [showParticipants, setShowParticipants] = useState(false);
   const [addParticipantId, setAddParticipantId] = useState<string>('');
+  // Whether the Seller being added may talk to the client straight away. Off
+  // by default — being in the chat is never by itself client access.
+  const [addWithClientAccess, setAddWithClientAccess] = useState(false);
+  const [savingClientAccess, setSavingClientAccess] = useState<number | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<number[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
@@ -91,7 +99,7 @@ export default function ProjectChatPage() {
   const loadThread = () => {
     userProjectMessengerService.show(projectId)
       .then(r => {
-        setThread(r.thread); setCanManageParticipants(r.can_manage_participants); setIsLiteralPm(r.is_literal_pm); setNoAccess(false); loadMessages();
+        setThread(r.thread); setCanManageParticipants(r.can_manage_participants); setIsUpseller(r.is_upseller); setIsLiteralPm(r.is_literal_pm); setNoAccess(false); loadMessages();
         // eligible-participants is permission-gated server-side and only used
         // by the Manage Participants picker.
         // Fetched once (not on every 8s poll) since the eligible pool rarely changes mid-session.
@@ -122,8 +130,9 @@ export default function ProjectChatPage() {
   const addParticipant = async () => {
     if (!addParticipantId) return;
     try {
-      await userProjectMessengerService.addParticipant(projectId, Number(addParticipantId));
+      await userProjectMessengerService.addParticipant(projectId, Number(addParticipantId), addWithClientAccess);
       setAddParticipantId('');
+      setAddWithClientAccess(false);
       loadThread();
     } catch (err: unknown) {
       toast.error(errorMessage(err, 'Failed to add participant'));
@@ -135,7 +144,20 @@ export default function ProjectChatPage() {
     try {
       await userProjectMessengerService.removeParticipant(projectId, userId);
       loadThread();
-    } catch { toast.error('Failed to remove participant'); }
+    } catch (err: unknown) { toast.error(errorMessage(err, 'Failed to remove participant')); }
+  };
+
+  // Grant/revoke one added Seller's client access without removing them from
+  // the chat — the second, separately revocable half of the Upseller's grant.
+  const toggleClientAccess = async (userId: number, next: boolean) => {
+    setSavingClientAccess(userId);
+    try {
+      await userProjectMessengerService.setParticipantClientAccess(projectId, userId, next);
+      toast.success(next ? 'Seller can now message the client' : 'Client access removed');
+      loadThread();
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to update client access'));
+    } finally { setSavingClientAccess(null); }
   };
 
   const toggleMute = async () => {
@@ -331,22 +353,64 @@ export default function ProjectChatPage() {
               {showParticipants && canManageParticipants && (
                 <div style={{ padding: '12px 20px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                    {thread.participants.map(p => (
-                      <span key={p.user_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '3px 10px', fontSize: 11.5, color: '#334155' }}>
-                        {p.name}
-                        <button onClick={() => removeParticipant(p.user_id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
-                      </span>
-                    ))}
+                    {thread.participants.map(p => {
+                      // can_manage is false for everyone an Upseller didn't
+                      // add themselves (the PM, the team, the client), so the
+                      // controls below simply aren't rendered for them —
+                      // matching what the server would allow. A PM/overseer
+                      // gets can_manage true on everyone, as before.
+                      const manageable = p.can_manage !== false;
+                      const sellerToggle = isUpseller && manageable && p.role === 'seller';
+                      return (
+                        <span key={p.user_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '3px 10px', fontSize: 11.5, color: '#334155' }}>
+                          {p.name}
+                          {sellerToggle && (
+                            <button
+                              onClick={() => toggleClientAccess(p.user_id, !p.can_message_client)}
+                              disabled={savingClientAccess === p.user_id}
+                              title={p.can_message_client
+                                ? 'This seller can message the client — click to revoke'
+                                : 'This seller cannot message the client — click to allow'}
+                              style={{
+                                border: 'none', borderRadius: 10, padding: '1px 7px', fontSize: 10, fontWeight: 600,
+                                cursor: savingClientAccess === p.user_id ? 'wait' : 'pointer',
+                                background: p.can_message_client ? '#dcfce7' : '#f1f5f9',
+                                color: p.can_message_client ? '#15803d' : '#64748b',
+                              }}
+                            >
+                              {p.can_message_client ? '✓ Client' : 'Client off'}
+                            </button>
+                          )}
+                          {manageable && (
+                            <button onClick={() => removeParticipant(p.user_id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
+                          )}
+                        </span>
+                      );
+                    })}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <select value={addParticipantId} onChange={e => setAddParticipantId(e.target.value)} style={{ ...inp, fontSize: 12 }}>
-                      <option value="">Add participant…</option>
+                      <option value="">{isUpseller ? 'Add a seller…' : 'Add participant…'}</option>
                       {eligibleUsers.filter(u => !thread.participants.some(p => p.user_id === u.id)).map(u => (
                         <option key={u.id} value={u.id}>{u.name}{u.is_seller ? ' (Seller)' : ''}</option>
                       ))}
                     </select>
                     <button onClick={addParticipant} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: '#2563eb', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>Add</button>
                   </div>
+                  {isUpseller && (
+                    <>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 11.5, color: '#475569', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={addWithClientAccess} onChange={e => setAddWithClientAccess(e.target.checked)} />
+                        Allow this seller to message the client
+                      </label>
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                        Sellers you add only get this project&apos;s chat — nothing else. Without the tick above they can talk to you and the other sellers here, but never to the client. You can change it any time.
+                      </div>
+                      {eligibleUsers.length === 0 && (
+                        <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 6 }}>No other active sellers found at your company.</div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
 

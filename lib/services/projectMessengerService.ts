@@ -9,6 +9,14 @@ export interface ProjectMessengerParticipant {
   // isProjectPmUser() would treat as this project's PM (not a role_type
   // guess). Drives a Seller's @mention suggestions (PM only).
   is_project_pm?: boolean;
+  // User-guard show() only. can_message_client: this participant's plain,
+  // untagged message reaches the project's client (see
+  // Api\User\ProjectMessengerController::sellerMayAddressClient()).
+  // can_manage: whether the CALLER may toggle that or remove them — false for
+  // everyone an Upseller didn't add themselves (the PM, the team, the client);
+  // always true for a PM/overseer, who is unrestricted.
+  can_message_client?: boolean;
+  can_manage?: boolean;
 }
 
 export interface ProjectMessengerThread {
@@ -41,7 +49,10 @@ function downloadBlob(blob: Blob, fileName: string): void {
 // User-side project chat — ONE thread per project (no more groups/direct
 // chats — see Api\User\ProjectMessengerController and ProjectChatService).
 export const userProjectMessengerService = {
-  show: async (projectId: number): Promise<{ is_pm: boolean; is_literal_pm: boolean; can_manage_participants: boolean; thread: ProjectMessengerThread }> =>
+  // is_upseller — this project's own Seller managing its chat roster. Their
+  // picker offers company Sellers only, and only they get the per-Seller
+  // "can message client" toggle (see setParticipantClientAccess below).
+  show: async (projectId: number): Promise<{ is_pm: boolean; is_literal_pm: boolean; can_manage_participants: boolean; is_upseller: boolean; thread: ProjectMessengerThread }> =>
     (await api.get(`/user/projects/${projectId}/messenger`)).data.data,
 
   eligibleParticipants: async (projectId: number): Promise<ProjectMessengerEligibleUser[]> =>
@@ -59,12 +70,24 @@ export const userProjectMessengerService = {
     await api.post(`/user/projects/${projectId}/messenger/invite-pm`, { user_id: userId });
   },
 
-  addParticipant: async (projectId: number, userId: number): Promise<void> => {
-    await api.post(`/user/projects/${projectId}/messenger/participants`, { user_id: userId });
+  // canMessageClient is only honoured when the caller is this project's
+  // Upseller adding a Seller — ignored otherwise (see addParticipant()).
+  addParticipant: async (projectId: number, userId: number, canMessageClient = false): Promise<void> => {
+    await api.post(`/user/projects/${projectId}/messenger/participants`, {
+      user_id: userId, can_message_client: canMessageClient,
+    });
   },
   removeParticipant: async (projectId: number, userId: number): Promise<void> => {
     await api.delete(`/user/projects/${projectId}/messenger/participants/${userId}`);
   },
+  // Grants/revokes one brought-in Seller's ability to message the project's
+  // client, without removing them from the chat. Upseller-only, and only for
+  // Sellers they added themselves.
+  setParticipantClientAccess: async (projectId: number, userId: number, canMessageClient: boolean): Promise<{ can_message_client: boolean }> =>
+    (await api.patch(
+      `/user/projects/${projectId}/messenger/participants/${userId}/client-access`,
+      { can_message_client: canMessageClient },
+    )).data.data,
   toggleMute: async (projectId: number): Promise<{ is_muted: boolean }> =>
     (await api.patch(`/user/projects/${projectId}/messenger/mute`)).data.data,
 

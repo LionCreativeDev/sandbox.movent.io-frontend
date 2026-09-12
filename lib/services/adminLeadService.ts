@@ -229,6 +229,11 @@ export const adminLeadService = {
     return res.data.data;
   },
 
+  aiProjectTitle: async (id: number): Promise<string | null> => {
+    const res = await api.get(`/admin/leads/${id}/ai-project-title`);
+    return res.data.data?.title ?? null;
+  },
+
   chatInvite: async (id: number): Promise<ChatInviteState> => {
     const res = await api.get(`/admin/leads/${id}/chat-invite`);
     return res.data.data;
@@ -356,6 +361,18 @@ export const userLeadService = {
   projectEligibility: async (id: number): Promise<DealEligibility> => {
     const res = await api.get(`/user/leads/${id}/project-eligibility`);
     return res.data.data;
+  },
+
+  /**
+   * A Project Title suggested from this lead's Sales Chat, or null when the
+   * conversation does not say what is being built. Null is a normal answer,
+   * not a failure — the caller must show nothing rather than inventing a
+   * placeholder. Re-analyses on every call, so a message sent moments ago is
+   * reflected. See App\Services\LeadProjectTitleService.
+   */
+  aiProjectTitle: async (id: number): Promise<string | null> => {
+    const res = await api.get(`/user/leads/${id}/ai-project-title`);
+    return res.data.data?.title ?? null;
   },
 
   chatInvite: async (id: number): Promise<ChatInviteState> => {

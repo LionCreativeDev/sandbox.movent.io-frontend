@@ -161,6 +161,16 @@ function NewInvoiceForm() {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [projectId, setProjectId]             = useState<number | null>(null);
   const [projectTitle, setProjectTitle]       = useState('');
+  // AI-suggested Project Title, read out of this lead's Sales Chat. A
+  // SUGGESTION only — it is never written into projectTitle on its own, so
+  // whatever gets submitted is always something the user typed or explicitly
+  // accepted. null means the conversation didn't support a title (or there is
+  // no chat yet), in which case nothing is offered rather than a guess.
+  // undefined = not fetched yet (the "reading the chat…" state), null =
+  // fetched and the conversation supported no title. Three states in one
+  // value rather than a second `loading` flag, which would have to be set
+  // synchronously inside the effect below.
+  const [aiTitle, setAiTitle]                 = useState<string | null | undefined>(undefined);
   const [projectReference, setProjectReference] = useState('');
   const [projectAmount, setProjectAmount]     = useState(0);
 
@@ -361,6 +371,25 @@ function NewInvoiceForm() {
   // and gating on the client list here was a source of a real race
   // condition (the client list can still be loading, or briefly empty,
   // when this resolves).
+  // Asks the AI for a Project Title suggestion from this lead's Sales Chat.
+  // Runs once per page load, which is exactly the behaviour asked for: a
+  // reload re-analyses the conversation, so a message sent since the last
+  // visit is taken into account (and the same requirements may come back
+  // worded differently). Failures are silent — a missing suggestion must
+  // never get in the way of raising an invoice.
+  useEffect(() => {
+    if (!authResolved || !leadId) return;
+    const svc = isAdmin ? adminLeadService : userLeadService;
+
+    let cancelled = false;
+
+    svc.aiProjectTitle(leadId)
+      .then(title => { if (!cancelled) setAiTitle(title); })
+      .catch(() => { if (!cancelled) setAiTitle(null); });
+
+    return () => { cancelled = true; };
+  }, [authResolved, leadId, isAdmin]);
+
   useEffect(() => {
     if (!authResolved || !leadId || leadPrefilled) return;
     const svc = isAdmin ? adminLeadService : userLeadService;
@@ -1121,7 +1150,57 @@ function NewInvoiceForm() {
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                         <div>
                           <label style={lbl}>Project Title *</label>
-                          <input style={inp} value={projectTitle} onChange={e => setProjectTitle(e.target.value)} placeholder="e.g. Website Redesign" />
+                          <input
+                            style={inp}
+                            value={projectTitle}
+                            onChange={e => setProjectTitle(e.target.value)}
+                            // Tab accepts the suggestion, but only while the
+                            // field is untouched — once the user has typed
+                            // anything, Tab goes back to moving focus, which
+                            // is what they'll expect.
+                            onKeyDown={e => {
+                              if (e.key === 'Tab' && !e.shiftKey && aiTitle && !projectTitle.trim()) {
+                                e.preventDefault();
+                                setProjectTitle(aiTitle);
+                              }
+                            }}
+                            // The suggestion sits in the placeholder, never in
+                            // the value: an empty field submits nothing, so a
+                            // title only ever reaches the invoice because
+                            // someone accepted or typed it.
+                            placeholder={aiTitle ?? 'e.g. Website Redesign'}
+                          />
+
+                          {/* Offered only when the chat actually produced one.
+                              No suggestion is a normal outcome — see
+                              App\Services\LeadProjectTitleService, which
+                              returns nothing rather than inventing a title
+                              the conversation never supported. */}
+                          {leadId && aiTitle === undefined && (
+                            <div style={{ marginTop: 6, fontSize: 11.5, color: '#94a3b8' }}>
+                              ✨ Reading the Sales Chat…
+                            </div>
+                          )}
+                          {aiTitle && (
+                            <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                onClick={() => setProjectTitle(aiTitle)}
+                                title="Use this title — you can still edit it"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                                  padding: '4px 10px', borderRadius: 999,
+                                  border: '1px solid #bfdbfe', background: '#eff6ff',
+                                  color: '#1d4ed8', fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                                }}
+                              >
+                                ✨ {aiTitle}
+                              </button>
+                              <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                                {projectTitle.trim() ? 'Click to replace' : 'Click or press Tab to use'}
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <div>
                           <label style={lbl}>Reference <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span></label>
