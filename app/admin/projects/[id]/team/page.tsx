@@ -16,16 +16,39 @@ import Link from 'next/link';
 const hasProjectManagementAccess = (u: User) =>
   (u.company_assignments ?? []).some(a => (a.permissions?.project_management ?? []).length > 0);
 
-// Only roles that can meaningfully sit on a project team — never
-// Seller/Client/Invoice/HR/Finance/Compliance staff.
-const TEAM_ELIGIBLE_ROLES = ['project_manager', 'production', 'developer', 'designer', 'qa', 'team_member'];
+// Roles that can meaningfully sit on a project team — never Client/Invoice/
+// HR/Finance/Compliance staff. Mirrors $eligibleRoles in
+// Api\Admin\ProjectController::assignTeam(), which is the real gate.
+//
+// Seller is included as of 2026-09-15 (it was excluded before). A Seller on the
+// team keeps their client-facing chat: ProjectChatController::projectForChat()
+// no longer resolves them as an internal 'worker'. Separate from the project's
+// own linked Seller (projects.seller_id), which is still assigned by its own
+// control on the project detail page and is shown read-only below.
+const TEAM_ELIGIBLE_ROLES = ['project_manager', 'production', 'developer', 'designer', 'qa', 'team_member', 'seller'];
 
-// A user must be an ACTIVE member of THIS project's own company — not just
-// any company the admin owns — and hold one of the team-eligible roles.
+// The roles a user holds in ONE company, as /admin/users now returns them per
+// assignment. Falls back to role_type for an older payload (or an account with
+// no role rows in that company).
+const rolesInCompany = (u: User, a: { roles?: string[] | null }): string[] =>
+  (a.roles && a.roles.length > 0) ? a.roles : (u.role_type ? [u.role_type] : []);
+
+// A user must be an ACTIVE member of THIS project's own company — not just any
+// company the admin owns — and hold a team-eligible role THERE.
+//
+// Both halves are now checked against the same assignment, which is the fix:
+// the eligible-role test used to read users.role_type, a single account-wide
+// column carrying only the user's PRIMARY role. So a Developer or QA who holds
+// that job as a SECOND role never appeared in this picker, and someone whose
+// primary role is team-eligible passed the test even for a company where they
+// hold something else entirely.
 const isEligibleForProjectCompany = (u: User, companyId: number | null) =>
   !!companyId &&
-  TEAM_ELIGIBLE_ROLES.includes(u.role_type) &&
-  (u.company_assignments ?? []).some(a => a.company_id === companyId && a.status === 'active');
+  (u.company_assignments ?? []).some(a =>
+    a.company_id === companyId
+    && a.status === 'active'
+    && rolesInCompany(u, a).some(r => TEAM_ELIGIBLE_ROLES.includes(r))
+  );
 
 // A team member's actual job (role_type, e.g. "Developer") is more useful
 // here than the generic 4-value project role_in_project — fall back to the

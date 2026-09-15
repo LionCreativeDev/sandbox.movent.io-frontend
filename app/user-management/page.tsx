@@ -6,7 +6,7 @@ import { staffUserService } from '@/lib/services/staffUserService';
 import { userService } from '@/lib/services/userService';
 import { can, getAuthUser, getActiveCompany, isDeputyAdmin } from '@/lib/auth';
 import { User, CompanyOption } from '@/types';
-import { roleDisplayLabel } from '@/lib/roleUtils';
+import { roleDisplayLabels } from '@/lib/roleUtils';
 import {
   HiUserPlus, HiPencilSquare, HiNoSymbol, HiPlay,
   HiCheckCircle, HiArrowPath, HiLockClosed, HiEye, HiClipboard, HiKey,
@@ -269,7 +269,24 @@ export default function UserManagementPage() {
                           <div style={{ fontSize: 11.5, color: '#94a3b8' }}>{u.email}</div>
                         </td>
                         <td style={td}>
-                          {roleDisplayLabel(u)}
+                          {/* Every role held in the company this roster is
+                              scoped to — roles are per company, so another
+                              company's roles must never show up here. */}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {(() => {
+                              const labels = roleDisplayLabels(u, companyId);
+                              if (labels.length === 0) return <span style={{ color: '#94a3b8' }}>—</span>;
+                              return labels.map((label, i) => (
+                                <span key={label} style={{
+                                  padding: '2px 8px', borderRadius: 20, fontSize: 11,
+                                  fontWeight: 700, whiteSpace: 'nowrap',
+                                  background: i === 0 ? '#eff6ff' : '#f8fafc',
+                                  color: i === 0 ? '#2563eb' : '#64748b',
+                                  border: i === 0 ? 'none' : '1px solid #e2e8f0',
+                                }}>{label}</span>
+                              ));
+                            })()}
+                          </div>
                           {peer && !isSelf && (
                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 4, padding: '2px 7px', borderRadius: 20, background: '#f1f5f9', color: '#64748b', fontSize: 10.5, fontWeight: 600 }}>
                               <HiLockClosed size={10} /> User Manager

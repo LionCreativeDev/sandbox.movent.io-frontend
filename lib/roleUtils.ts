@@ -176,6 +176,49 @@ export function roleDisplayLabel(user: { role_type?: string | null; custom_role_
   return (user.role_type && ROLE_LABELS[user.role_type]) || user.role_type || '—';
 }
 
+/**
+ * Every role a user holds, as display labels — one entry when they hold one
+ * role, several when they hold several.
+ *
+ * SCOPED TO A COMPANY, because roles are: the same person can be a Seller in
+ * one company and a Project Manager in another, and a roster showing one
+ * company must show that company's roles alone. Pass the company the list is
+ * currently filtered to. With no company (the "All Companies" view) this falls
+ * back to the de-duplicated set across every assignment, which is the only
+ * honest answer when no single company is in view.
+ *
+ * Order is preserved from the API, which sorts primary first.
+ *
+ * Falls back to the legacy role_type when `roles` is absent — that means the
+ * endpoint did not load roles, not that the user has none, and blanking the
+ * column for an obviously-roled user would read as a bug.
+ */
+export function roleDisplayLabels(
+  user: {
+    role_type?: string | null;
+    custom_role_label?: string | null;
+    company_assignments?: { company_id: number; roles?: string[] | null }[];
+  } | null | undefined,
+  companyId?: number | 'all' | null,
+): string[] {
+  if (!user) return [];
+
+  // A custom role renames the whole person, so it replaces the list rather
+  // than joining it — same rule the single-label version above follows.
+  const custom = user.custom_role_label?.trim();
+  if (custom) return [custom];
+
+  const assignments = user.company_assignments ?? [];
+  const scoped = typeof companyId === 'number'
+    ? assignments.filter(a => a.company_id === companyId)
+    : assignments;
+
+  const roles = [...new Set(scoped.flatMap(a => a.roles ?? []))];
+  if (roles.length > 0) return roles.map(r => ROLE_LABELS[r] ?? r);
+
+  return user.role_type ? [ROLE_LABELS[user.role_type] ?? user.role_type] : [];
+}
+
 // ── Role default permissions ─────────────────────────────────────────────────
 // Mirrors App\Services\RoleDefaultPermissions::MAP exactly — every key here
 // is a real, currently-enforced ModuleCatalog permission (never invented).
@@ -404,6 +447,10 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
       // this Lead Manager) is visible too, not just their own/unassigned
       // ones (see Api\User\ClientController::visibleClients()).
       'canViewAllCompanyClients',
+      // Same reasoning as canTransferLeads above — a Lead Manager
+      // redistributes ownership across the team; a Seller does not get
+      // this by default.
+      'canTransferClients',
       'canResetClientPassword', 'canViewClientPayments', 'canViewClientInvoices',
       'canManageClientDocuments', 'canViewClientDocuments',
     ],
@@ -574,6 +621,36 @@ export function getRoleDefaultPermissions(
     if (valid.length > 0) filtered[moduleKey] = valid;
   }
   return stripAlwaysExplicit(filtered);
+}
+
+/**
+ * Combined defaults for a user holding SEVERAL roles in one company — the
+ * mirror of RoleDefaultPermissions::forRoles() on the backend, and it must stay
+ * in step with it: this is what pre-ticks the boxes, that is what gets saved,
+ * and the two disagreeing means the form lies about what it is about to store.
+ *
+ * A plain union. Holding a second role only ever adds permissions, so no role
+ * can override or remove what another role granted. Order is irrelevant here
+ * (it only decides the primary role elsewhere), and an empty list yields {}.
+ */
+export function getRolesDefaultPermissions(
+  roles: string[],
+  catalogModules: string[],
+  allModulePermissions: Record<string, string[]>,
+): Record<string, string[]> {
+  const merged: Record<string, Set<string>> = {};
+
+  for (const role of [...new Set(roles.filter(Boolean))]) {
+    const one = getRoleDefaultPermissions(role, catalogModules, allModulePermissions);
+    for (const [moduleKey, permKeys] of Object.entries(one)) {
+      merged[moduleKey] ??= new Set();
+      for (const key of permKeys) merged[moduleKey].add(key);
+    }
+  }
+
+  return Object.fromEntries(
+    Object.entries(merged).map(([moduleKey, keys]) => [moduleKey, [...keys]]),
+  );
 }
 
 /** Given a Record<moduleKey, permissionKey[]>, return a concise role label. */

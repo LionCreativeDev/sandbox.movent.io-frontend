@@ -488,10 +488,31 @@ export default function ClientDetailPage() {
 
           <form onSubmit={enablePortal}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+              {/* Not editable here. The login email is the client's Contact
+                  Email — Api\Client\ProfileController keeps the two in step
+                  whenever the client edits their own details, so an address
+                  typed in independently on this screen would be silently
+                  overwritten the next time they touch their profile. Change it
+                  on the Details tab instead.
+
+                  Safe to disable: the value is already pre-filled (from the
+                  portal user's email, else the contact email) and this form
+                  submits `portalEmail` from state, not from the input, so a
+                  disabled field still sends it. */}
               <div>
-                <label style={lbl}>{client.portal_access ? 'Update Login Email' : 'Login Email'} *</label>
-                <input type="email" value={portalEmail} onChange={e => setPortalEmail(e.target.value)}
-                  required placeholder="client@example.com" style={inp} />
+                <label style={lbl}>Login Email</label>
+                <input
+                  type="email"
+                  value={portalEmail}
+                  disabled
+                  placeholder="client@example.com"
+                  style={{ ...inp, background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }}
+                />
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                  {portalEmail
+                    ? 'Same as the Contact Email. Change it on the Details tab.'
+                    : 'Set a Contact Email on the Details tab first — it becomes the login email.'}
+                </div>
               </div>
               <div>
                 <label style={lbl}>{client.portal_access ? 'New Password' : 'Password'} *</label>
@@ -514,11 +535,24 @@ export default function ClientDetailPage() {
               </div>
             )}
 
-            <button type="submit" disabled={savingPortal || (!seat?.can_add && !client.portal_access)} style={{
-              padding: '10px 24px', background: savingPortal ? '#93c5fd' : '#2563eb',
-              color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600,
-              cursor: savingPortal ? 'not-allowed' : 'pointer',
-            }}>
+            {/* Blocked rather than left to fail on save: the login email field
+                above is disabled, so an empty one cannot be fixed from this
+                tab and the request would just come back 422. */}
+            {!portalEmail && (
+              <div style={{ padding: '10px 14px', background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 8, fontSize: 13, marginBottom: 16 }}>
+                This client has no Contact Email yet. Add one on the Details tab — that address becomes their login.
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={savingPortal || !portalEmail || (!seat?.can_add && !client.portal_access)}
+              style={{
+                padding: '10px 24px',
+                background: savingPortal || !portalEmail ? '#93c5fd' : '#2563eb',
+                color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600,
+                cursor: savingPortal || !portalEmail ? 'not-allowed' : 'pointer',
+              }}>
               {savingPortal ? 'Saving…' : client.portal_access ? 'Update Login' : 'Enable Portal'}
             </button>
           </form>

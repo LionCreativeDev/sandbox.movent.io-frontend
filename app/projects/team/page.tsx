@@ -155,13 +155,28 @@ function UserTeamPageInner() {
   // Api\User\ProjectController::assignTeam()).
   const memberUserIds = new Set(members.map(m => m.user_id));
   const hasPmMember = members.some(m => m.user?.role_type === 'project_manager');
-  const hasSellerMember = members.some(m => m.user?.role_type === 'seller');
+
+  // Every role a candidate holds in THIS project's company, as the API now
+  // returns it. role_type alone carries only their PRIMARY role, so a person
+  // given Seller as a second role read as "not a Seller" everywhere and never
+  // appeared in this picker. Falls back to role_type for an older payload.
+  const rolesOf = (u: { roles?: string[] | null; role_type: string }): string[] =>
+    (u.roles && u.roles.length > 0) ? u.roles : (u.role_type ? [u.role_type] : []);
+  const holdsRole = (u: { roles?: string[] | null; role_type: string }, role: string) =>
+    rolesOf(u).includes(role);
+
   const addableUsers = users.filter(u => {
     if (memberUserIds.has(u.id)) return false;
+    // Only the PM slot is capped, and only on the PRIMARY role — widening it
+    // to every held role would hide a PM-who-is-also-a-Seller the moment any
+    // Seller joined. Sellers themselves are uncapped (2026-09-15): a project
+    // takes as many as the work needs, so the list keeps offering them.
     if (u.role_type === 'project_manager' && hasPmMember) return false;
-    if (u.role_type === 'seller' && hasSellerMember) return false;
-    if (isLeadManagerActor) return eligibleRoles.includes(u.role_type);
-    return eligibleRoles.includes(u.role_type) || (isLiteralPm && u.role_type === 'seller');
+    if (isLeadManagerActor) return rolesOf(u).some(r => eligibleRoles.includes(r));
+    // The "only the Company Admin or this project's PM may add a Seller" rule
+    // is untouched — isLiteralPm still gates it. All that changed is that
+    // someone holding Seller as a second role now counts as a Seller here.
+    return rolesOf(u).some(r => eligibleRoles.includes(r)) || (isLiteralPm && holdsRole(u, 'seller'));
   });
   const selectedCandidate = addableUsers.find(u => String(u.id) === userId) ?? null;
 

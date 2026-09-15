@@ -356,14 +356,15 @@ export default function ClientProfilePage() {
     setTransferModal(true);
     setTransferError('');
     if (companyUsers.length > 0 || !client) return;
-    adminClientService.companyUsers(client.company_id).then(setCompanyUsers).catch(() => setTransferError('Failed to load users'));
+    const req = isSubUser ? userClientService.companyUsers() : adminClientService.companyUsers(client.company_id);
+    req.then(setCompanyUsers).catch(() => setTransferError('Failed to load users'));
   };
 
   const handleTransfer = async () => {
     if (!client || !transferToUserId) { setTransferError('Select a user to transfer to'); return; }
     setTransferring(true); setTransferError('');
     try {
-      const updated = await adminClientService.transfer(client.id, Number(transferToUserId), transferReason.trim() || undefined);
+      const updated = await clientSvc.transfer(client.id, Number(transferToUserId), transferReason.trim() || undefined);
       setClient(current => current ? { ...current, ...updated } : updated);
       toast.success('Client transferred');
       setTransferModal(false);
@@ -416,9 +417,11 @@ export default function ClientProfilePage() {
             {client.company_name && <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>{client.company_name}</p>}
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            {/* Admin only — Api\Admin\ClientController::transfer() has no
-                staff-side equivalent, same as Lead Transfer's Admin path. */}
-            {!isSubUser && (
+            {/* Admin always allowed (Api\Admin\ClientController::transfer()
+                has no permission gate); a staff member needs
+                canTransferClients (Lead Manager default) — see
+                Api\User\ClientController::transfer(). */}
+            {(!isSubUser || can('client', 'canTransferClients')) && (
               <button onClick={openTransferModal} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 8, border: '1.5px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                 <HiArrowsRightLeft size={14} /> Transfer
               </button>

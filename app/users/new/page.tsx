@@ -519,7 +519,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { userService } from '@/lib/services/userService';
 import { getAvailableModules } from '@/lib/moduleCatalog';
 import { SIMPLE_PROJECT_PERMISSIONS, collapseProjectPermissions } from '@/lib/simplifiedProjectPermissions';
-import { CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, getRoleDefaultPermissions, rolesFor } from '@/lib/roleUtils';
+import { CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, ROLE_LABELS, getRolesDefaultPermissions, rolesFor } from '@/lib/roleUtils';
 import { CompanyOption } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { getAuthType, isDeputyAdmin } from '@/lib/auth';
@@ -612,15 +612,37 @@ export default function NewUserPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('');
-  // "+ Custom Role…" mode — role holds CUSTOM_ROLE_SENTINEL, customRoleLabel
-  // is the free-text name shown everywhere instead, and customRoleBase is
-  // the real structural role_type this custom role behaves like (defaults
-  // to the generic/least-privilege Team Member bucket).
+  // Several roles may be held at once. The first entry is the PRIMARY role —
+  // what the roster's Role column shows and what users.role_type mirrors — so
+  // selection order is preserved rather than sorted.
+  //
+  // The permissions the user ends up with are the UNION of every selected
+  // role's defaults (getRolesDefaultPermissions), never one role winning over
+  // another: picking a second role can only add grants.
+  const [roles, setRoles] = useState<string[]>([]);
+  // "+ Custom Role…" is a mode, not a role — roles holds CUSTOM_ROLE_SENTINEL
+  // while it is on, customRoleLabel is the free-text name shown everywhere
+  // instead, and customRoleBase is the real structural role_type it behaves
+  // like (defaults to the generic/least-privilege Team Member bucket).
   const [customRoleLabel, setCustomRoleLabel] = useState('');
   const [customRoleBase, setCustomRoleBase] = useState('team_member');
-  const isCustomRole = role === CUSTOM_ROLE_SENTINEL;
-  const effectiveRole = isCustomRole ? customRoleBase : role;
+  const isCustomRole = roles.includes(CUSTOM_ROLE_SENTINEL);
+  // What actually gets sent and seeded: the sentinel swapped for the real
+  // bucket it stands for, de-duplicated in case that bucket was also ticked.
+  const effectiveRoles = [...new Set(
+    roles.map(r => (r === CUSTOM_ROLE_SENTINEL ? customRoleBase : r)),
+  )];
+
+  // A custom role is a relabelling of ONE structural bucket, so it cannot be
+  // combined with other roles — the label would then describe only part of what
+  // the person is. Ticking it clears the rest, and vice versa.
+  const toggleRole = (value: string) => {
+    setRoles(prev => {
+      if (prev.includes(value)) return prev.filter(r => r !== value);
+      if (value === CUSTOM_ROLE_SENTINEL) return [CUSTOM_ROLE_SENTINEL];
+      return [...prev.filter(r => r !== CUSTOM_ROLE_SENTINEL), value];
+    });
+  };
 
   // Step 2
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
@@ -698,11 +720,17 @@ export default function NewUserPage() {
       const assignments = selectedIds.map(cid => ({
         company_id: cid,
         permissions: perms[cid] ?? {},
+        // Roles are stored per company. This wizard applies the same selection
+        // to every company it assigns; Edit User is where they diverge.
+        roles: effectiveRoles,
       }));
 
       await userService.create({
         name: name.trim(), email: email.trim(),
-        role_type: effectiveRole || undefined,
+        roles: effectiveRoles,
+        // Still sent so the legacy users.role_type column is written with the
+        // PRIMARY role even on the paths that have not learned about `roles`.
+        role_type: effectiveRoles[0] || undefined,
         custom_role_label: isCustomRole ? (customRoleLabel.trim() || undefined) : undefined,
         ...(existingUser ? {} : { password }),
         company_assignments: assignments,
@@ -887,16 +915,62 @@ export default function NewUserPage() {
                 )}
                 {existingUser && <div style={{ marginBottom: 12 }} />}
 
-                {/* Select Role — default permissions for this role are auto-checked in the next step */}
+                {/* Roles — pick as many as apply. The combined default
+                    permissions of every selected role are auto-checked in the
+                    next step; roles add up, they never cancel each other. */}
                 <div style={{ marginBottom: isCustomRole ? 16 : 28 }}>
-                  <label style={lbl}>Role *</label>
-                  <select style={inp} value={role} onChange={e => setRole(e.target.value)}>
-                    <option value="">Select a role…</option>
-                    {rolesFor(ownerReach).map(r => (
-                      <option key={r.value} value={r.value}>{r.label}</option>
-                    ))}
-                    <option value={CUSTOM_ROLE_SENTINEL}>+ Custom Role…</option>
-                  </select>
+                  <label style={lbl}>Roles *</label>
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 8,
+                    border: '1.5px solid #e2e8f0', borderRadius: 10, padding: 12,
+                    maxHeight: 260, overflowY: 'auto', background: '#fafafa',
+                  }}>
+                    {rolesFor(ownerReach).map(r => {
+                      const on = roles.includes(r.value);
+                      // Whatever was ticked first is the primary role; badged
+                      // so it is obvious which one the roster will display.
+                      const primary = roles[0] === r.value && roles.length > 1;
+                      return (
+                        <label key={r.value} style={{
+                          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8,
+                          border: `1.5px solid ${on ? '#bfdbfe' : '#e2e8f0'}`,
+                          background: on ? '#eff6ff' : '#fff', cursor: 'pointer', fontSize: 13,
+                        }}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggleRole(r.value)}
+                            style={{ accentColor: '#2563eb', width: 15, height: 15, flexShrink: 0 }}
+                          />
+                          <span style={{ fontWeight: on ? 700 : 500, color: on ? '#1d4ed8' : '#0f172a' }}>{r.label}</span>
+                          {primary && (
+                            <span style={{
+                              marginLeft: 'auto', fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
+                              color: '#1d4ed8', background: '#dbeafe', padding: '2px 6px', borderRadius: 999,
+                            }}>PRIMARY</span>
+                          )}
+                        </label>
+                      );
+                    })}
+                    <label style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8,
+                      border: `1.5px dashed ${isCustomRole ? '#bfdbfe' : '#cbd5e1'}`,
+                      background: isCustomRole ? '#eff6ff' : '#fff', cursor: 'pointer', fontSize: 13,
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={isCustomRole}
+                        onChange={() => toggleRole(CUSTOM_ROLE_SENTINEL)}
+                        style={{ accentColor: '#2563eb', width: 15, height: 15, flexShrink: 0 }}
+                      />
+                      <span style={{ fontWeight: isCustomRole ? 700 : 500, color: isCustomRole ? '#1d4ed8' : '#64748b' }}>+ Custom Role…</span>
+                    </label>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                    {roles.length > 1
+                      ? `${roles.length} roles — this user gets the combined permissions of all of them. First pick (${ROLE_LABELS[effectiveRoles[0]] ?? effectiveRoles[0]}) is the primary.`
+                      : 'Pick one or more. Selecting several combines their permissions — no role cancels another.'}
+                  </div>
                 </div>
 
                 {isCustomRole && (
@@ -928,16 +1002,17 @@ export default function NewUserPage() {
                       setError('Password is required (min 8 characters).');
                       return;
                     }
-                    if (!role) { setError('Please select a role.'); return; }
+                    if (roles.length === 0) { setError('Please select at least one role.'); return; }
                     if (isCustomRole && !customRoleLabel.trim()) { setError('Please enter a name for this custom role.'); return; }
                     setError('');
                     if (singleCompany) {
-                      // Auto-assign the only company and pre-fill this role's default permissions
+                      // Auto-assign the only company and pre-fill the COMBINED
+                      // default permissions of every selected role.
                       const cid = companies[0].id;
                       const rawDb = companies[0].modules ?? [];
                       const mods = getAvailableModules(rawDb);
                       const allPerms = visiblePermsByModule(mods, rawDb);
-                      const auto = getRoleDefaultPermissions(effectiveRole, mods.map(m => m.key), allPerms);
+                      const auto = getRolesDefaultPermissions(effectiveRoles, mods.map(m => m.key), allPerms);
                       setPerms({ [cid]: auto });
                       setActiveCompanyId(cid);
                       setStep(3);
@@ -993,7 +1068,7 @@ export default function NewUserPage() {
                       if (selectedIds.length === 0) { handleSubmit(); return; }
                       setError('');
 
-                      // Pre-select this role's default permissions for companies that have none yet
+                      // Pre-select the selected roles' combined default permissions for companies that have none yet
                       const nextPerms = { ...perms };
                       for (const cid of selectedIds) {
                         const existing = nextPerms[cid];
@@ -1002,7 +1077,7 @@ export default function NewUserPage() {
                         const rawDb = co?.modules ?? [];
                         const mods = getAvailableModules(rawDb);
                         const allPerms = visiblePermsByModule(mods, rawDb);
-                        nextPerms[cid] = getRoleDefaultPermissions(effectiveRole, mods.map(m => m.key), allPerms);
+                        nextPerms[cid] = getRolesDefaultPermissions(effectiveRoles, mods.map(m => m.key), allPerms);
                       }
                       setPerms(nextPerms);
 

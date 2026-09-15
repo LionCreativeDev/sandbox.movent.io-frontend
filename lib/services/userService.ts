@@ -24,12 +24,22 @@ export interface CompanyAssignmentPayload {
   company_id: number;
   permissions: Record<string, string[]>; // moduleKey → permissionKey[]
   data_scopes?: Record<string, DataScope>; // moduleKey → data scope (descriptive only)
+  // Roles held in THIS company, primary first. Omit to leave whatever roles the
+  // user already has here untouched — the server treats an absent/empty list as
+  // "no change", never as "remove them all".
+  roles?: string[];
 }
 
 export interface UserPayload {
   name: string;
   email: string;
   password?: string;
+  // Every role this user holds, primary first. Applied to each company in
+  // company_assignments that does not carry its own `roles`. Permissions are
+  // seeded as the UNION of all of them — roles add up and never cancel out.
+  roles?: string[];
+  // Legacy single-role field. Still accepted and still written, as the PRIMARY
+  // role, so send roles[0] here alongside `roles` rather than dropping it.
   role_type?: string;
   // Display-only "Custom Role" name — role_type still carries the real
   // permission/behavior bucket. See roleUtils.CUSTOM_ROLE_SENTINEL.
@@ -43,6 +53,7 @@ export interface UserPayload {
 export interface InvitePayload {
   name: string;
   email: string;
+  roles?: string[];
   role_type?: string;
   custom_role_label?: string | null;
   phone?: string | null;
@@ -183,11 +194,16 @@ const updateCompanyPermissions = async (
   userId: number,
   companyId: number,
   permissions: Record<string, string[]>,
-  dataScopes?: Record<string, DataScope>
+  dataScopes?: Record<string, DataScope>,
+  // Roles held in THIS company, primary first. Omit (or send []) to leave the
+  // user's existing roles here untouched — the server never reads an empty list
+  // as "clear them".
+  roles?: string[]
 ): Promise<{ permissions: Record<string, string[]>; data_scopes: Record<string, DataScope> }> => {
   const res = await api.put(`${base()}/${userId}/company-permissions/${companyId}`, {
     permissions,
     data_scopes: dataScopes ?? {},
+    ...(roles && roles.length > 0 ? { roles } : {}),
   });
   return res.data.data;
 };

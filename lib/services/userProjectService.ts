@@ -65,7 +65,13 @@ export interface CompanyUserOption {
     id: number;
     name: string;
     email: string;
+    // The user's PRIMARY role only. Prefer `roles` below for any "is this
+    // person a Seller / a PM" test — this column cannot answer it once someone
+    // holds more than one role.
     role_type: string;
+    // Every role this user holds in the company being listed, primary first.
+    // Company-scoped: the same person can hold a different set elsewhere.
+    roles?: string[];
     has_project_management_access: boolean;
 }
 

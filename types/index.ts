@@ -30,6 +30,12 @@ export interface CompanyAssignment {
   company_name: string;
   status: 'active' | 'suspended';
   permissions: Record<string, string[]>; // moduleKey → permissionKey[]
+  // Roles held IN THIS COMPANY, primary first. A user may hold several, and a
+  // different set per company. null means the API did not load roles for this
+  // response — distinct from [], which means "none here". Permissions above are
+  // still the only thing authorization reads; these decide which defaults get
+  // seeded and what the roster shows.
+  roles?: string[] | null;
   data_scopes?: Record<string, DataScope>; // moduleKey → data scope (enforced for project_management; descriptive only elsewhere so far)
 }
 

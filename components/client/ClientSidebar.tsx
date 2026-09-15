@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import Cookies from 'js-cookie';
 import {
   HiSquares2X2, HiFolder, HiDocumentText, HiCreditCard,
-  HiArrowDownTray, HiLifebuoy, HiChartBar, HiSparkles,
+  HiArrowDownTray, HiLifebuoy, HiChartBar, HiSparkles, HiUserCircle,
 } from 'react-icons/hi2';
 import clientApi from '@/lib/clientAxios';
 
@@ -29,6 +29,9 @@ const NAV = [
   // The company's own services. Last on purpose: it's an offer, not part of
   // the client's own account, so it sits below everything they came here to do.
   { key: 'services',  label: 'Services',  icon: HiSparkles,            path: '/client/services' },
+  // key: null — the client's own details are theirs, not a portal module the
+  // company can switch off, so this is never filtered out by permissions.
+  { key: null,        label: 'My Profile', icon: HiUserCircle,         path: '/client/profile' },
 ];
 
 const GREEN   = '#10b981';

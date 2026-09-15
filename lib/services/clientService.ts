@@ -1,5 +1,25 @@
 import clientApi from '@/lib/clientAxios';
 
+export interface ClientProfile {
+  name: string;
+  company_name?: string | null;
+  /** Contact email — editable. Saving a new one also becomes the login email. */
+  email: string;
+  phone?: string | null;
+  address?: string | null;
+  /** Login email (users.email). Read-only: it follows the contact email. */
+  login_email: string;
+}
+
+export interface ClientProfilePayload {
+  name: string;
+  email: string;
+  phone?: string | null;
+  address?: string | null;
+  /** Required only when `email` differs from the current login email. */
+  current_password?: string;
+}
+
 export const clientService = {
   login: async (email: string, password: string) => {
     const res = await clientApi.post('/client/login', { email, password });
@@ -15,6 +35,17 @@ export const clientService = {
   dashboard: async () => {
     const res = await clientApi.get('/client/dashboard');
     return res.data.data;
+  },
+  profile: async (): Promise<ClientProfile> => {
+    const res = await clientApi.get('/client/profile');
+    return res.data.data;
+  },
+  // Saving a changed `email` moves the LOGIN email with it, which is why
+  // current_password is required in that case — see
+  // Api\Client\ProfileController::update().
+  updateProfile: async (data: ClientProfilePayload) => {
+    const res = await clientApi.put('/client/profile', data);
+    return res.data as { message?: string; data: ClientProfile & { email_changed: boolean } };
   },
   requestService: async (data: { service_key: string; notes?: string }) => {
     const res = await clientApi.post('/client/dashboard/request-service', data);

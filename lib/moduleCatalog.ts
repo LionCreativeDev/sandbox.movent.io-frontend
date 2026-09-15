@@ -31,6 +31,9 @@ export const MODULE_CATALOG: ModuleDef[] = [
       // clients they're the account manager for, or that are linked to
       // their own lead/invoice/project.
       { key: 'canViewAllCompanyClients', label: 'View All Company Clients', group: 'Client Management' },
+      // Reassign a client's account manager to another Seller — mirrors
+      // canTransferLeads. A Company Admin can always do this regardless.
+      { key: 'canTransferClients', label: 'Transfer / Assign Clients', group: 'Client Management' },
 
       // Client Portal Access (only when client_portal DB module is purchased)
       { key: 'canEnableClientPortal',   label: 'Enable Client Portal Access',  group: 'Client Portal Access', requiresDb: 'client_portal' },

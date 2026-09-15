@@ -10,6 +10,25 @@ import clientApi from '@/lib/clientAxios';
 import { clientNotificationService, ClientNotification } from '@/lib/services/clientNotificationService';
 import toast from 'react-hot-toast';
 
+// Portal screens reachable WITHOUT a session.
+//
+// One list, used by all three checks below — the auth redirect, the
+// notification poll, and the sidebar wrapper. They were not one list before,
+// and that is exactly how /client/forgot-password ended up bouncing straight
+// back to the login page: the wrapper knew it was a logged-out screen, but the
+// redirect above it only ever exempted /client/login, so an unauthenticated
+// visitor was pushed back before the page could render.
+//
+// Reset is here for the same reason — it is opened from an email link, by
+// definition without a session.
+const PUBLIC_PORTAL_PATHS = [
+  '/client/login',
+  '/client/forgot-password',
+  '/client/reset-password',
+];
+
+const isPublicPortalPath = (pathname: string) => PUBLIC_PORTAL_PATHS.includes(pathname);
+
 // "3m ago" / "2h ago" / "5d ago" — enough for a portal bell, no date lib needed.
 function timeAgo(iso: string): string {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -36,7 +55,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     setMounted(true);
-    if (pathname === '/client/login') return;
+    if (isPublicPortalPath(pathname)) return;
     if (!isClientAuthenticated()) {
       router.push('/client/login');
       return;
@@ -48,7 +67,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   }, [router, pathname]);
 
   useEffect(() => {
-    if (pathname === '/client/login' || !isClientAuthenticated()) return;
+    if (isPublicPortalPath(pathname) || !isClientAuthenticated()) return;
     const load = () => {
       clientNotificationService.list()
         .then(res => { setNotifications(res.notifications); setUnreadCount(res.unread_count); })
@@ -105,8 +124,9 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
   if (!mounted) return null;
 
-  // Login page: no sidebar/navbar wrapper
-  if (pathname === '/client/login') return <>{children}</>;
+  // Unauthenticated portal screens: no sidebar/navbar wrapper. A sidebar built
+  // from /client/permissions is meaningless on a page reached without a session.
+  if (isPublicPortalPath(pathname)) return <>{children}</>;
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>

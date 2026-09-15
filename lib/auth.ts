@@ -68,24 +68,62 @@ export const clearActiveCompany = () => {
 
 // ── Permission helpers ────────────────────────────────────────────────────────
 
-// Returns the permission keys a sub-user has for a given module key.
-// Rule 8: uses the active company when set; falls back to all assignments.
-// Admins always get all permissions (returns ['*']).
+// Returns the permission keys a sub-user has for a given module key, scoped to
+// the company they are currently working in. Admins always get all permissions
+// (returns ['*']).
+//
+// A permission granted in one company MUST NOT apply in another. That is not a
+// convenience filter, it is the tenancy boundary, so the three rules below are
+// deliberately strict:
+//
+//  1. ACTIVE ASSIGNMENTS ONLY. UserResource serialises every
+//     company_user_assignments row including suspended ones, permissions and
+//     all, so a suspended member used to keep their whole UI. /select-company
+//     already refuses to auto-select a suspended assignment and
+//     User::scopeOfCompany() already requires status='active' — this now agrees
+//     with both.
+//  2. STRICT COMPANY MATCH. When an active company is set, only that company's
+//     assignment counts.
+//  3. NO GUESSING WHEN AMBIGUOUS. With no active company set, this used to fall
+//     back to *every* assignment and return the first one holding any
+//     permission for the module — an arbitrary OTHER company's grants, applied
+//     wherever the user happened to be. One unambiguous active assignment is
+//     still honoured (that is the ordinary single-company session, which
+//     /select-company sets the cookie for anyway); beyond that we return
+//     nothing and let the user pick a company. Denying here is safe — the
+//     server re-checks every call against its own company_id.
 export const getUserModulePermissions = (moduleKey: string): string[] => {
   if (getAuthType() === 'admin') return ['*'];
 
-  const u          = getAuthUser() as User | null;
-  const activeId   = getActiveCompany();
-  const all        = u?.company_assignments ?? [];
+  const u        = getAuthUser() as User | null;
+  const activeId = getActiveCompany();
+  const active   = (u?.company_assignments ?? []).filter(a => a.status === 'active');
 
-  // Filter by active company if one is selected — 'all' is the Admin-only
-  // sentinel and never applies to a staff/user session's own assignments.
-  const assignments = typeof activeId === 'number' ? all.filter(a => a.company_id === activeId) : all;
-
-  for (const a of assignments) {
-    if (a.permissions?.[moduleKey]) return a.permissions[moduleKey] as string[];
+  // 'all' is the Company Admin-only sentinel and is never valid for a staff
+  // session, so it is not a number here and falls through to the single-
+  // assignment case below rather than unlocking every company.
+  let scoped: CompanyAssignment[];
+  if (typeof activeId === 'number') {
+    scoped = active.filter(a => a.company_id === activeId);
+  } else if (active.length === 1) {
+    scoped = active;
+  } else {
+    return [];
   }
-  return [];
+
+  // Union, never first-match. Today there is one assignment row per company so
+  // this usually merges a single entry, but returning early on the first hit
+  // silently discarded everything after it — which is exactly how a second
+  // grant (a duplicate assignment row, or a user holding more than one role in
+  // the same company) would lose its permissions. Merging keeps the rule that
+  // grants only ever add up: nothing a user has been given can be taken away
+  // by something else they have.
+  const merged = new Set<string>();
+  for (const a of scoped) {
+    for (const key of a.permissions?.[moduleKey] ?? []) merged.add(key);
+  }
+
+  return [...merged];
 };
 
 // canView/Create/EditClients are granted identically whether the company

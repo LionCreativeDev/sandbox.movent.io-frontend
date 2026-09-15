@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { userService } from "@/lib/services/userService";
-import { roleDisplayLabel } from "@/lib/roleUtils";
+import { roleDisplayLabels } from "@/lib/roleUtils";
 import { MODULE_CATALOG } from "@/lib/moduleCatalog";
 import { User, CompanyAssignment } from "@/types";
 import { useAdminGuard } from "@/hooks/useAdminGuard";
@@ -618,22 +618,39 @@ export default function UsersPage() {
                           </div>
                         </td>
 
-                        {/* Role — just the role_type label, nothing else */}
+                        {/* Roles — every role this user holds, scoped to the
+                            company the list is filtered to. One chip when they
+                            hold one role, several when they hold several. */}
                         <td style={{ padding: "14px 16px" }}>
-                          <span
-                            style={{
-                              display: "inline-block",
-                              padding: "3px 10px",
-                              borderRadius: 50,
-                              fontSize: 12,
-                              fontWeight: 600,
-                              background: "#eff6ff",
-                              color: "#2563eb",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {roleDisplayLabel(user)}
-                          </span>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                            {(() => {
+                              const labels = roleDisplayLabels(user, activeCompany);
+                              if (labels.length === 0) {
+                                return <span style={{ color: "#94a3b8", fontSize: 12 }}>—</span>;
+                              }
+                              return labels.map((label, i) => (
+                                <span
+                                  key={label}
+                                  // The first is the primary role — kept solid
+                                  // so the headline role stays readable at a
+                                  // glance when someone holds four of them.
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "3px 10px",
+                                    borderRadius: 50,
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    background: i === 0 ? "#eff6ff" : "#f8fafc",
+                                    color: i === 0 ? "#2563eb" : "#64748b",
+                                    border: i === 0 ? "none" : "1px solid #e2e8f0",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {label}
+                                </span>
+                              ));
+                            })()}
+                          </div>
                         </td>
 
                         {/* Companies — every company this user is assigned to

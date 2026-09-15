@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { clientService } from '@/lib/services/clientService';
 import { setClientAuth } from '@/lib/clientAuth';
@@ -127,7 +128,24 @@ export default function ClientLoginPage() {
           </button>
         </form>
 
-        <div style={{ textAlign: 'center', marginTop: 20 }}>
+        {/* Password reset already worked for portal clients — a client login is
+            an ordinary User row, and Auth\ForgotPasswordController never
+            filtered by role. What was missing was a way in from here. The
+            portal has its own green-themed forgot/reset screens rather than
+            the staff ones, but they post to that same single flow. */}
+        {/* next/link, not a bare <a>: a plain href does a full document load,
+            which re-runs the portal layout's auth check from scratch and made
+            this feel like the page was just reloading itself. */}
+        <div style={{ textAlign: 'center', marginTop: 18 }}>
+          <Link
+            href="/client/forgot-password"
+            style={{ fontSize: 13, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}
+          >
+            Forgot your password?
+          </Link>
+        </div>
+
+        <div style={{ textAlign: 'center', marginTop: 12 }}>
           <span style={{ fontSize: 12, color: '#94a3b8' }}>
             Having trouble? Contact your account manager.
           </span>

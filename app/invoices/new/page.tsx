@@ -416,9 +416,20 @@ function NewInvoiceForm() {
       }
 
       // A won lead has no project yet — default to naming one, carrying the
-      // deal's own proposed title/reference so they travel with the invoice.
+      // deal's own reference so it travels with the invoice.
       setProjectMode('new');
-      setProjectTitle(lead.name);
+      // Project Title is deliberately NOT pre-filled from the lead. It used to
+      // be seeded with lead.name, which broke the feature three ways at once:
+      // the field arrived holding "John Smith", so the commonest path (submit
+      // without touching it) shipped the lead's NAME as the project title; a
+      // non-empty field suppressed the Sales-Chat suggestion in the
+      // placeholder; and it disabled the Tab-to-accept path below, which is
+      // gated on !projectTitle.trim(). The title must describe what the chat
+      // says is being built ("Real Estate Property Listing Website"), never
+      // who is buying it — the lead's name is identification, not scope. Left
+      // empty, the suggestion from App\Services\LeadProjectTitleService is the
+      // only thing offered, and submit-time validation still requires a title,
+      // so nothing ships unnamed.
       if (lead.deal_reference) setProjectReference(lead.deal_reference);
       const kickoff = lead.required_kickoff_amount ?? lead.estimated_value ?? 0;
       if (kickoff > 0) {

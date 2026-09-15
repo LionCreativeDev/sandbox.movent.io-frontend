@@ -5,7 +5,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { userService } from '@/lib/services/userService';
 import { getAvailableModules } from '@/lib/moduleCatalog';
 import { SIMPLE_PROJECT_PERMISSIONS, collapseProjectPermissions } from '@/lib/simplifiedProjectPermissions';
-import { CUSTOM_ROLE_SENTINEL, CUSTOM_ROLE_BASE_OPTIONS, getRoleDefaultPermissions, rolesFor } from '@/lib/roleUtils';
+import { getRolesDefaultPermissions, rolesFor } from '@/lib/roleUtils';
 import { handleNotFound } from '@/lib/notFound';
 import { CompanyOption, User } from '@/types';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
@@ -102,13 +102,23 @@ function EditUserPageContent() {
 
   // Basic info
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', role_type: '' });
-  // What the Role <select> itself shows — either a real role_type, or the
-  // "+ Custom Role…" sentinel when this user has a custom_role_label. form's
-  // own role_type always holds the real structural bucket ("behaves like")
-  // regardless of which mode this is in — see roleUtils.CUSTOM_ROLE_SENTINEL.
-  const [roleSelectValue, setRoleSelectValue] = useState('');
+  // Roles PER COMPANY: companyId → roles, primary first.
+  //
+  // Roles are company-scoped exactly like the permissions below them, and this
+  // shape is what keeps them independent: editing, adding or removing a role in
+  // one company touches only that company's entry, so a Seller in company A who
+  // is a Project Manager in company B keeps both. form.role_type mirrors the
+  // PRIMARY company's primary role — it is the legacy single-role column the
+  // rest of the app still reads.
+  const [rolesByCompany, setRolesByCompany] = useState<Record<number, string[]>>({});
+  // A custom role RENAMES the person (users.custom_role_label is one column on
+  // the account, not per company), so it stays here at account level while the
+  // structural roles are picked per company below.
+  const [customRoleMode, setCustomRoleMode] = useState(false);
   const [customRoleLabel, setCustomRoleLabel] = useState('');
-  const isCustomRole = roleSelectValue === CUSTOM_ROLE_SENTINEL;
+  const isCustomRole = customRoleMode;
+
+  const rolesFor_ = (cid: number | null): string[] => (cid === null ? [] : rolesByCompany[cid] ?? []);
 
   // Permissions: companyId → moduleKey → permKey[]
   const [perms, setPerms]                 = useState<Record<number, Record<string, string[]>>>({});
@@ -123,13 +133,28 @@ function EditUserPageContent() {
       .then(([user, cos]: [User, CompanyOption[]]) => {
         setForm({ name: user.name, email: user.email, password: '', phone: user.phone ?? '', role_type: user.role_type ?? '' });
         setCustomRoleLabel(user.custom_role_label ?? '');
-        setRoleSelectValue(user.custom_role_label ? CUSTOM_ROLE_SENTINEL : (user.role_type ?? ''));
+        setCustomRoleMode(!!user.custom_role_label);
 
         const assignments = user.company_assignments ?? [];
         const ids = assignments.map(a => a.company_id);
         setAssignedIds(ids);
         setActiveCompanyId(ids[0] ?? null);
         setCompanies(cos);
+
+        // Each company keeps its OWN role set. `roles` comes back null when the
+        // endpoint did not load them — fall back to the legacy role_type so the
+        // picker is never blank for a user who plainly has a role, but only on
+        // the FIRST assignment: role_type is a single account-wide column and
+        // says nothing about the user's other companies, so copying it into all
+        // of them would invent roles nobody assigned.
+        const initialRoles: Record<number, string[]> = {};
+        assignments.forEach((a, i) => {
+          const loaded = a.roles ?? [];
+          initialRoles[a.company_id] = loaded.length > 0
+            ? loaded
+            : (i === 0 && user.role_type ? [user.role_type] : []);
+        });
+        setRolesByCompany(initialRoles);
 
         // Load existing permissions into state
         const initialPerms: Record<number, Record<string, string[]>> = {};
@@ -178,11 +203,12 @@ function EditUserPageContent() {
     const cid = Number(pickCompanyId);
     if (assignedIds.includes(cid)) return;
 
-    const co = companies.find(c => c.id === cid);
-    const rawDb = co?.modules ?? [];
-    const availMods = getAvailableModules(rawDb);
-    const allPerms = visiblePermsByModule(availMods, rawDb);
-    setPerms(prev => ({ ...prev, [cid]: getRoleDefaultPermissions(form.role_type, availMods.map(m => m.key), allPerms) }));
+    // A newly added company starts with NO roles — roles are per company, and
+    // guessing them from another company's set is exactly the cross-company
+    // bleed this screen has to prevent. The admin picks them in the Roles field
+    // for this company, which then seeds its permissions.
+    setRolesByCompany(prev => ({ ...prev, [cid]: [] }));
+    setPerms(prev => ({ ...prev, [cid]: {} }));
     setAssignedIds(prev => [...prev, cid]);
     setActiveCompanyId(cid);
     setPickCompanyId('');
@@ -221,40 +247,42 @@ function EditUserPageContent() {
   // User, where defaults just pre-fill a blank slate — it REPLACES whatever
   // custom permissions were already saved, across every company this user is
   // assigned to (each filtered to that company's own purchased modules).
-  const handleRoleChange = (newRole: string) => {
-    if (!newRole || newRole === form.role_type) {
-      setForm(f => ({ ...f, role_type: newRole }));
+  // Re-applies the COMBINED defaults of $next to ONE company.
+  //
+  // Scoped to $cid deliberately: every other company's roles and permissions
+  // are left exactly as they were, so changing what someone does in one company
+  // cannot reach into another. Confirmed first, because unlike Add User (which
+  // fills a blank slate) this REPLACES that company's saved permissions.
+  const applyRolesFor = (cid: number, next: string[]) => {
+    const co = companies.find(c => c.id === cid);
+    const label = co?.name ?? 'this company';
+
+    if (next.length === 0) {
+      setRolesByCompany(prev => ({ ...prev, [cid]: [] }));
       return;
     }
 
     const proceed = window.confirm(
-      'Changing role will apply default permissions for this role. Do you want to continue?'
+      next.length > 1
+        ? `Apply the combined default permissions of all ${next.length} selected roles for ${label}? This replaces the permissions currently saved for ${label} only — other companies are not affected.`
+        : `Apply default permissions for this role in ${label}? This replaces the permissions currently saved for ${label} only — other companies are not affected.`
     );
-    if (!proceed) return; // Rule: cancelled -> keep existing custom permissions AND role unchanged.
+    if (!proceed) return; // Cancelled -> keep existing permissions AND roles unchanged.
 
-    setForm(f => ({ ...f, role_type: newRole }));
+    setRolesByCompany(prev => ({ ...prev, [cid]: next }));
 
-    const nextPerms = { ...perms };
-    for (const cid of assignedIds) {
-      const co = companies.find(c => c.id === cid);
-      const rawDb = co?.modules ?? [];
-      const availMods = getAvailableModules(rawDb);
-      const allPerms = visiblePermsByModule(availMods, rawDb);
-      nextPerms[cid] = getRoleDefaultPermissions(newRole, availMods.map(m => m.key), allPerms);
-    }
-    setPerms(nextPerms);
+    const rawDb = co?.modules ?? [];
+    const availMods = getAvailableModules(rawDb);
+    const allPerms = visiblePermsByModule(availMods, rawDb);
+    setPerms(prev => ({
+      ...prev,
+      [cid]: getRolesDefaultPermissions(next, availMods.map(m => m.key), allPerms),
+    }));
   };
 
-  // The Role <select> itself — picking "+ Custom Role…" just switches the UI
-  // into custom mode (reveals the name + "Behaves like" fields) without
-  // touching form.role_type/permissions yet; picking any real role exits
-  // custom mode (clearing the custom label) and runs the normal
-  // confirm-then-apply-defaults flow via handleRoleChange().
-  const handleRoleSelectChange = (value: string) => {
-    setRoleSelectValue(value);
-    if (value === CUSTOM_ROLE_SENTINEL) return;
-    setCustomRoleLabel('');
-    handleRoleChange(value);
+  const toggleRole = (cid: number, value: string) => {
+    const current = rolesFor_(cid);
+    applyRolesFor(cid, current.includes(value) ? current.filter(r => r !== value) : [...current, value]);
   };
 
   const handleSave = async () => {
@@ -265,18 +293,31 @@ function EditUserPageContent() {
     setSaving(true); setError('');
     try {
       // Update basic info
+      // Account-level fields only. No `roles` here on purpose: that endpoint
+      // writes roles for ONE company (the account's primary), and the
+      // per-company loop below is what actually keeps each company's set
+      // independent. role_type is still sent so the legacy column tracks the
+      // primary company's primary role.
+      const primaryCompanyRoles = rolesFor_(
+        assignedIds.find(cid => cid === activeCompanyId) ?? assignedIds[0] ?? null
+      );
+
       await userService.update(id, {
         name:      form.name,
         email:     form.email,
         password:  form.password || undefined,
         phone:     form.phone || null,
-        role_type: form.role_type || undefined,
+        role_type: primaryCompanyRoles[0] || form.role_type || undefined,
         custom_role_label: isCustomRole ? (customRoleLabel.trim() || null) : null,
       });
 
-      // Update permissions per company
+      // Permissions AND roles, each company with its own set — so saving one
+      // company never overwrites another's roles or permissions.
       for (const cid of assignedIds) {
-        await userService.updateCompanyPermissions(id, cid, perms[cid] ?? {});
+        const companyRoles = rolesFor_(cid);
+        await userService.updateCompanyPermissions(
+          id, cid, perms[cid] ?? {}, undefined, companyRoles.length > 0 ? companyRoles : undefined
+        );
       }
 
       setToast('Saved successfully');
@@ -337,34 +378,41 @@ function EditUserPageContent() {
                   <label style={lbl}>Phone</label>
                   <PhoneInput value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
                 </div>
+                {/* Roles themselves are picked per company, in Module
+                    Permissions below — they are company-scoped and belong
+                    beside the permissions they seed. What stays here is the
+                    account-level display name, which is one column on the user
+                    and so cannot be per company. */}
                 <div>
-                  <label style={lbl}>Role</label>
-                  <select style={inp} value={roleSelectValue} onChange={e => handleRoleSelectChange(e.target.value)}>
-                    <option value="">Auto-detect from assigned modules</option>
-                    {rolesFor(ownerReach).map(r => (
-                      <option key={r.value} value={r.value}>{r.label}</option>
-                    ))}
-                    <option value={CUSTOM_ROLE_SENTINEL}>+ Custom Role…</option>
-                  </select>
+                  <label style={lbl}>Display Name Override</label>
+                  <label style={{
+                    display: 'flex', alignItems: 'center', gap: 9, padding: '11px 14px', borderRadius: 10,
+                    border: `1.5px solid ${customRoleMode ? '#bfdbfe' : '#e2e8f0'}`,
+                    background: customRoleMode ? '#eff6ff' : '#fafafa', cursor: 'pointer', fontSize: 13,
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={customRoleMode}
+                      onChange={() => {
+                        const next = !customRoleMode;
+                        setCustomRoleMode(next);
+                        if (!next) setCustomRoleLabel('');
+                      }}
+                      style={{ accentColor: '#2563eb', width: 15, height: 15, flexShrink: 0 }}
+                    />
+                    <span style={{ fontWeight: customRoleMode ? 700 : 500, color: customRoleMode ? '#1d4ed8' : '#64748b' }}>
+                      Show a custom role name
+                    </span>
+                  </label>
                 </div>
                 {isCustomRole && (
-                  <>
-                    <div>
-                      <label style={lbl}>Custom Role Name *</label>
-                      <input style={inp} value={customRoleLabel} onChange={e => setCustomRoleLabel(e.target.value)} placeholder="e.g. Marketing Lead" maxLength={100} />
+                  <div>
+                    <label style={lbl}>Custom Role Name *</label>
+                    <input style={inp} value={customRoleLabel} onChange={e => setCustomRoleLabel(e.target.value)} placeholder="e.g. Marketing Lead" maxLength={100} />
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                      Display only — shown instead of the role names everywhere. What this user can actually do is set by their roles and permissions per company below.
                     </div>
-                    <div>
-                      <label style={lbl}>Behaves Like *</label>
-                      <select style={inp} value={form.role_type || 'team_member'} onChange={e => handleRoleChange(e.target.value)}>
-                        {rolesFor(ownerReach, CUSTOM_ROLE_BASE_OPTIONS).map(r => (
-                          <option key={r.value} value={r.value}>{r.label}</option>
-                        ))}
-                      </select>
-                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-                        Determines this custom role&apos;s real permissions/behavior — the name above is just what&apos;s shown.
-                      </div>
-                    </div>
-                  </>
+                  </div>
                 )}
               </div>
             </div>
@@ -462,6 +510,67 @@ function EditUserPageContent() {
                         })}
                       </div>
                     )}
+
+                    {/* Roles for the SELECTED company — full width, because a
+                        multi-role selection needs the room to stay readable.
+                        Sits here rather than in Account Details because roles
+                        are company-scoped: switching the tab above switches
+                        which company's roles this edits, and saving one company
+                        leaves every other company's roles and permissions
+                        untouched. */}
+                    {activeCompanyId !== null && (() => {
+                      const cid = activeCompanyId;
+                      const selected = rolesFor_(cid);
+                      const coName = companies.find(c => c.id === cid)?.name;
+                      return (
+                        <div style={{ marginBottom: 16 }}>
+                          <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span>Roles{coName ? ` in ${coName}` : ''} *</span>
+                            {selected.length > 1 && (
+                              <span style={{
+                                fontSize: 10, fontWeight: 800, letterSpacing: 0.3, textTransform: 'none',
+                                color: '#1d4ed8', background: '#dbeafe', padding: '2px 8px', borderRadius: 999,
+                              }}>{selected.length} selected</span>
+                            )}
+                          </label>
+                          <div style={{
+                            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8,
+                            width: '100%', border: '1.5px solid #e2e8f0', borderRadius: 10, padding: 12,
+                            background: '#fafafa',
+                          }}>
+                            {rolesFor(ownerReach).map(r => {
+                              const on = selected.includes(r.value);
+                              return (
+                                <label key={r.value} style={{
+                                  display: 'flex', alignItems: 'center', gap: 8, padding: '9px 11px', borderRadius: 8,
+                                  border: `1.5px solid ${on ? '#bfdbfe' : '#e2e8f0'}`,
+                                  background: on ? '#eff6ff' : '#fff', cursor: 'pointer', fontSize: 13,
+                                }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={on}
+                                    onChange={() => toggleRole(cid, r.value)}
+                                    style={{ accentColor: '#2563eb', width: 15, height: 15, flexShrink: 0 }}
+                                  />
+                                  <span style={{ fontWeight: on ? 700 : 500, color: on ? '#1d4ed8' : '#0f172a' }}>{r.label}</span>
+                                  {on && selected[0] === r.value && selected.length > 1 && (
+                                    <span style={{
+                                      marginLeft: 'auto', fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
+                                      color: '#1d4ed8', background: '#dbeafe', padding: '2px 6px', borderRadius: 999,
+                                    }}>PRIMARY</span>
+                                  )}
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                            {selected.length > 1
+                              ? `Permissions below are the combined total of all ${selected.length} roles — no role cancels another. Applies to ${coName ?? 'this company'} only.`
+                              : `Pick one or more. Several roles combine their permissions. Applies to ${coName ?? 'this company'} only — other companies keep their own roles.`}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Add Users — one common toggle per company, not per
                         module. Owner reach only: a DELEGATED manager can

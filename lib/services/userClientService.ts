@@ -1,5 +1,6 @@
 import api from '@/lib/axios';
 import { Client, ClientDeleteSummary } from '@/types';
+import { CompanyUser } from './adminLeadService';
 
 // Sub-user side of Client management — basic record management plus portal
 // access (gated by canEnableClientPortal/canDisableClientPortal). Document/
@@ -57,5 +58,17 @@ export const userClientService = {
 
   updatePermissions: async (id: number, permissions: Record<string, boolean>): Promise<void> => {
     await api.put(`/user/clients/${id}/permissions`, { permissions });
+  },
+
+  // Gated on canTransferClients (Lead Manager default) — see
+  // Api\User\ClientController::transfer()/companyUsers().
+  transfer: async (id: number, toUserId: number, reason?: string): Promise<Client> => {
+    const res = await api.post(`/user/clients/${id}/transfer`, { to_user_id: toUserId, reason: reason || null });
+    return res.data.data;
+  },
+
+  companyUsers: async (): Promise<CompanyUser[]> => {
+    const res = await api.get('/user/clients/company-users');
+    return res.data.data;
   },
 };
