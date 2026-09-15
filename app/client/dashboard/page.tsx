@@ -17,11 +17,19 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 };
 
 type AiService = {
+  // null for the pre-first-invoice bootstrap fallback catalog (see
+  // Api\Client\DashboardController::aiServicesFor()) — that list isn't
+  // backed by a persisted client_ai_service_batch_items row, so there's no
+  // real id to send anywhere; `key` remains the stable identifier either way.
+  id: number | null;
   key: string;
   name: string;
   category: string;
   summary: string;
   timeline: string;
+  // 'taken' only ever comes from the client's own persisted batch — the
+  // bootstrap fallback catalog always reports 'available'.
+  status: 'available' | 'requested' | 'taken';
 };
 
 type DashboardStats = {
@@ -86,7 +94,6 @@ export default function ClientDashboardPage() {
   const [data, setData]       = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [requestingService, setRequestingService] = useState<string | null>(null);
-  const [requestedServices, setRequestedServices] = useState<Record<string, boolean>>({});
   const [serviceMessage, setServiceMessage] = useState('');
 
   useEffect(() => {
@@ -132,7 +139,13 @@ export default function ClientDashboardPage() {
 
     try {
       await clientService.requestService({ service_key: service.key });
-      setRequestedServices(prev => ({ ...prev, [service.key]: true }));
+      // Backend-sourced status now, not local-only state — so this survives
+      // a reload instead of resetting, unlike before this feature persisted
+      // requests (see Api\Client\DashboardController::requestService()).
+      setData(prev => prev && {
+        ...prev,
+        ai_services: (prev.ai_services || []).map(s => s.key === service.key ? { ...s, status: 'requested' as const } : s),
+      });
       setServiceMessage(`${service.name} request sent to admin.`);
     } catch (error: unknown) {
       const apiError = error as AxiosError<{ message?: string }>;
@@ -235,36 +248,66 @@ export default function ClientDashboardPage() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
             {aiServices.map(service => {
-              const requested = requestedServices[service.key];
               const requesting = requestingService === service.key;
+              const taken = service.status === 'taken';
+              const requested = service.status === 'requested';
 
               return (
-                <div key={service.key} style={{ border: '1px solid #e2e8f0', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', minHeight: 190 }}>
+                <div
+                  key={service.key}
+                  style={{
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 12,
+                    padding: 16,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minHeight: 190,
+                    opacity: taken ? 0.65 : 1,
+                  }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                     <span style={{ fontSize: 11, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: 999, fontWeight: 700 }}>{service.category}</span>
                     <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{service.timeline}</span>
                   </div>
                   <h3 style={{ margin: '0 0 8px', fontSize: 15, lineHeight: 1.25, fontWeight: 800, color: '#0f172a' }}>{service.name}</h3>
                   <p style={{ margin: 0, fontSize: 12, color: '#64748b', lineHeight: 1.55, flex: 1 }}>{service.summary}</p>
-                  <button
-                    type="button"
-                    disabled={requesting || requested}
-                    onClick={() => requestAiService(service)}
-                    style={{
-                      marginTop: 14,
-                      width: '100%',
-                      border: 'none',
-                      borderRadius: 8,
-                      padding: '10px 12px',
-                      background: requested ? '#ecfdf5' : '#10b981',
-                      color: requested ? '#047857' : '#fff',
-                      fontSize: 12,
-                      fontWeight: 800,
-                      cursor: requesting || requested ? 'default' : 'pointer',
-                    }}
-                  >
-                    {requesting ? 'Sending...' : requested ? 'Requested' : 'Request Service'}
-                  </button>
+                  {taken ? (
+                    <div
+                      style={{
+                        marginTop: 14,
+                        width: '100%',
+                        textAlign: 'center',
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        background: '#f1f5f9',
+                        color: '#475569',
+                        fontSize: 12,
+                        fontWeight: 800,
+                      }}
+                    >
+                      ✓ Fulfilled
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={requesting || requested}
+                      onClick={() => requestAiService(service)}
+                      style={{
+                        marginTop: 14,
+                        width: '100%',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        background: requested ? '#ecfdf5' : '#10b981',
+                        color: requested ? '#047857' : '#fff',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        cursor: requesting || requested ? 'default' : 'pointer',
+                      }}
+                    >
+                      {requesting ? 'Sending...' : requested ? 'Requested' : 'Request Service'}
+                    </button>
+                  )}
                 </div>
               );
             })}

@@ -29,6 +29,18 @@ export interface InvoicePayload {
     payment_type?: string;
     required_payment_amount?: number;
     counts_toward_project_activation?: boolean;
+    // Optional — links this invoice to one of the client's outstanding
+    // AI-suggested services (see AiServiceBatchItem), which flips it to
+    // 'taken' once this invoice is paid/partially paid.
+    ai_service_batch_item_id?: number | null;
+}
+
+export interface AiServiceBatchItem {
+    id: number;
+    key: string;
+    name: string;
+    category: string;
+    status: 'available' | 'requested' | 'taken';
 }
 
 export interface ClientInvoiceStats {

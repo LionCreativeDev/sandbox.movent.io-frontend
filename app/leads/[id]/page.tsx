@@ -333,6 +333,18 @@ export default function LeadDetailPage() {
     catch { toast.error('Download failed'); }
   };
 
+  // Admin only — DELETE /admin/sales-chat/messages/{id} has no staff-side
+  // route (see adminSalesChatService.deleteMessage's comment), so the
+  // button below is gated on isAdmin directly rather than a permission that
+  // would silently no-op for a staff member.
+  const deleteChatMessage = async (messageId: number) => {
+    if (!confirm('Delete this message?')) return;
+    try {
+      await adminSalesChatService.deleteMessage(messageId);
+      setChat(prev => prev.filter(m => m.id !== messageId));
+    } catch { toast.error('Failed to delete message'); }
+  };
+
   const handleStatusChange = async (newStatus: string) => {
     if (!lead || !canManagePipe) return;
     try {
@@ -980,8 +992,14 @@ export default function LeadDetailPage() {
                           }}>📎 {m.attachment_name}</button>
                         )}
                       </div>
-                      <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 3, marginLeft: isMine ? 0 : 4, marginRight: isMine ? 4 : 0 }}>
-                        {fmtChatTime(m.sent_at)}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, marginLeft: isMine ? 0 : 4, marginRight: isMine ? 4 : 0 }}>
+                        <span style={{ fontSize: 10.5, color: '#94a3b8' }}>{fmtChatTime(m.sent_at)}</span>
+                        {isAdmin && (
+                          <button onClick={() => deleteChatMessage(m.id)} style={{
+                            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                            fontSize: 11, color: '#dc2626', fontWeight: 700, textDecoration: 'underline',
+                          }}>Delete</button>
+                        )}
                       </div>
                     </div>
                   </div>

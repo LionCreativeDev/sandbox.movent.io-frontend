@@ -2,7 +2,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { adminInvoiceService, InvoicePayload } from '@/lib/services/adminInvoiceService';
+import { adminInvoiceService, InvoicePayload, AiServiceBatchItem } from '@/lib/services/adminInvoiceService';
 import { adminClientService, ClientCompany } from '@/lib/services/adminClientService';
 import { userClientService } from '@/lib/services/userClientService';
 import { adminLeadService, userLeadService, Lead } from '@/lib/services/adminLeadService';
@@ -139,6 +139,11 @@ function NewInvoiceForm() {
   // array) before its actual client ever loaded.
   const [loadingClients, setLoadingClients] = useState(true);
   const [clientId, setClientId]         = useState<number | null>(null);
+  // This client's outstanding AI-suggested services (see
+  // App\Services\ClientAiServiceBatchService) — optional link on Create
+  // Invoice, only ever populated when one exists.
+  const [aiBatchItems, setAiBatchItems]                 = useState<AiServiceBatchItem[]>([]);
+  const [aiServiceBatchItemId, setAiServiceBatchItemId] = useState<number | ''>('');
   // Why the client list came back empty, when it wasn't simply "none exist".
   // A 403 from GET /user/clients (missing canViewClients) used to be swallowed
   // and rendered as "No clients found for this company", which reads as an empty
@@ -372,11 +377,14 @@ function NewInvoiceForm() {
   // condition (the client list can still be loading, or briefly empty,
   // when this resolves).
   // Asks the AI for a Project Title suggestion from this lead's Sales Chat.
-  // Runs once per page load, which is exactly the behaviour asked for: a
-  // reload re-analyses the conversation, so a message sent since the last
-  // visit is taken into account (and the same requirements may come back
-  // worded differently). Failures are silent — a missing suggestion must
-  // never get in the way of raising an invoice.
+  // Runs once per page load/mount, same as before — but the backend
+  // (LeadProjectTitleService::suggest()) now caches its result per lead,
+  // keyed on the exact chat content, so reloading this page repeatedly for
+  // the SAME lead with no new messages is a cache hit and never re-calls
+  // the AI provider. A message sent since the last visit still changes that
+  // key, so it's still reflected on the very next load. Failures are
+  // silent — a missing suggestion must never get in the way of raising an
+  // invoice.
   useEffect(() => {
     if (!authResolved || !leadId) return;
     const svc = isAdmin ? adminLeadService : userLeadService;
@@ -457,6 +465,25 @@ function NewInvoiceForm() {
     }
     setClientPrefilled(true);
   }, [authResolved, clientIdParam, leadId, clientPrefilled, loadingClients, clients]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // This client's outstanding AI-suggested services, for the optional "Link
+  // to AI-Suggested Service" dropdown below — refetched whenever the
+  // selected client changes, cleared for Guest invoices (no client = no
+  // batch to link against).
+  useEffect(() => {
+    if (!authResolved || customerType !== 'client' || !clientId) {
+      setAiBatchItems([]);
+      setAiServiceBatchItemId('');
+      return;
+    }
+    const svc = isAdmin ? adminClientService : userClientService;
+    let cancelled = false;
+    svc.aiServiceBatchItems(clientId)
+      .then(res => { if (!cancelled) setAiBatchItems(res.items); })
+      .catch(() => { if (!cancelled) setAiBatchItems([]); });
+    setAiServiceBatchItemId('');
+    return () => { cancelled = true; };
+  }, [authResolved, isAdmin, customerType, clientId]);
 
   // Load this tenant's active gateway accounts once auth is resolved —
   // Admin reads the full Settings gateway list (already has everything);
@@ -614,7 +641,7 @@ function NewInvoiceForm() {
       items: effectiveItems.map(r => ({ description: r.description, quantity: r.quantity, unit_price: r.unit_price })),
       gateway_account_ids: selectedGatewayIds,
       ...(customerType === 'client'
-        ? { client_id: clientId }
+        ? { client_id: clientId, ai_service_batch_item_id: aiServiceBatchItemId || undefined }
         : {
             client_id:        null,
             customer_name:    guestName.trim()    || null,
@@ -1067,6 +1094,26 @@ function NewInvoiceForm() {
                           </div>
                         );
                       })()}
+                      {aiBatchItems.length > 0 && (
+                        <div style={{ marginTop: 14 }}>
+                          <label style={lbl}>Link to AI-Suggested Service <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span></label>
+                          <select
+                            style={inp}
+                            value={aiServiceBatchItemId}
+                            onChange={e => setAiServiceBatchItemId(e.target.value ? Number(e.target.value) : '')}
+                          >
+                            <option value="">None</option>
+                            {aiBatchItems.map(item => (
+                              <option key={item.id} value={item.id}>
+                                {item.name} ({item.category}){item.status === 'requested' ? ' — requested' : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>
+                            Marks this suggested service as fulfilled once this invoice is paid.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

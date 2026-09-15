@@ -1,6 +1,7 @@
 import api from '@/lib/axios';
 import { Client, ClientDeleteSummary } from '@/types';
 import { CompanyUser } from './adminLeadService';
+import { AiServiceBatchItem } from './adminInvoiceService';
 
 export interface ClientPayload {
   company_id: number;
@@ -63,6 +64,13 @@ export const adminClientService = {
 
   enablePortal: async (id: number, email: string, password: string): Promise<void> => {
     await api.post(`/admin/clients/${id}/enable-portal`, { portal_email: email, portal_password: password });
+  },
+
+  // Outstanding (not yet 'taken') AI-suggested services for this client —
+  // powers the "Link to AI-Suggested Service" dropdown on Create Invoice.
+  aiServiceBatchItems: async (id: number): Promise<{ batch_id: number | null; items: AiServiceBatchItem[] }> => {
+    const res = await api.get(`/admin/clients/${id}/ai-service-batch-items`);
+    return res.data.data;
   },
 
   disablePortal: async (id: number): Promise<void> => {

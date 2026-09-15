@@ -1,6 +1,7 @@
 import api from '@/lib/axios';
 import { Client, ClientDeleteSummary } from '@/types';
 import { CompanyUser } from './adminLeadService';
+import { AiServiceBatchItem } from './adminInvoiceService';
 
 // Sub-user side of Client management — basic record management plus portal
 // access (gated by canEnableClientPortal/canDisableClientPortal). Document/
@@ -69,6 +70,13 @@ export const userClientService = {
 
   companyUsers: async (): Promise<CompanyUser[]> => {
     const res = await api.get('/user/clients/company-users');
+    return res.data.data;
+  },
+
+  // Outstanding (not yet 'taken') AI-suggested services for this client —
+  // powers the "Link to AI-Suggested Service" dropdown on Create Invoice.
+  aiServiceBatchItems: async (id: number): Promise<{ batch_id: number | null; items: AiServiceBatchItem[] }> => {
+    const res = await api.get(`/user/clients/${id}/ai-service-batch-items`);
     return res.data.data;
   },
 };

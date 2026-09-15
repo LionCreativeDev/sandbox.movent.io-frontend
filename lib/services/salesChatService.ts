@@ -83,5 +83,17 @@ function downloadBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-export const adminSalesChatService = buildSalesChatService('/admin');
+// Admin-only: DELETE /admin/sales-chat/messages/{id} has no staff-side
+// route (Company Admin is unrestricted here, same posture as every other
+// Sales Chat action). Attached only to adminSalesChatService rather than
+// added to buildSalesChatService() so it's never accidentally exposed on
+// userSalesChatService and clicked into a silent 404 — mirrors the same
+// "only Admin actually has this endpoint" note on canDeleteLead in
+// frontend/app/leads/[id]/page.tsx.
+export const adminSalesChatService = {
+  ...buildSalesChatService('/admin'),
+  deleteMessage: async (messageId: number): Promise<void> => {
+    await api.delete(`/admin/sales-chat/messages/${messageId}`);
+  },
+};
 export const userSalesChatService = buildSalesChatService('/user');
