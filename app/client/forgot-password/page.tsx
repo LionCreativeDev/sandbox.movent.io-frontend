@@ -29,13 +29,21 @@ export default function ClientForgotPasswordPage() {
     setError('');
     setLoading(true);
     try {
-      await clientApi.post('/forgot-password', { email });
-      // Always the same success state — never reveal whether the address is
-      // registered. Matches the API, which returns one message either way.
+      // The PORTAL endpoint, not the staff /forgot-password: this one verifies
+      // the address really is a registered portal client and says so when it
+      // is not, instead of promising an email that will never arrive. Same
+      // underlying reset flow either way.
+      await clientApi.post('/client/forgot-password', { email });
       setSent(true);
     } catch (err: unknown) {
-      const ex = err as { response?: { data?: { message?: string } } };
-      setError(ex.response?.data?.message || 'Something went wrong. Please try again.');
+      const ex = err as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } };
+      // A 422 puts the reason under `errors.email` — that is the unregistered
+      // case, and it belongs against the field rather than in a banner.
+      setError(
+        ex.response?.data?.errors?.email?.[0]
+          || ex.response?.data?.message
+          || 'Something went wrong. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -74,25 +82,31 @@ export default function ClientForgotPasswordPage() {
           </p>
         </div>
 
-        {error && (
-          <div style={{
-            background: '#fef2f2', border: '1px solid #fecaca',
-            borderRadius: 8, padding: '10px 14px',
-            color: '#dc2626', fontSize: 13, marginBottom: 20,
-          }}>
-            {error}
-          </div>
-        )}
-
+        {/* Success sits where the form was and the page never navigates — the
+            address stays on screen so it is obvious which inbox to check. */}
         {sent ? (
-          <div style={{
-            background: '#ecfdf5', border: '1px solid #a7f3d0',
-            borderRadius: 8, padding: '14px 16px',
-            color: '#047857', fontSize: 13, lineHeight: 1.6, marginBottom: 22,
-          }}>
-            If that email is registered, a password reset link has been sent.
-            The link is valid for one hour.
-          </div>
+          <>
+            <div style={{
+              background: '#ecfdf5', border: '1px solid #a7f3d0',
+              borderRadius: 8, padding: '14px 16px',
+              color: '#047857', fontSize: 13, lineHeight: 1.6,
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Reset link sent</div>
+              We&apos;ve emailed a password reset link to <strong>{email}</strong>.
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setSent(false); setError(''); }}
+              style={{
+                width: '100%', marginTop: 16, padding: '11px',
+                background: '#fff', color: '#10b981',
+                fontWeight: 600, fontSize: 14,
+                border: '1.5px solid #a7f3d0', borderRadius: 8, cursor: 'pointer',
+              }}>
+              Send to a different email
+            </button>
+          </>
         ) : (
           <form onSubmit={submit}>
             <div style={{ marginBottom: 22 }}>
@@ -102,18 +116,32 @@ export default function ClientForgotPasswordPage() {
               <input
                 type="email"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                // Clear the error as soon as they start correcting it —
+                // otherwise a stale "not registered" sits under an address
+                // that is no longer the one being submitted.
+                onChange={e => { setEmail(e.target.value); if (error) setError(''); }}
                 required
                 autoFocus
                 placeholder="you@company.com"
+                aria-invalid={!!error}
+                aria-describedby={error ? 'email-error' : undefined}
                 style={{
                   width: '100%', padding: '10px 12px',
-                  border: '1px solid #e2e8f0', borderRadius: 8,
+                  border: `1px solid ${error ? '#fca5a5' : '#e2e8f0'}`,
+                  borderRadius: 8,
                   fontSize: 14, outline: 'none', boxSizing: 'border-box',
                 }}
-                onFocus={e => (e.target.style.borderColor = '#10b981')}
-                onBlur={e => (e.target.style.borderColor = '#e2e8f0')}
+                onFocus={e => (e.target.style.borderColor = error ? '#fca5a5' : '#10b981')}
+                onBlur={e => (e.target.style.borderColor = error ? '#fca5a5' : '#e2e8f0')}
               />
+
+              {/* Directly under the field it belongs to, which is where the
+                  "this address isn't registered" answer is actionable. */}
+              {error && (
+                <div id="email-error" role="alert" style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6, lineHeight: 1.5 }}>
+                  {error}
+                </div>
+              )}
             </div>
 
             <button

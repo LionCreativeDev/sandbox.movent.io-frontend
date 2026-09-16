@@ -346,9 +346,11 @@ export default function ClientDetailPage() {
           <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>
             {client.company?.name} {client.company_name ? `· ${client.company_name}` : ''}
           </p>
+          {/* Account Manager is not shown here — it served no purpose on this
+              header. The field itself still exists (clients.account_manager)
+              and the Transfer Client action still reads and reassigns it. */}
           <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>
-            Account Manager: <strong style={{ color: '#475569' }}>{client.accountManager?.name ?? 'Unassigned'}</strong>
-            {' · '}Created By: <strong style={{ color: '#475569' }}>{client.creator?.name ?? '—'}</strong>
+            Created By: <strong style={{ color: '#475569' }}>{client.creator?.name ?? '—'}</strong>
           </p>
         </div>
 
