@@ -162,6 +162,8 @@ export default function ProjectBillingPage() {
           <Badge label={ps.label} sc={ps.sc} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
+          <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Subtotal</div><div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>{fmt(summary?.total_subtotal ?? 0)}</div></div>
+          <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Tax</div><div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>{fmt(summary?.total_tax ?? 0)}</div></div>
           <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Total Invoiced</div><div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', marginTop: 4 }}>{fmt(summary?.total_invoiced ?? 0)}</div></div>
           <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Total Paid</div><div style={{ fontSize: 17, fontWeight: 700, color: '#059669', marginTop: 4 }}>{fmt(summary?.total_paid ?? 0)}</div></div>
           <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Remaining Due</div><div style={{ fontSize: 17, fontWeight: 700, color: (summary?.outstanding ?? 0) > 0 ? '#ea580c' : '#059669', marginTop: 4 }}>{fmt(summary?.outstanding ?? 0)}</div></div>
@@ -266,7 +268,14 @@ export default function ProjectBillingPage() {
                 return (
                   <tr key={inv.id} style={{ borderBottom: '1px solid #f8fafc' }}>
                     <td style={{ padding: '9px 10px', fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{inv.invoice_number}</td>
-                    <td style={{ padding: '9px 10px', fontSize: 13, color: '#475569' }}>{fmt(inv.total_amount, inv.currency)}</td>
+                    <td style={{ padding: '9px 10px', fontSize: 13, color: '#475569' }}>
+                      {fmt(inv.total_amount, inv.currency)}
+                      {inv.tax_amount > 0 && (
+                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                          {fmt(inv.subtotal, inv.currency)} + tax {fmt(inv.tax_amount, inv.currency)}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding: '9px 10px', fontSize: 13, color: '#059669', fontWeight: 600 }}>{fmt(inv.paid_amount, inv.currency)}</td>
                     <td style={{ padding: '9px 10px', fontSize: 13, fontWeight: 600, color: remaining > 0 ? '#ea580c' : '#059669' }}>{fmt(remaining, inv.currency)}</td>
                     <td style={{ padding: '9px 10px' }}><Badge label={inv.status} sc={STATUS_SC[inv.status] ?? { bg: '#f1f5f9', color: '#64748b' }} /></td>

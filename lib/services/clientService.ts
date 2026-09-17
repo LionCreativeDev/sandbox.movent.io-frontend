@@ -20,6 +20,78 @@ export interface ClientProfilePayload {
   current_password?: string;
 }
 
+// ── Payment Assistant ────────────────────────────────────────────────────────
+// The rule-based invoice payment chat. Every call returns the WHOLE assistant
+// state rebuilt server-side — the browser holds no company, invoice or amount
+// of its own, because none of those may be decided here.
+
+export interface AssistantInvoice {
+  id: number;
+  invoice_number: string;
+  company_name?: string | null;
+  currency?: string | null;
+  invoice_date?: string | null;
+  due_date?: string | null;
+  total_amount: number;
+  paid_amount: number;
+  amount_due: number;
+  status: string;
+  is_payable: boolean;
+}
+
+export interface AssistantCompany {
+  company_id: number;
+  client_id: number;
+  company_name?: string | null;
+  unpaid_count: number;
+}
+
+export interface AssistantState {
+  state:
+    | 'company_selection'
+    | 'waiting_for_invoice'
+    | 'invoice_found'
+    | 'confirming'
+    | 'processing'
+    | 'payment_success'
+    | 'payment_failed';
+  company: { id: number; name?: string | null } | null;
+  companies: AssistantCompany[];
+  invoice: AssistantInvoice | null;
+  message: string | null;
+  already_paid?: boolean;
+  payment?: { amount: number; paid_at?: string | null; reference?: string | null } | null;
+  /** Present after confirm(): the invoice to run the EXISTING checkout against. */
+  checkout_invoice_id?: number;
+  amount_due?: number;
+  /** Cards already on file for this company. Absent when there are none. */
+  saved_methods?: { id: number; label: string; is_default: boolean }[];
+  /** Present after pay-saved: whether the charge settled. */
+  paid?: boolean;
+}
+
+export interface SavedCard {
+  id: number;
+  company_id: number;
+  gateway: string;
+  /** "Visa •••• 4242" — the only description of a card that ever leaves the API. */
+  label: string;
+  brand?: string | null;
+  last4?: string | null;
+  exp_month?: number | null;
+  exp_year?: number | null;
+  is_default: boolean;
+  is_expired: boolean;
+}
+
+export interface SavedCardCompany {
+  company_id: number;
+  company_name?: string | null;
+  /** False when this company's gateway cannot vault a card — hides the Add button. */
+  can_add: boolean;
+  payment_methods: SavedCard[];
+}
+
 export const clientService = {
   login: async (email: string, password: string) => {
     const res = await clientApi.post('/client/login', { email, password });
@@ -36,6 +108,67 @@ export const clientService = {
     const res = await clientApi.get('/client/dashboard');
     return res.data.data;
   },
+  assistant: {
+    open: async (): Promise<AssistantState> =>
+      (await clientApi.get('/client/payment-assistant')).data.data,
+    selectCompany: async (companyId: number): Promise<AssistantState> =>
+      (await clientApi.post('/client/payment-assistant/company', { company_id: companyId })).data.data,
+    changeCompany: async (): Promise<AssistantState> =>
+      (await clientApi.post('/client/payment-assistant/change-company')).data.data,
+    send: async (text: string): Promise<AssistantState> =>
+      (await clientApi.post('/client/payment-assistant/message', { text })).data.data,
+    selectInvoice: async (invoiceId: number): Promise<AssistantState> =>
+      (await clientApi.post('/client/payment-assistant/invoice', { invoice_id: invoiceId })).data.data,
+    // Explicit consent step. Does NOT charge — it returns the invoice to run the
+    // existing gateway checkout against.
+    confirm: async (): Promise<AssistantState> =>
+      (await clientApi.post('/client/payment-assistant/confirm')).data.data,
+    // The one call that moves money. Separate and explicit by design — confirm()
+    // above only offers the card.
+    payWithSaved: async (paymentMethodId: number): Promise<AssistantState> =>
+      (await clientApi.post('/client/payment-assistant/pay-saved', { payment_method_id: paymentMethodId })).data.data,
+    reset: async (): Promise<AssistantState> =>
+      (await clientApi.post('/client/payment-assistant/reset')).data.data,
+    // Clear History — a conversation RESET, not a delete. The server rotates
+    // this session's conversation id; the permanent activity trail
+    // (system_audit_logs, action payment_assistant.*) is untouched, as are
+    // invoices, payments, receipts and documents. Returns the state a fresh
+    // conversation starts in, which this page renders into an empty thread.
+    clearHistory: async (): Promise<AssistantState> =>
+      (await clientApi.post('/client/payment-assistant/clear')).data.data,
+    unpaid: async (): Promise<{ invoices: AssistantInvoice[] }> =>
+      (await clientApi.get('/client/payment-assistant/unpaid')).data.data,
+  },
+
+  paymentMethods: {
+    list: async (): Promise<{ companies: SavedCardCompany[] }> =>
+      (await clientApi.get('/client/payment-methods')).data.data,
+    // Opens the gateway's hosted card page. Charges nothing.
+    startSetup: async (companyId: number): Promise<{ navigation: 'redirect' | 'post_form'; action: string; fields?: Record<string, string> }> =>
+      (await clientApi.post('/client/payment-methods/setup', { company_id: companyId })).data.data,
+    complete: async (companyId: number, sessionId: string): Promise<{ payment_method: SavedCard }> =>
+      (await clientApi.post('/client/payment-methods/complete', { company_id: companyId, session_id: sessionId })).data.data,
+    setDefault: async (id: number) =>
+      (await clientApi.post(`/client/payment-methods/${id}/default`)).data,
+    remove: async (id: number) =>
+      (await clientApi.delete(`/client/payment-methods/${id}`)).data,
+  },
+
+  /**
+   * A document's file as an object URL, for showing a payment receipt on screen
+   * instead of only downloading it.
+   *
+   * Reuses the Documents module's OWN download endpoint — there is no second
+   * API for this — and re-types the blob to image/svg+xml so the browser is
+   * told exactly what it is rather than depending on what the file server
+   * guessed or on the attachment disposition that endpoint sends. Callers own
+   * the returned URL and must revokeObjectURL it.
+   */
+  documentImageUrl: async (documentId: number): Promise<string> => {
+    const res = await clientApi.get(`/client/documents/${documentId}/download`, { responseType: 'blob' });
+    return URL.createObjectURL(new Blob([res.data], { type: 'image/svg+xml' }));
+  },
+
   profile: async (): Promise<ClientProfile> => {
     const res = await clientApi.get('/client/profile');
     return res.data.data;

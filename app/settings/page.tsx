@@ -911,16 +911,16 @@ export default function SettingsPage() {
           ) : (
             <div style={card}>
               <div style={cardHead}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Project Creation Workflow</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Payment Policy</div>
                 <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
-                  Choose when a client&apos;s invoice payment creates the project. Either way the project is created as a
-                  draft holding only its name — you fill in the rest and activate it before any work shows up for the client.
+                  How much of an invoice may be settled at once. Enforced everywhere an amount is entered — the
+                  client&apos;s own payment page and a Company Admin manually recording a payment received.
                 </p>
               </div>
               <div style={cardBody}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 22 }}>
-                  {Object.entries(dealSettings.triggers).map(([key, label]) => {
-                    const active = dealSettings.project_creation_trigger === key;
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {Object.entries(dealSettings.payment_policies).map(([key, label]) => {
+                    const active = dealSettings.payment_policy === key;
                     const [heading, detail] = label.split(' — ');
                     return (
                       <label key={key} style={{
@@ -930,9 +930,9 @@ export default function SettingsPage() {
                       }}>
                         <input
                           type="radio"
-                          name="project_creation_trigger"
+                          name="payment_policy"
                           checked={active}
-                          onChange={() => setDealSettings(p => p ? { ...p, project_creation_trigger: key } : p)}
+                          onChange={() => setDealSettings(p => p ? { ...p, payment_policy: key } : p)}
                           style={{ width: 16, height: 16, accentColor: '#2563eb', marginTop: 1, flexShrink: 0 }}
                         />
                         <span>
@@ -943,12 +943,6 @@ export default function SettingsPage() {
                     );
                   })}
                 </div>
-
-                {dealSettings.project_creation_trigger === 'full_payment' && (
-                  <div style={{ marginBottom: 20, padding: '10px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, color: '#64748b' }}>
-                    💡 A part payment won&apos;t start anything — the client is emailed that their project begins once the invoice is paid in full.
-                  </div>
-                )}
 
                 <button onClick={saveDealSettings} disabled={savingDeal}
                   style={{ padding: '10px 28px', borderRadius: 9, border: 'none', background: savingDeal ? '#93c5fd' : 'linear-gradient(135deg,#2563eb,#3b82f6)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: savingDeal ? 'not-allowed' : 'pointer' }}>

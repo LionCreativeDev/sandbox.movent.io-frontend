@@ -6,6 +6,7 @@ import Cookies from 'js-cookie';
 import {
   HiSquares2X2, HiFolder, HiDocumentText, HiCreditCard,
   HiArrowDownTray, HiLifebuoy, HiChartBar, HiSparkles, HiUserCircle,
+  HiChatBubbleLeftRight, HiWallet,
 } from 'react-icons/hi2';
 import clientApi from '@/lib/clientAxios';
 
@@ -23,6 +24,10 @@ const NAV = [
   { key: 'projects',  label: 'Projects',  icon: HiFolder,              path: '/client/projects' },
   { key: 'invoices',  label: 'Invoices',  icon: HiDocumentText,        path: '/client/invoices' },
   { key: 'payments',  label: 'Payments',  icon: HiCreditCard,          path: '/client/payments' },
+  // Sits under the invoices module because that is what it acts on — a client
+  // whose Invoices access is switched off has nothing to pay here.
+  { key: 'invoices',  label: 'Payment Assistant', icon: HiChatBubbleLeftRight, path: '/client/payment-assistant' },
+  { key: 'invoices',  label: 'Payment Methods',   icon: HiWallet,              path: '/client/payment-methods' },
   { key: 'documents', label: 'Documents', icon: HiArrowDownTray,       path: '/client/documents' },
   { key: 'support',   label: 'Support',   icon: HiLifebuoy,            path: '/client/support' },
   { key: 'reports',   label: 'Reports',   icon: HiChartBar,            path: '/client/reports' },

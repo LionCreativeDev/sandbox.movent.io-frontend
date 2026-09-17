@@ -696,6 +696,9 @@ export default function LeadDetailPage() {
                 </div>
               </div>
             </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: '#94a3b8' }}>
+              Compared before tax — a payment toward a taxed invoice only counts its pre-tax share here.
+            </div>
             {dealEligibility.project_creation_eligible && !dealEligibility.has_project && (
               <div style={{ marginTop: 12, padding: '9px 14px', background: '#ecfdf5', borderRadius: 8, color: '#059669', fontSize: 12.5, fontWeight: 600 }}>
                 ✓ Required payment received. This Deal is now eligible for project creation.

@@ -34,7 +34,7 @@ export const CATEGORIES: Category[] = [
   { key: 'compliance', label: 'Compliance', icon: HiShieldCheck, desc: 'Policies, audits & risk', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', price_pkr: 1500, price_usd: 6, modules: ['compliance', 'policies', 'audit_trails', 'compliance_reports', 'risk_assessments', 'alerts', 'document_compliance'], badge: 'Requires Projects + Invoice' },
   { key: 'hr', label: 'HR Management', icon: HiUsers, desc: 'Employees, attendance & payroll', color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', price_pkr: 1800, price_usd: 7, modules: ['employees', 'recruitment', 'attendance', 'leaves', 'payroll'], badge: 'Can be used alone' },
   { key: 'finance', label: 'Finance', icon: HiBanknotes, desc: 'Dashboard, revenue & reports', color: '#d97706', bg: '#fffbeb', border: '#fde68a', price_pkr: 1200, price_usd: 5, modules: ['finance_dashboard', 'finance_reports', 'revenue_reports', 'payments_report'], badge: 'Requires Invoice' },
-  { key: 'invoice', label: 'Invoice', icon: HiDocumentText, desc: 'Billing, payments & reminders', color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', price_pkr: 1200, price_usd: 5, modules: ['invoices', 'payments', 'payment_details', 'invoice_reminders'], badge: 'Can be used alone' },
+  { key: 'invoice', label: 'Invoice', icon: HiDocumentText, desc: 'Billing, payments & reminders', color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', price_pkr: 1200, price_usd: 5, modules: ['invoices', 'payments', 'payment_details', 'invoice_reminders'], badge: 'Requires Client' },
 ];
 export const DEFAULT_CATEGORY_STYLE = { icon: HiCube, color: '#475569', bg: '#f8fafc', border: '#e2e8f0', badge: 'Can be used alone' };
 
@@ -60,6 +60,7 @@ export const DEPENDENCY_ERRORS: Record<string, string> = {
   client_portal: 'Client module requires Invoice or Project.',
   finance: 'Invoice module is required because Finance depends on invoice and payment data.',
   compliance: 'Compliance requires both the Project and Invoice modules.',
+  invoice: 'Client module is required because Invoice needs a client to bill.',
 };
 
 export function requiredDependencyKeys(selected: string[]): string[] {
@@ -70,6 +71,9 @@ export function requiredDependencyKeys(selected: string[]): string[] {
   if (selected.includes('compliance')) {
     if (selected.includes('projects') && !deps.includes('projects')) deps.push('projects');
     if (selected.includes('invoice') && !deps.includes('invoice')) deps.push('invoice');
+  }
+  if (selected.includes('invoice') && !deps.includes('client_portal')) {
+    deps.push('client_portal');
   }
   return deps;
 }
@@ -83,6 +87,9 @@ export function moduleDependencyErrors(selected: string[]): string[] {
   }
   if (selected.includes('compliance') && (!selected.includes('projects') || !selected.includes('invoice'))) {
     errors.push(DEPENDENCY_ERRORS.compliance);
+  }
+  if (selected.includes('invoice') && !selected.includes('client_portal')) {
+    errors.push(DEPENDENCY_ERRORS.invoice);
   }
   return errors;
 }
@@ -106,6 +113,12 @@ export function toggleCategorySelection(prev: string[], key: string): string[] {
     toast.error(DEPENDENCY_ERRORS.compliance);
     return prev;
   }
+  // Client is mandatory once Invoice is selected — block removing Client
+  // while Invoice is still in the selection.
+  if (key === 'client_portal' && prev.includes(key) && prev.includes('invoice')) {
+    toast.error(DEPENDENCY_ERRORS.invoice);
+    return prev;
+  }
 
   if (prev.includes(key)) return prev.filter(k => k !== key);
 
@@ -116,6 +129,11 @@ export function toggleCategorySelection(prev: string[], key: string): string[] {
   if (key === 'compliance') {
     if (!next.includes('projects')) next.push('projects');
     if (!next.includes('invoice')) next.push('invoice');
+  }
+  // Invoice always needs Client — cascades whether Invoice was picked
+  // directly or pulled in automatically by Sales/Finance/Compliance above.
+  if (next.includes('invoice') && !next.includes('client_portal')) {
+    next.push('client_portal');
   }
   return next;
 }

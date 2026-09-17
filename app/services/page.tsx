@@ -80,6 +80,7 @@ export default function CompanyServicesPage() {
   const [customDraft, setCustomDraft] = useState<Draft>({
     name: '', short_description: '', starting_price: '', is_featured: false, icon: null,
   });
+  const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
 
   const load = () => {
     setLoading(true);
@@ -94,6 +95,8 @@ export default function CompanyServicesPage() {
 
   const loadRequests = () => {
     setRequestsLoading(true);
+    // Merges every company this admin owns — each row carries its own
+    // company name (see the request card below), so nothing needs picking.
     companyServiceService.requests()
       .then(res => { setRequests(res.requests); setNewCount(res.new_count); })
       .catch(err => toast.error(errText(err, 'Failed to load requests')))
@@ -344,6 +347,9 @@ export default function CompanyServicesPage() {
                               {r.intent_label}
                             </span>
                             <span style={{ padding: '2px 9px', borderRadius: 20, fontSize: 10.5, fontWeight: 700, ...st }}>{st.label}</span>
+                            <span style={{ padding: '2px 9px', borderRadius: 20, background: '#ecfdf5', color: '#059669', fontSize: 10.5, fontWeight: 700 }}>
+                              {r.company?.name ?? 'Unknown company'}
+                            </span>
                           </div>
                           <div style={{ fontSize: 12.5, color: '#64748b', marginTop: 3 }}>
                             {r.client?.name ?? 'Unknown client'}
@@ -510,6 +516,30 @@ export default function CompanyServicesPage() {
                             {s.starting_price !== null && (
                               <div style={{ fontSize: 12, color: '#059669', fontWeight: 600, marginTop: 4 }}>
                                 From {data?.currency} {s.starting_price.toLocaleString()}
+                              </div>
+                            )}
+                            {s.clients_count > 0 && (
+                              <div style={{ marginTop: 6 }}>
+                                <button
+                                  onClick={() => setExpandedClients(prev => ({ ...prev, [keyOf(s)]: !prev[keyOf(s)] }))}
+                                  style={{
+                                    background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                    fontSize: 11.5, fontWeight: 600, color: '#2563eb',
+                                  }}
+                                >
+                                  Used by {s.clients_count} client{s.clients_count === 1 ? '' : 's'}
+                                  {expandedClients[keyOf(s)] ? ' ▲' : ' ▼'}
+                                </button>
+                                {expandedClients[keyOf(s)] && (
+                                  <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    {s.clients.map(c => (
+                                      <div key={c.client_id} style={{ fontSize: 11.5, color: '#475569' }}>
+                                        {c.client_name}
+                                        {c.company_name && <span style={{ color: '#94a3b8' }}> · {c.company_name}</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </>

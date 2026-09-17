@@ -1,4 +1,9 @@
 import api from '@/lib/axios';
+// One receipt shape across the whole app — the Admin client tab, both
+// Compliance guards and the Client Portal all read the same card.
+import type { InvoiceReceipt } from '@/lib/services/adminClientService';
+
+export type { InvoiceReceipt };
 
 export type ComplianceCaseStatus = 'not_started' | 'pending' | 'under_review' | 'compliant' | 'on_hold' | 'rejected';
 export type ComplianceDocumentStatus = 'pending_review' | 'approved' | 'rejected' | 'resubmission_requested' | 'expired';
@@ -139,6 +144,9 @@ export interface ComplianceCaseListItem {
   // Client Attachments count — files the client themselves sent in the
   // project's chat.
   client_attachments_count?: number;
+  // Payment receipts billed under this project — counted separately from
+  // chat attachments so each number stays honest about what it counts.
+  client_receipts_count?: number;
   // Invoices count.
   invoices_count?: number;
   // Final Delivery submissions count.
@@ -602,6 +610,21 @@ export const adminComplianceService = {
     clientAttachments: async (projectId: number): Promise<ComplianceChatMessage[]> => {
       const res = await api.get(`/admin/compliance/projects/${projectId}/client-attachments`);
       return res.data.data;
+    },
+    // The other half of Client Files: receipts for what the client actually
+    // paid on this project's invoices. Same card shape the Admin client tab
+    // gets — App\Services\PaymentReceiptService::card() builds both.
+    clientReceipts: async (projectId: number): Promise<InvoiceReceipt[]> => {
+      const res = await api.get(`/admin/compliance/projects/${projectId}/client-receipts`);
+      return res.data.data;
+    },
+    // Fetched through axios, not pointed at directly: receipts live on the
+    // private disk behind an authenticated endpoint and an <img src> carries
+    // no bearer token. Re-typed so the browser is told exactly what it is.
+    // Callers own the returned URL and must revokeObjectURL it.
+    clientReceiptImageUrl: async (endpoint: string): Promise<string> => {
+      const res = await api.get(endpoint, { responseType: 'blob' });
+      return URL.createObjectURL(new Blob([res.data], { type: 'image/svg+xml' }));
     },
     clientAttachmentDownload: async (messageId: number, fileName: string): Promise<void> => {
       const res = await api.get(`/admin/compliance/client-attachments/${messageId}/download`, { responseType: 'blob' });

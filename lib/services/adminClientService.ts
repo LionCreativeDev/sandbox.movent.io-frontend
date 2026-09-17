@@ -20,6 +20,48 @@ export interface ClientPayload {
 
 export interface ClientCompany { id: number; name: string; currency: string; }
 
+/**
+ * A generated receipt for one confirmed payment of this client's.
+ *
+ * Every figure is read live off the invoice and payment rows server-side (the
+ * same facts the receipt image itself is rendered from), so a card can never
+ * describe a payment differently from the receipt it shows.
+ */
+export interface InvoiceReceipt {
+  id: number;
+  invoice_id: number;
+  invoice_number: string;
+  invoice_status: string;
+  invoice_date: string | null;
+  due_date: string | null;
+  currency: string | null;
+  invoice_amount: number;
+  /** This payment. `total_paid` is everything confirmed against the invoice. */
+  paid_amount: number;
+  total_paid: number;
+  balance_due: number;
+  payment_id: number;
+  payment_status: string;
+  payment_date: string | null;
+  receipt_number: string | null;
+  method: string | null;
+  gateway: string | null;
+  /** The gateway's own transaction reference, when the gateway gave one. */
+  reference: string | null;
+  /** Set only when the gateway was charged in a currency other than the invoice's. */
+  converted: string | null;
+  brand_name: string | null;
+  company_name: string | null;
+  is_brand: boolean;
+  client_name: string | null;
+  client_company: string | null;
+  /** API-relative path to the receipt image. Authenticated — no public URL exists. */
+  image_endpoint: string;
+  document_id: number | null;
+  file_name: string | null;
+  generated_at: string;
+}
+
 export const adminClientService = {
   companies: async (): Promise<ClientCompany[]> => {
     const res = await api.get('/admin/companies');
@@ -84,6 +126,24 @@ export const adminClientService = {
   transfer: async (id: number, toUserId: number, reason?: string): Promise<Client> => {
     const res = await api.post(`/admin/clients/${id}/transfer`, { to_user_id: toUserId, reason: reason || null });
     return res.data.data;
+  },
+
+  // Receipts for this client's confirmed payments — the Invoice Receipts tab.
+  invoiceReceipts: async (id: number): Promise<InvoiceReceipt[]> => {
+    const res = await api.get(`/admin/clients/${id}/invoice-receipts`);
+    return res.data.data.receipts;
+  },
+
+  // The receipt image, as an object URL for an <img>. Fetched through axios
+  // rather than pointed at directly because receipts live on the private disk
+  // behind an authenticated endpoint — an <img src> carries no bearer token.
+  // Callers own the returned URL and must revokeObjectURL it on unmount.
+  receiptImageUrl: async (endpoint: string): Promise<string> => {
+    const res = await api.get(endpoint, { responseType: 'blob' });
+    // Re-typed rather than used as received: the browser renders an <img> by
+    // the blob's own type, so stating it here means the thumbnail cannot go
+    // blank because of what a proxy or the file server put on Content-Type.
+    return URL.createObjectURL(new Blob([res.data], { type: 'image/svg+xml' }));
   },
 
   // Picker list for the Transfer Client modal — active Sellers only.

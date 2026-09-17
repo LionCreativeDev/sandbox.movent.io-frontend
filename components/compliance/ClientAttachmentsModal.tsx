@@ -2,12 +2,16 @@
 import { useEffect, useState } from "react";
 import { userComplianceService, ComplianceChatMessage } from "@/lib/services/userComplianceService";
 import { fmtDate } from "@/components/compliance/shared";
+import ReceiptFilesSection from "@/components/ui/ReceiptFilesSection";
 import { can } from "@/lib/auth";
 import toast from "react-hot-toast";
 
-// Popup shown from the Project Compliance Listing's "Client Attachments"
-// column — files the CLIENT themselves sent in the project's chat, not
-// anything staff uploaded. Read-only besides Download, same as
+// Popup shown from the Project Compliance Listing's "Client Files" column.
+// Two kinds of client-originated record, in one place:
+//   1. files the CLIENT themselves sent in the project's chat (not anything
+//      staff uploaded), and
+//   2. the payment receipts generated when their invoices were paid.
+// Read-only besides Download, same as
 // TaskAttachmentsModal.tsx/ProjectAttachmentsModal.tsx.
 export default function ClientAttachmentsModal({
     projectId,
@@ -62,6 +66,12 @@ export default function ClientAttachmentsModal({
                 </div>
 
                 <div style={{ padding: "14px 20px", overflowY: "auto", flex: 1 }}>
+                    <div style={{
+                        fontSize: 11, fontWeight: 700, letterSpacing: 0.6, textTransform: "uppercase",
+                        color: "#64748b", marginBottom: 10,
+                    }}>
+                        Files Sent by the Client
+                    </div>
                     {loading ? (
                         <div style={{ padding: 20, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>Loading…</div>
                     ) : attachments.length === 0 ? (
@@ -86,6 +96,23 @@ export default function ClientAttachmentsModal({
                             ))}
                         </div>
                     )}
+
+                    {/* The other half of Client Files: what the client
+                        actually PAID. A receipt is client-originated in the
+                        sense compliance cares about — generated from the
+                        payment itself, not uploaded by anyone — so it belongs
+                        beside the files they sent rather than only under
+                        Invoices.
+
+                        Download follows the same line the attachment list
+                        above already draws: a reviewer without
+                        canDownloadComplianceData may read the record on
+                        screen, but must not take a copy away. */}
+                    <ReceiptFilesSection
+                        load={() => userComplianceService.project.clientReceipts(projectId)}
+                        loadImage={(endpoint) => userComplianceService.project.clientReceiptImageUrl(endpoint)}
+                        downloadable={canDownload}
+                    />
                 </div>
             </div>
         </div>

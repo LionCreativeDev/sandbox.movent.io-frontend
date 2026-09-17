@@ -53,7 +53,7 @@ const CATEGORY_STYLE: Record<string, { icon: IconType; color: string; bg: string
   compliance:    { icon: HiShieldCheck,             color: '#dc2626', bg: '#fef2f2', border: '#fecaca', badge: 'Requires Projects + Invoice' },
   hr:            { icon: HiUsers,                  color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', badge: 'Can be used alone' },
   finance:       { icon: HiBanknotes,               color: '#d97706', bg: '#fffbeb', border: '#fde68a', badge: 'Requires Invoice' },
-  invoice:       { icon: HiDocumentText,           color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', badge: 'Can be used alone' },
+  invoice:       { icon: HiDocumentText,           color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', badge: 'Requires Client' },
 };
 const DEFAULT_STYLE = { icon: HiCube, color: '#475569', bg: '#f8fafc', border: '#e2e8f0', badge: 'Can be used alone' };
 
@@ -62,6 +62,7 @@ const DEPENDENCY_ERRORS: Record<string, string> = {
   client_portal: 'Client module requires Invoice or Project.',
   finance: 'Invoice module is required because Finance depends on invoice and payment data.',
   compliance: 'Compliance requires both the Project and Invoice modules.',
+  invoice: 'Client module is required because Invoice needs a client to bill.',
 };
 
 function requiredDependencyKeys(keys: string[]): string[] {
@@ -72,6 +73,9 @@ function requiredDependencyKeys(keys: string[]): string[] {
   if (keys.includes('compliance')) {
     if (keys.includes('projects') && !deps.includes('projects')) deps.push('projects');
     if (keys.includes('invoice') && !deps.includes('invoice')) deps.push('invoice');
+  }
+  if (keys.includes('invoice') && !deps.includes('client_portal')) {
+    deps.push('client_portal');
   }
   return deps;
 }
@@ -85,6 +89,9 @@ function moduleDependencyErrors(keys: string[]): string[] {
   }
   if (keys.includes('compliance') && (!keys.includes('projects') || !keys.includes('invoice'))) {
     errors.push(DEPENDENCY_ERRORS.compliance);
+  }
+  if (keys.includes('invoice') && !keys.includes('client_portal')) {
+    errors.push(DEPENDENCY_ERRORS.invoice);
   }
   return errors;
 }
@@ -170,6 +177,13 @@ export default function UpgradeModulesPage() {
       toast.error(DEPENDENCY_ERRORS.compliance);
       return;
     }
+    // Client is mandatory once Invoice is active (owned or in this
+    // purchase) — block removing Client from the selection while that holds.
+    if (key === 'client_portal' && selected.includes(key)
+      && (selected.includes('invoice') || owned.includes('invoice'))) {
+      toast.error(DEPENDENCY_ERRORS.invoice);
+      return;
+    }
 
     if (selected.includes(key)) {
       setSelected(selected.filter(k => k !== key));
@@ -186,6 +200,12 @@ export default function UpgradeModulesPage() {
       if (!next.includes('projects') && !owned.includes('projects')) { next.push('projects'); added.push('Project'); }
       if (!next.includes('invoice') && !owned.includes('invoice')) { next.push('invoice'); added.push('Invoice'); }
       if (added.length) toast.success(`${added.join(' and ')} added automatically — required by Compliance.`);
+    }
+    // Invoice always needs Client — cascades whether Invoice was picked
+    // directly or pulled in automatically by Sales/Finance/Compliance above.
+    if (next.includes('invoice') && !next.includes('client_portal') && !owned.includes('client_portal')) {
+      next.push('client_portal');
+      toast.success('Client added automatically — required by Invoice.');
     }
     setSelected(next);
   };

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminProfileService, userProfileService, resolveAvatarUrl } from '@/lib/services/profileService';
 import { getAuthType, getAuthUser, getToken, setAuthData } from '@/lib/auth';
+import api from '@/lib/axios';
 import { Admin, User } from '@/types';
 import { card, inp, lbl } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
@@ -29,6 +30,8 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<Admin | User | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  const [companyName, setCompanyName] = useState('');
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,6 +45,11 @@ export default function ProfilePage() {
     setProfile(p);
     setName(p.name);
     setPhone(p.phone ?? '');
+    if (authType === 'admin') {
+      const dc = [...(((p as Admin).companies) ?? [])].sort((a, b) => a.id - b.id)[0];
+      setCompanyId(dc?.id ?? null);
+      setCompanyName(dc?.name ?? '');
+    }
     // Refresh the cached session so the Navbar/Sidebar reflect the change
     // immediately, without waiting for the 60s background poll. The profile
     // API returns a lightweight self-profile, so merge it into the existing
@@ -63,9 +71,20 @@ export default function ProfilePage() {
   const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { toast.error('Name is required'); return; }
+    if (isAdmin && companyId && !companyName.trim()) { toast.error('Company name is required'); return; }
     setSaving(true);
     try {
       const updated = await svc.update({ name: name.trim(), phone: phone.trim() || null });
+      // Company is a separate entity from the admin's own identity (see
+      // Api\Admin\ProfileController's comment) — persisted through the same
+      // endpoint the Companies section uses, so name uniqueness is enforced
+      // consistently. Merged into `updated` so the Navbar/company list
+      // reflect the new name immediately without a second profile fetch.
+      if (isAdmin && companyId) {
+        const res = await api.put(`/admin/companies/${companyId}`, { name: companyName.trim() });
+        const admin = updated as Admin;
+        admin.companies = (admin.companies ?? []).map(c => c.id === companyId ? { ...c, name: res.data.data.name } : c);
+      }
       applyProfile(updated);
       toast.success('Profile updated');
     } catch (err: unknown) {
@@ -114,9 +133,6 @@ export default function ProfilePage() {
   const avatarUrl = resolveAvatarUrl(profile.avatar_url);
   const initials = name.split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().slice(0, 2);
   const roleLabel = !isAdmin ? (ROLE_TYPE_LABEL[(profile as User).role_type] ?? (profile as User).role_type) : 'Company Admin';
-  const defaultCompany = isAdmin
-    ? [...((profile as Admin).companies ?? [])].sort((a, b) => a.id - b.id)[0]
-    : null;
 
   return (
     <DashboardLayout title="My Profile">
@@ -190,10 +206,14 @@ export default function ProfilePage() {
             {isAdmin ? (
               <div style={{ marginBottom: 18 }}>
                 <label style={lbl}>Company</label>
-                <input
-                  value={defaultCompany?.name || '—'}
-                  disabled style={{ ...inp, background: '#f1f5f9', color: '#94a3b8', cursor: 'not-allowed' }}
-                />
+                {companyId ? (
+                  <input value={companyName} onChange={e => setCompanyName(e.target.value)} style={inp} required />
+                ) : (
+                  <input
+                    value="—" disabled
+                    style={{ ...inp, background: '#f1f5f9', color: '#94a3b8', cursor: 'not-allowed' }}
+                  />
+                )}
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14, marginBottom: 18 }}>

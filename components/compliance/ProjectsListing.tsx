@@ -338,7 +338,12 @@ export default function ProjectsListing({
                                                 <td style={{ padding: "9px 8px" }} onClick={e => e.stopPropagation()}>
                                                     <RowAction
                                                         action="clientFiles"
-                                                        count={c.client_attachments_count ?? 0}
+                                                        // Both kinds of client-originated record the
+                                                        // popup shows: files they sent, plus the
+                                                        // receipts for what they paid. Counting only
+                                                        // the first made a project with receipts but
+                                                        // no chat files read as empty.
+                                                        count={(c.client_attachments_count ?? 0) + (c.client_receipts_count ?? 0)}
                                                         onClick={() => setClientAttachmentsModalProject({ id: c.project.id, name: c.project.name })}
                                                     />
                                                 </td>

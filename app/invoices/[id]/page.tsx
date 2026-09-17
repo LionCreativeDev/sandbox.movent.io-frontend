@@ -288,6 +288,12 @@ export default function InvoiceDetailPage() {
 
   const st = STATUS_STYLE[invoice.status] ?? STATUS_STYLE.draft;
   const outstanding = invoice.total_amount - invoice.paid_amount;
+  // Same "Full Payment Only" policy the server enforces in
+  // Api\Admin\PaymentController::store() — reflected here so the field
+  // itself refuses a partial amount instead of the admin finding out only
+  // after submitting.
+  const requiresFullPayment = !!invoice.requires_full_payment;
+  const minPayAmount = requiresFullPayment ? outstanding : 0.01;
   const canEdit   = invoice.status === 'draft' || invoice.status === 'sent';
   const canSend   = invoice.status === 'draft';
   const canCancel = invoice.status !== 'paid' && invoice.status !== 'cancelled';
@@ -360,7 +366,13 @@ export default function InvoiceDetailPage() {
                 </button>
               )}
               {!isSubUser && canPay && (
-                <button onClick={() => setShowPayForm(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 16px', borderRadius: 7, border: 'none', background: 'linear-gradient(135deg, #059669, #10b981)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                <button onClick={() => {
+                  // Full Payment Only: nothing else is a valid amount, so
+                  // prefill it rather than making the admin type the exact
+                  // outstanding figure themselves.
+                  if (!showPayForm && requiresFullPayment) setPayAmount(outstanding.toFixed(2));
+                  setShowPayForm(p => !p);
+                }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 16px', borderRadius: 7, border: 'none', background: 'linear-gradient(135deg, #059669, #10b981)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   <HiPlusCircle size={14} /> Record Payment
                 </button>
               )}
@@ -556,11 +568,24 @@ export default function InvoiceDetailPage() {
           <div style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: 12, padding: 22, marginBottom: 16 }}>
             <h4 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 700, color: '#14532d' }}>Record Payment — Outstanding: {fmt(outstanding)}</h4>
             {payError && <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fef2f2', borderRadius: 7, color: '#dc2626', fontSize: 13 }}>{payError}</div>}
+            {requiresFullPayment && (
+              <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 7, color: '#92400e', fontSize: 12.5 }}>
+                This company&apos;s Payment Policy is Full Payment Only — part payments aren&apos;t accepted, so the amount is fixed at the full outstanding balance.
+              </div>
+            )}
             <form onSubmit={handleRecordPayment}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 12 }}>
                 <div>
                   <label style={{ ...lbl, color: '#166534' }}>Amount *</label>
-                  <input type="number" min={0.01} max={outstanding} step="0.01" required style={{ ...({ ...{}, ...{ border: '1.5px solid #86efac' }, background: '#fff' } as React.CSSProperties), width: '100%', padding: '9px 12px', borderRadius: 7, fontSize: 13, outline: 'none', boxSizing: 'border-box' as const }} value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder={`Max ${outstanding}`} />
+                  <input
+                    type="number" min={minPayAmount} max={outstanding} step="0.01" required readOnly={requiresFullPayment}
+                    style={{
+                      ...({ ...{}, ...{ border: '1.5px solid #86efac' }, background: requiresFullPayment ? '#f0fdf4' : '#fff' } as React.CSSProperties),
+                      width: '100%', padding: '9px 12px', borderRadius: 7, fontSize: 13, outline: 'none', boxSizing: 'border-box' as const,
+                      cursor: requiresFullPayment ? 'not-allowed' : 'text',
+                    }}
+                    value={payAmount} onChange={e => setPayAmount(e.target.value)} placeholder={`Max ${outstanding}`}
+                  />
                 </div>
                 <div>
                   <label style={{ ...lbl, color: '#166534' }}>Method</label>

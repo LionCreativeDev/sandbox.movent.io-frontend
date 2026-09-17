@@ -23,6 +23,11 @@ export interface CompanyServiceRow {
   display_order: number;
   is_custom: boolean;
   catalog_default: { name: string; description: string } | null;
+  // Clients actually delivered this service (via a Project tagged with it,
+  // not just an inquiry) — always [] for a catalogue placeholder (id: null),
+  // since nothing can be tagged with a service that has no row yet.
+  clients: { client_id: number; client_name: string; company_id: number | null; company_name: string | null }[];
+  clients_count: number;
 }
 
 export interface CompanyServiceIndex {
@@ -102,6 +107,7 @@ const reorder = async (order: number[], companyId?: number): Promise<void> => {
 export interface ServiceRequestRow {
   id: number;
   client: { id: number; name: string; email: string | null } | null;
+  company: { id: number; name: string } | null;
   service_name: string;
   intent: 'quote' | 'new_project' | 'consultation';
   intent_label: string;
@@ -112,8 +118,11 @@ export interface ServiceRequestRow {
   created_at: string;
 }
 
-const requests = async (status?: string): Promise<{ requests: ServiceRequestRow[]; new_count: number }> => {
-  const res = await api.get('/admin/service-requests', { params: status ? { status } : {} });
+const requests = async (status?: string, companyId?: number): Promise<{ requests: ServiceRequestRow[]; new_count: number }> => {
+  const params: Record<string, string | number> = {};
+  if (status) params.status = status;
+  if (companyId) params.company_id = companyId;
+  const res = await api.get('/admin/service-requests', { params });
   return res.data.data;
 };
 

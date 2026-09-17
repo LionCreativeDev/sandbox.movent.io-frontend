@@ -31,6 +31,8 @@ export interface ProjectInvoice {
   id: number;
   project_id?: number | null;
   invoice_number: string;
+  subtotal: number;
+  tax_amount: number;
   total_amount: number;
   paid_amount: number;
   status: string;
@@ -115,7 +117,7 @@ export interface Project {
   // originating invoice). Only present when the viewer holds
   // canManageProjectInvoices (Company Admin always sees it).
   invoices?: ProjectInvoice[];
-  billing_summary?: { total_invoiced: number; total_paid: number; outstanding: number };
+  billing_summary?: { total_subtotal: number; total_tax: number; total_invoiced: number; total_paid: number; outstanding: number };
   // Relation keys — Eloquent snake_cases relation method names when
   // serializing (projectManager() -> project_manager, teamMembers() ->
   // team_members). The API never returns the camelCase form.

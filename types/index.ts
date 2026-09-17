@@ -340,6 +340,11 @@ export interface Invoice {
     progress: number;
     project_manager?: { id: number; name: string } | null;
   }[];
+  // True under a "Full Payment Only" Payment Policy (Settings > Deal
+  // Workflow) — the Record Payment form uses this to require the full
+  // outstanding balance instead of allowing any partial amount. Only present
+  // on Api\Admin\InvoiceController::show()'s response.
+  requires_full_payment?: boolean;
 }
 
 export interface ApiResponse<T> {

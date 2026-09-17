@@ -939,6 +939,14 @@ export default function UserProjectDetailPage() {
     const projectInvoices = (project.invoices ?? []).filter(
         (inv) => inv.project_id === project.id,
     );
+    const projectTotalSubtotal = projectInvoices.reduce(
+        (sum, inv) => sum + Number(inv.subtotal || 0),
+        0,
+    );
+    const projectTotalTax = projectInvoices.reduce(
+        (sum, inv) => sum + Number(inv.tax_amount || 0),
+        0,
+    );
     const projectTotalInvoiced = projectInvoices.reduce(
         (sum, inv) => sum + Number(inv.total_amount || 0),
         0,
@@ -1830,6 +1838,56 @@ export default function UserProjectDetailPage() {
                                             textTransform: "uppercase",
                                         }}
                                     >
+                                        Subtotal
+                                    </div>
+                                    <div
+                                        style={{
+                                            fontSize: 15,
+                                            fontWeight: 700,
+                                            color: "#0f172a",
+                                            marginTop: 4,
+                                        }}
+                                    >
+                                        {projectTotalSubtotal.toLocaleString(
+                                            "en-US",
+                                            { minimumFractionDigits: 2 },
+                                        )}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div
+                                        style={{
+                                            fontSize: 11,
+                                            color: "#94a3b8",
+                                            fontWeight: 600,
+                                            textTransform: "uppercase",
+                                        }}
+                                    >
+                                        Tax
+                                    </div>
+                                    <div
+                                        style={{
+                                            fontSize: 15,
+                                            fontWeight: 700,
+                                            color: "#0f172a",
+                                            marginTop: 4,
+                                        }}
+                                    >
+                                        {projectTotalTax.toLocaleString(
+                                            "en-US",
+                                            { minimumFractionDigits: 2 },
+                                        )}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div
+                                        style={{
+                                            fontSize: 11,
+                                            color: "#94a3b8",
+                                            fontWeight: 600,
+                                            textTransform: "uppercase",
+                                        }}
+                                    >
                                         Total Invoiced
                                     </div>
                                     <div
@@ -1976,6 +2034,25 @@ export default function UserProjectDetailPage() {
                                                     {
                                                         minimumFractionDigits: 2,
                                                     },
+                                                )}
+                                                {inv.tax_amount > 0 && (
+                                                    <div
+                                                        style={{
+                                                            fontSize: 11,
+                                                            color: "#94a3b8",
+                                                            marginTop: 2,
+                                                        }}
+                                                    >
+                                                        {inv.subtotal.toLocaleString(
+                                                            "en-US",
+                                                            { minimumFractionDigits: 2 },
+                                                        )}{" "}
+                                                        + tax{" "}
+                                                        {inv.tax_amount.toLocaleString(
+                                                            "en-US",
+                                                            { minimumFractionDigits: 2 },
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
                                             <td style={{ padding: "9px 10px" }}>
