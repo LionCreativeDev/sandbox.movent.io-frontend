@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import {
   HiCheckCircle,
   HiOutlineTrash,
@@ -29,7 +28,27 @@ const INK = "#14284a"; // message text
 const LINE = "#dbe7f8"; // hairlines on the blue surface
 const NAVY = "#0aa473"; // client avatar
 
-type Bubble =
+/**
+ * How close to the bottom still counts as "reading the latest".
+ *
+ * Generous enough to survive the sub-pixel rounding a smooth scroll lands on,
+ * tight enough that someone who has genuinely scrolled up to re-read an invoice
+ * is not dragged back down.
+ */
+const NEAR_BOTTOM_PX = 80;
+
+/**
+ * Every bubble carries its own id.
+ *
+ * Not the array index: bubbles are REMOVED from the middle of the thread (the
+ * "Please confirm the payment" ask retires once the payment lands), which
+ * shifts every index after it. With index keys React then matches the wrong
+ * old node to the wrong new bubble and repaints the tail of the conversation —
+ * the flicker where messages appeared to jump or briefly show the wrong text.
+ */
+type Bubble = { id: number } & BubbleBody;
+
+type BubbleBody =
   // `tag` marks a bubble the conversation may need to find again later.
   // "confirm-prompt" is the "Please confirm the payment" ask: once the payment
   // actually goes through, that line is stale and misleading, so it is removed
@@ -72,15 +91,32 @@ export default function PaymentAssistantPage() {
   // setState in the effect body for the compiler lint to object to.
   const [thinking, setThinking] = useState(true);
   const [unpaid, setUnpaid] = useState<AssistantInvoice[] | null>(null);
-  const [gateways, setGateways] = useState<
-    { gateway: string; label?: string }[] | null
-  >(null);
+  const [needsPaymentMethod, setNeedsPaymentMethod] = useState(false);
   // Only for the avatar initials — read once on mount so this component never
   // touches storage during render.
   const [clientUser, setClientUser] = useState<{ name?: string } | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  // The conversation's own scroll container (.pa-thread). All auto-scrolling
+  // happens on this element and nowhere else — the page itself is never moved.
+  const threadRef = useRef<HTMLDivElement>(null);
+  // True while the client is reading the newest messages. Starts true: an
+  // empty thread is already at its bottom.
+  const pinnedToBottomRef = useRef(true);
+  // What the thread held on the previous render, so the effect below can tell
+  // an addition from any other state change.
+  const threadContentRef = useRef({
+    bubbles: 0,
+    unpaid: false,
+    needsPaymentMethod: false,
+    thinking: false,
+  });
+  // Opened once per mount — see the note in the mount effect below.
+  const openedRef = useRef(false);
 
-  const say = (b: Bubble) => setBubbles((prev) => [...prev, b]);
+  // Monotonic, never reused — so a bubble keeps the same key for its whole
+  // life even as others are added or removed around it.
+  const nextBubbleId = useRef(0);
+  const say = (b: BubbleBody) =>
+    setBubbles((prev) => [...prev, { ...b, id: ++nextBubbleId.current }]);
 
   /** Apply a server response: its message, and its invoice card when one is in view. */
   const apply = (next: AssistantState, showCard = true) => {
@@ -112,6 +148,13 @@ export default function PaymentAssistantPage() {
       setClientUser(getClientUser() as { name?: string } | null),
     );
 
+    // React StrictMode runs every effect twice in development. Without this
+    // guard the assistant opened TWICE on load: two GET requests (two audit
+    // rows), and the welcome message rendered twice — the duplicate messages
+    // and repeated API calls this page was showing.
+    if (openedRef.current) return;
+    openedRef.current = true;
+
     clientService.assistant
       .open()
       .then((s) => apply(s))
@@ -125,15 +168,74 @@ export default function PaymentAssistantPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Keep the thread following the conversation — the THREAD, not the page.
+   *
+   * This used to be `endRef.scrollIntoView()`, which was the bug: scrollIntoView
+   * scrolls EVERY scrollable ancestor, so alongside the thread it also scrolled
+   * the document to bring that element into the viewport. The whole page jumped.
+   * `el.scrollTo()` moves only the element it is called on.
+   *
+   * It also fired on any of [bubbles, unpaid, panels, thinking] changing —
+   * and run() resets panels on every request — so a single message triggered
+   * three or four competing smooth page-scrolls. Now it fires
+   * only when the thread's content actually GREW, and never when the typing
+   * indicator disappears or a panel closes.
+   *
+   * And it respects the reader: if the client has scrolled up to re-read
+   * something, nothing drags them back down.
+   */
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [bubbles, unpaid, gateways, thinking]);
+    const el = threadRef.current;
+    if (!el) return;
+
+    const prev = threadContentRef.current;
+    const now = {
+      bubbles: bubbles.length,
+      unpaid: unpaid !== null,
+      needsPaymentMethod,
+      thinking,
+    };
+    threadContentRef.current = now;
+
+    // Each trigger is a real addition to the thread, never a generic state
+    // change: a message arrived, a panel opened, or the assistant started
+    // composing. A panel closing or the dots vanishing is not one of them.
+    const grew =
+      now.bubbles > prev.bubbles ||
+      (now.unpaid && !prev.unpaid) ||
+      (now.needsPaymentMethod && !prev.needsPaymentMethod) ||
+      (now.thinking && !prev.thinking);
+
+    if (!grew || !pinnedToBottomRef.current) return;
+
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [bubbles, unpaid, needsPaymentMethod, thinking]);
+
+  /**
+   * Whether the client is still reading the newest part of the conversation.
+   *
+   * Held in a ref and updated from the thread's own scroll event: it must not
+   * re-render the thread (a state update per scroll frame would be its own
+   * source of jank), and the effect above only ever reads it.
+   *
+   * Content growing does not fire a scroll event, so the value the effect reads
+   * is the one from BEFORE the new message was added — which is exactly the
+   * question being asked: was the client at the bottom when it arrived?
+   */
+  const onThreadScroll = () => {
+    const el = threadRef.current;
+    if (!el) return;
+
+    pinnedToBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+  };
 
   const run = async (fn: () => Promise<AssistantState>, showCard = true) => {
     setBusy(true);
     setThinking(true);
     setUnpaid(null);
-    setGateways(null);
+    setNeedsPaymentMethod(false);
     try {
       apply(await fn(), showCard);
     } catch (err: unknown) {
@@ -183,7 +285,7 @@ export default function PaymentAssistantPage() {
     setThinking(true);
     setBubbles([]);
     setUnpaid(null);
-    setGateways(null);
+    setNeedsPaymentMethod(false);
     try {
       apply(await clientService.assistant.clearHistory());
     } catch {
@@ -200,7 +302,7 @@ export default function PaymentAssistantPage() {
   const showUnpaid = async () => {
     setBusy(true);
     setThinking(true);
-    setGateways(null);
+    setNeedsPaymentMethod(false);
     try {
       const res = await clientService.assistant.unpaid();
       setUnpaid(res.invoices);
@@ -218,8 +320,51 @@ export default function PaymentAssistantPage() {
   };
 
   /**
-   * Confirm → re-validate server-side → then the EXISTING checkout.
-   * No gateway logic lives here; this only lists what that invoice allows.
+   * Opens hosted setup for a saved payment method. This stores a card token for
+   * later saved-card payment; it does not pay the invoice.
+   */
+  const startPaymentMethodSetup = async () => {
+    const companyId = state?.company?.id;
+    if (!companyId) return;
+    setBusy(true);
+    try {
+      const res = await clientService.paymentMethods.startSetup(companyId);
+
+      try {
+        sessionStorage.setItem("pm_company_id", String(companyId));
+      } catch {
+        /* private mode */
+      }
+
+      if (res.navigation === "redirect") {
+        window.location.assign(res.action);
+        return;
+      }
+
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = res.action;
+      Object.entries(res.fields ?? {}).forEach(([k, v]) => {
+        const i = document.createElement("input");
+        i.type = "hidden";
+        i.name = k;
+        i.value = String(v);
+        form.appendChild(i);
+      });
+      document.body.appendChild(form);
+      form.submit();
+    } catch (err: unknown) {
+      const ex = err as { response?: { data?: { message?: string } } };
+      toast.error(
+        ex.response?.data?.message ||
+          "Could not open the payment method setup page.",
+      );
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Confirm → re-validate server-side → charge saved card or ask for one.
    */
   const confirm = async () => {
     setBusy(true);
@@ -236,22 +381,7 @@ export default function PaymentAssistantPage() {
       // payWithSaved() below, a separate press.
       if (next.saved_methods && next.saved_methods.length > 0) return;
 
-      const data = await clientService.invoiceGateways(
-        next.checkout_invoice_id,
-      );
-      const list = (data?.gateways ?? []) as {
-        gateway: string;
-        label?: string;
-      }[];
-
-      if (list.length === 0) {
-        say({
-          who: "bot",
-          text: "No online payment method is available for this invoice. Please contact your account manager.",
-        });
-        return;
-      }
-      setGateways(list);
+      setNeedsPaymentMethod(true);
     } catch (err: unknown) {
       const ex = err as { response?: { data?: { message?: string } } };
       say({
@@ -279,7 +409,7 @@ export default function PaymentAssistantPage() {
         // payment" ask above it is now false, so it is retired rather than
         // left on screen contradicting the result.
         setState(next);
-        setGateways(null);
+        setNeedsPaymentMethod(false);
         setBubbles((prev) =>
           prev.filter((b) => !("tag" in b && b.tag === "confirm-prompt")),
         );
@@ -305,75 +435,6 @@ export default function PaymentAssistantPage() {
       });
     } finally {
       setThinking(false);
-      setBusy(false);
-    }
-  };
-
-  /** Fall back to the hosted page — "use a different card". */
-  const payAnotherWay = async () => {
-    if (!state?.checkout_invoice_id) return;
-    setBusy(true);
-    try {
-      const data = await clientService.invoiceGateways(
-        state.checkout_invoice_id,
-      );
-      const list = (data?.gateways ?? []) as {
-        gateway: string;
-        label?: string;
-      }[];
-      if (list.length === 0) {
-        say({
-          who: "bot",
-          text: "No other payment method is available for this invoice.",
-        });
-        return;
-      }
-      setState((s) => (s ? { ...s, saved_methods: [] } : s));
-      setGateways(list);
-    } catch {
-      say({ who: "bot", text: "Could not load the other payment options." });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /** Hand the browser to the gateway's own hosted page. */
-  const pay = async (gateway: string) => {
-    if (!state?.checkout_invoice_id) return;
-    setBusy(true);
-    try {
-      const res = await clientService.initiateGatewayCheckout(
-        state.checkout_invoice_id,
-        gateway,
-      );
-
-      if (res.navigation === "redirect") {
-        // assign() rather than setting location.href — the compiler lint
-        // rejects assigning to that property, and this is the same navigation.
-        window.location.assign(res.action);
-        return;
-      }
-
-      // POST-form gateways (e.g. Accept Hosted) — build and submit it.
-      const form = document.createElement("form");
-      form.method = "POST";
-      form.action = res.action;
-      Object.entries(res.fields ?? {}).forEach(([k, v]) => {
-        const i = document.createElement("input");
-        i.type = "hidden";
-        i.name = k;
-        i.value = String(v);
-        form.appendChild(i);
-      });
-      document.body.appendChild(form);
-      form.submit();
-    } catch (err: unknown) {
-      const ex = err as { response?: { data?: { message?: string } } };
-      // Never surface a raw gateway error (spec §13).
-      toast.error(
-        ex.response?.data?.message ||
-          "Your payment could not be started. Please try another method.",
-      );
       setBusy(false);
     }
   };
@@ -464,11 +525,11 @@ export default function PaymentAssistantPage() {
 
       <div className="pa-shell">
         {/* Conversation */}
-        <div className="pa-thread">
-          {bubbles.map((b, i) =>
+        <div className="pa-thread" ref={threadRef} onScroll={onThreadScroll}>
+          {bubbles.map((b) =>
             "card" in b ? (
               <div
-                key={i}
+                key={b.id}
                 style={{
                   display: "flex",
                   gap: 12,
@@ -522,7 +583,7 @@ export default function PaymentAssistantPage() {
               // same tint; who is speaking is shown by side and avatar rather
               // than by two competing colours.
               <div
-                key={i}
+                key={b.id}
                 style={{
                   display: "flex",
                   gap: 12,
@@ -704,8 +765,12 @@ export default function PaymentAssistantPage() {
                     Confirm Payment · {m.label}
                   </button>
                 ))}
-                <button disabled={busy} onClick={payAnotherWay} style={btn()}>
-                  Use a different card
+                <button
+                  disabled={busy}
+                  onClick={startPaymentMethodSetup}
+                  style={btn()}
+                >
+                  Add or change payment method
                 </button>
               </div>
               <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 10 }}>
@@ -715,8 +780,8 @@ export default function PaymentAssistantPage() {
             </div>
           )}
 
-          {/* Gateway choice — the existing per-invoice options */}
-          {gateways && gateways.length > 0 && (
+          {/* Payment method setup — no direct one-off checkout here. */}
+          {needsPaymentMethod && (
             <div style={{ ...card }}>
               <div
                 style={{
@@ -726,39 +791,35 @@ export default function PaymentAssistantPage() {
                   marginBottom: 4,
                 }}
               >
-                PAY SECURELY
+                PAYMENT METHOD REQUIRED
               </div>
               <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
-                You&apos;ll complete payment on your provider&apos;s secure
-                page.
+                {state?.invoice && (
+                  <>
+                    Paying{" "}
+                    <strong style={{ color: INK }}>
+                      {money(
+                        state.amount_due ?? state.invoice.amount_due,
+                        state.invoice.currency,
+                      )}
+                    </strong>{" "}
+                    for invoice #{state.invoice.invoice_number}.{" "}
+                  </>
+                )}
+                Add a payment method first. After it is saved, return here and
+                pay with the saved card.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {gateways.map((g) => (
-                  <button
-                    key={g.gateway}
-                    disabled={busy}
-                    onClick={() => pay(g.gateway)}
-                    style={btn(true)}
-                  >
-                    {g.label || g.gateway}
-                  </button>
-                ))}
-              </div>
-              {/* Spec §10: no card on file yet, so offer to add one. Paying
-                  above also saves the card, but a client who would rather set
-                  it up first should not have to discover that. */}
-              <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
-                Want to save a card for next time?{" "}
-                <Link
-                  href="/client/payment-methods"
-                  style={{
-                    color: GREEN,
-                    fontWeight: 600,
-                    textDecoration: "none",
-                  }}
+                <button
+                  disabled={busy}
+                  onClick={startPaymentMethodSetup}
+                  style={btn(true)}
                 >
                   Add Payment Method
-                </Link>
+                </button>
+              </div>
+              <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
+                No charge is made while adding a payment method.
               </div>
             </div>
           )}
@@ -803,8 +864,6 @@ export default function PaymentAssistantPage() {
               </div>
             </div>
           )}
-
-          <div ref={endRef} />
         </div>
 
         {/* Actions */}
@@ -905,9 +964,7 @@ export default function PaymentAssistantPage() {
                   competing buttons. Clear History is deliberately the muted
                   one: it is the less common action and undoes what is on
                   screen, so it should not compete with the primary link. */}
-              <div
-                style={{ display: "flex", alignItems: "center", gap: 12 }}
-              >
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <button
                   type="button"
                   disabled={busy}

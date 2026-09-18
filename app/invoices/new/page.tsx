@@ -43,6 +43,11 @@ function defaultGatewaySelection(accounts: GatewayAccountOption[]): number[] {
 
 type CustomerType = 'client' | 'guest';
 type ProjectMode = 'new' | 'existing';
+// Whether this invoice is linked to a project/deal at all. 'project' is the
+// existing flow (untouched) — 'standalone' is a new, plain billing invoice
+// with no project involved, and no payment→project automation afterward
+// (see App\Services\PaymentProjectStartService).
+type InvoiceScope = 'project' | 'standalone';
 
 function NewInvoiceForm() {
   useAdminGuard();
@@ -162,6 +167,13 @@ function NewInvoiceForm() {
   // exist yet.
   const [projectMode, setProjectMode]         = useState<ProjectMode>('new');
   const [projectModuleAvailable, setProjectModuleAvailable] = useState(false);
+  // Only offered when the Projects module is on AND this isn't a deep link
+  // from a Lead (?lead_id=) — that entry point is already, unambiguously,
+  // "for a project" (a Deal being kicked off), so it keeps forcing 'project'
+  // exactly as before rather than asking again. Everywhere else, defaults to
+  // 'project' — the existing behavior — until the admin explicitly picks
+  // "Without Project".
+  const [invoiceScope, setInvoiceScope]       = useState<InvoiceScope>('project');
   const [projects, setProjects]               = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [projectId, setProjectId]             = useState<number | null>(null);
@@ -548,12 +560,29 @@ function NewInvoiceForm() {
   const addItem    = () => setItems(p => [...p, EMPTY_ITEM()]);
   const removeItem = (i: number) => setItems(p => p.filter((_, idx) => idx !== i));
 
+  // Whether the invoice-scope choice ("For a Project" / "Without Project") is
+  // even offered — the Lead deep-link is already unambiguously project-track,
+  // and with the module off there's nothing to choose between (see
+  // effectiveScope below).
+  const canChooseStandalone = projectModuleAvailable && !leadId;
+  // The scope actually in effect, folding in the two cases where the choice
+  // isn't real: the module being off forces 'standalone' (there is no project
+  // flow to offer), and a Lead deep-link forces 'project' (unchanged from
+  // today — it was always project-track before this feature existed).
+  const effectiveScope: InvoiceScope = !projectModuleAvailable
+    ? 'standalone'
+    : leadId
+      ? 'project'
+      : invoiceScope;
+
   // "New Project" normally replaces the manual Line Items list with a single
   // title/amount row — there's no project yet to itemize billing against.
   // Arriving from a won lead is the exception: that lead's own figures are
   // already prefilled into Line Items above, so those stand as the billing
-  // detail and only the project's title/reference are named here.
-  const showLineItems = projectMode === 'existing' || !!leadId;
+  // detail and only the project's title/reference are named here. A
+  // standalone invoice is a plain bill — it always uses the full Line Items
+  // editor, never the single title/amount row.
+  const showLineItems = projectMode === 'existing' || !!leadId || effectiveScope === 'standalone';
 
   const effectiveItems: LineItem[] = showLineItems
     ? items
@@ -610,8 +639,13 @@ function NewInvoiceForm() {
     if (noGatewayConfigured) { setError('Please activate a payment gateway before creating an invoice.'); return null; }
     if (customerType === 'client' && !clientId) { setError('Select a client, or switch to Guest for an external customer'); return null; }
     if (customerType === 'guest' && !guestName.trim()) { setError('Customer name is required for guest invoices'); return null; }
-    if (projectMode === 'existing' && !projectId) { setError('Select an existing project, or switch to New Project'); return null; }
-    if (projectMode === 'new' && !projectTitle.trim()) { setError('Project title is required'); return null; }
+    // Project fields are only ever required in 'project' scope — a
+    // standalone invoice has no project card rendered at all, so nothing
+    // here applies to it.
+    if (effectiveScope === 'project') {
+      if (projectMode === 'existing' && !projectId) { setError('Select an existing project, or switch to New Project'); return null; }
+      if (projectMode === 'new' && !projectTitle.trim()) { setError('Project title is required'); return null; }
+    }
     if (showLineItems) {
       if (items.some(r => !r.description.trim())) { setError('All items need a description'); return null; }
     } else if (!projectAmount || projectAmount <= 0) {
@@ -650,9 +684,11 @@ function NewInvoiceForm() {
             customer_address: guestAddress.trim() || null,
           }
       ),
-      ...(projectMode === 'existing'
-        ? { project_id: projectId }
-        : { project_id: null, project_title: projectTitle.trim(), project_reference: projectReference.trim() || null }
+      ...(effectiveScope === 'standalone'
+        ? { project_id: null, project_title: null, project_reference: null, is_standalone: true }
+        : projectMode === 'existing'
+          ? { project_id: projectId }
+          : { project_id: null, project_title: projectTitle.trim(), project_reference: projectReference.trim() || null }
       ),
     };
   };
@@ -771,6 +807,29 @@ function NewInvoiceForm() {
       <button
         type="button"
         onClick={() => setProjectMode(mode)}
+        style={{
+          flex: 1, padding: '12px 16px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
+          border: `2px solid ${active ? '#2563eb' : '#e2e8f0'}`,
+          background: active ? '#eff6ff' : '#fafafa',
+          transition: 'border-color .15s, background .15s',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 3 }}>
+          <span style={{ color: active ? '#2563eb' : '#94a3b8' }}>{icon}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: active ? '#1d4ed8' : '#374151' }}>{label}</span>
+          {active && <span style={{ marginLeft: 'auto', width: 16, height: 16, borderRadius: '50%', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 900, flexShrink: 0 }}>✓</span>}
+        </div>
+        <div style={{ fontSize: 11, color: '#94a3b8', paddingLeft: 25 }}>{sub}</div>
+      </button>
+    );
+  };
+
+  const scopeBtn = (mode: InvoiceScope, icon: React.ReactNode, label: string, sub: string): React.ReactNode => {
+    const active = invoiceScope === mode;
+    return (
+      <button
+        type="button"
+        onClick={() => setInvoiceScope(mode)}
         style={{
           flex: 1, padding: '12px 16px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
           border: `2px solid ${active ? '#2563eb' : '#e2e8f0'}`,
@@ -1150,7 +1209,28 @@ function NewInvoiceForm() {
                 </div>
               </div>
 
-              {/* Project card */}
+              {/* Invoice scope toggle — only when the Projects module is on
+                  and this isn't a Lead deep-link (already unambiguously
+                  project-track). Picking "For a Project" reveals the exact
+                  same Project card below, completely unchanged; "Without
+                  Project" hides it entirely and this becomes a plain billing
+                  invoice with no project/deal behind it. */}
+              {canChooseStandalone && (
+                <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden', marginBottom: 16 }}>
+                  <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
+                    <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Invoice Scope</h3>
+                  </div>
+                  <div style={{ padding: 22, display: 'flex', gap: 10 }}>
+                    {scopeBtn('project', <HiFolder size={15} />, 'For a Project', 'Link this invoice to a new or existing project')}
+                    {scopeBtn('standalone', <HiUserCircle size={15} />, 'Without Project', 'A plain billing invoice — no project or deal involved')}
+                  </div>
+                </div>
+              )}
+
+              {/* Project card — untouched: renders exactly as before whenever
+                  the invoice is project-scoped (the default, and the only
+                  option when the module is off or scope can't be chosen). */}
+              {effectiveScope === 'project' && (
               <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden', marginBottom: 16 }}>
                 <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }}>
                   <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Project</h3>
@@ -1280,6 +1360,7 @@ function NewInvoiceForm() {
                   )}
                 </div>
               </div>
+              )}
 
               {/* Line items card */}
               {showLineItems && (

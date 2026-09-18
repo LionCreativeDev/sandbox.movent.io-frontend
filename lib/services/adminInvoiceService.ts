@@ -13,6 +13,11 @@ export interface InvoicePayload {
     project_id?: number | null;
     project_title?: string | null;
     project_reference?: string | null;
+    // Explicitly opts this invoice OUT of the payment→project auto-creation
+    // automation (see App\Services\PaymentProjectStartService) — a plain
+    // billing invoice with no project or deal behind it. Omitted/false for
+    // every existing project-linked flow, which behaves exactly as before.
+    is_standalone?: boolean;
     send_now?: boolean;
     due_date?: string | null;
     currency?: string;
