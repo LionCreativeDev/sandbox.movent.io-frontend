@@ -5,7 +5,7 @@ import { clientService } from '@/lib/services/clientService';
 
 type ReturnState = 'checking' | 'paid' | 'processing' | 'error';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 
 const GATEWAY_LABEL: Record<string, string> = {
   stripe: 'Stripe', paypal: 'PayPal', authorize_net: 'Authorize.net',
@@ -48,10 +48,10 @@ export default function ClientGatewayReturnPage() {
   );
 
   if (state === 'paid') return (
-    <div style={{ maxWidth: 480 }}><div style={{ ...card, background: '#f0fdf4', border: '1.5px solid #86efac' }}>
-      <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#dcfce7', border: '3px solid #86efac', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', fontSize: 28 }}>✅</div>
-      <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#15803d' }}>Payment Successful</h2>
-      <p style={{ margin: '0 0 24px', fontSize: 13, color: '#166534' }}>Your payment via {gatewayLabel} was confirmed. A receipt has been sent to your email.</p>
+    <div style={{ maxWidth: 480 }}><div style={{ ...card, background: '#E9EDF2', border: '1.5px solid #E6E2D9' }}>
+      <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#E9EDF2', border: '3px solid #E6E2D9', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', fontSize: 28 }}>✅</div>
+      <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#15283C' }}>Payment Successful</h2>
+      <p style={{ margin: '0 0 24px', fontSize: 13, color: '#15283C' }}>Your payment via {gatewayLabel} was confirmed. A receipt has been sent to your email.</p>
       <button
         onClick={() => router.push(`/client/invoices/${invoiceId}`)}
         style={{ width: '100%', padding: '12px 0', borderRadius: 9, border: 'none', background: GREEN, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}

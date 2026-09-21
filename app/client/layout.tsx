@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter, usePathname } from 'next/navigation';
 import { isClientAuthenticated, getClientUser, getClientInfo, clientLogout } from '@/lib/clientAuth';
 import ClientSidebar from '@/components/client/ClientSidebar';
@@ -9,6 +10,7 @@ import {
 import clientApi from '@/lib/clientAxios';
 import { clientNotificationService, ClientNotification } from '@/lib/services/clientNotificationService';
 import toast from 'react-hot-toast';
+import { DASHBOARD_THEME } from '@/components/client/dashboardTheme';
 
 // Portal screens reachable WITHOUT a session.
 //
@@ -28,6 +30,20 @@ const PUBLIC_PORTAL_PATHS = [
 ];
 
 const isPublicPortalPath = (pathname: string) => PUBLIC_PORTAL_PATHS.includes(pathname);
+
+// The floating assistant, mounted ONCE here rather than per page.
+//
+// Two things follow from it living in the layout, and both are the point: it
+// is on every portal screen without any page having to know about it, and a
+// route change re-renders `children` underneath it without unmounting it — so
+// the conversation survives navigating from Invoices to Projects mid-flow.
+//
+// Loaded on demand (ssr: false) because it is a client-only, cookie-reading
+// widget nobody needs in the first paint of a dashboard.
+const PortalAssistant = dynamic(
+  () => import('@/components/client/assistant/PortalAssistant'),
+  { ssr: false },
+);
 
 // "3m ago" / "2h ago" / "5d ago" — enough for a portal bell, no date lib needed.
 function timeAgo(iso: string): string {
@@ -128,9 +144,10 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   // from /client/permissions is meaningless on a page reached without a session.
   if (isPublicPortalPath(pathname)) return <>{children}</>;
 
+  // Navy/cream/gold theme applies portal-wide — see dashboardTheme.ts.
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
-      <ClientSidebar />
+    <div style={{ display: 'flex', minHeight: '100vh', background: DASHBOARD_THEME.pageBg }}>
+      <ClientSidebar variant="navy" />
 
       <div style={{ marginLeft: 240, flex: 1, display: 'flex', flexDirection: 'column' }}>
         {/* Top bar */}
@@ -143,7 +160,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           position: 'sticky', top: 0, zIndex: 50,
         }}>
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b' }}>
+            <div style={{ fontWeight: 600, fontSize: 14, color: DASHBOARD_THEME.textPrimary }}>
               {clientInfo?.company_name || 'Client Portal'}
             </div>
           </div>
@@ -176,9 +193,9 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
                   width: 340, maxHeight: 420, overflowY: 'auto', zIndex: 200,
                 }}>
                   <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>Notifications</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: DASHBOARD_THEME.textPrimary }}>Notifications</span>
                     {unreadCount > 0 && (
-                      <button onClick={markAllRead} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: '#10b981', padding: 0 }}>
+                      <button onClick={markAllRead} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: DASHBOARD_THEME.navy, padding: 0 }}>
                         Mark all read
                       </button>
                     )}
@@ -195,7 +212,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
                       style={{
                         padding: '10px 14px', borderBottom: '1px solid #f8fafc',
                         cursor: linkOf(n) ? 'pointer' : 'default',
-                        background: n.is_read ? '#fff' : '#f0fdf4',
+                        background: n.is_read ? '#fff' : DASHBOARD_THEME.badgeBg,
                         display: 'flex', gap: 8, alignItems: 'flex-start',
                       }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -230,15 +247,15 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
                 }}>
                 <div style={{
                   width: 28, height: 28, borderRadius: '50%',
-                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  background: `linear-gradient(135deg, ${DASHBOARD_THEME.navyActive}, ${DASHBOARD_THEME.navy})`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   color: '#fff', fontWeight: 700, fontSize: 12,
                 }}>
                   {user?.name?.[0]?.toUpperCase() ?? 'C'}
                 </div>
                 <div style={{ textAlign: 'left' }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>{user?.name ?? 'Client'}</div>
-                  <div style={{ fontSize: 10, color: '#10b981' }}>Client</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: DASHBOARD_THEME.textPrimary }}>{user?.name ?? 'Client'}</div>
+                  <div style={{ fontSize: 10, color: DASHBOARD_THEME.textSecondary }}>Client</div>
                 </div>
                 <HiChevronDown size={12} color="#94a3b8" />
               </button>
@@ -282,6 +299,10 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           style={{ position: 'fixed', inset: 0, zIndex: 40 }}
         />
       )}
+
+      {/* Sibling of the page content, not part of it — so it is never inside
+          a scroll container or a stacking context that would trap it. */}
+      <PortalAssistant navy />
     </div>
   );
 }

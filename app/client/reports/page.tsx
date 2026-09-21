@@ -4,9 +4,9 @@ import { clientService } from '@/lib/services/clientService';
 import { fmtDateLong as fmtDate } from '@/lib/date';
 import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 const SC: Record<string, string> = {
-  planning: '#2563eb', active: '#10b981', on_hold: '#d97706', completed: '#16a34a', cancelled: '#dc2626',
+  planning: '#2563eb', active: '#081B2D', on_hold: '#d97706', completed: '#16a34a', cancelled: '#dc2626',
 };
 
 export default function ClientReportsPage() {
@@ -52,7 +52,7 @@ export default function ClientReportsPage() {
           <div style={{ display: 'flex', gap: 14, marginBottom: 24, flexWrap: 'wrap' }}>
             {[
               { label: 'Total Projects', val: projData.summary?.total || 0 },
-              { label: 'Active',         val: projData.summary?.active || 0,    color: '#10b981' },
+              { label: 'Active',         val: projData.summary?.active || 0,    color: '#081B2D' },
               { label: 'Completed',      val: projData.summary?.completed || 0, color: '#16a34a' },
               { label: 'On Hold',        val: projData.summary?.on_hold || 0,   color: '#d97706' },
             ].map(({ label, val, color }) => (
@@ -98,7 +98,7 @@ export default function ClientReportsPage() {
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
                 {[
                   { label: 'Total Invoiced', val: `${cs.currency} ${Number(cs.total_invoiced || 0).toLocaleString()}` },
-                  { label: 'Total Paid',     val: `${cs.currency} ${Number(cs.total_paid || 0).toLocaleString()}`,   color: '#10b981' },
+                  { label: 'Total Paid',     val: `${cs.currency} ${Number(cs.total_paid || 0).toLocaleString()}`,   color: '#081B2D' },
                   { label: 'Pending',        val: `${cs.currency} ${Number(cs.total_pending || 0).toLocaleString()}`, color: '#dc2626' },
                 ].map(({ label, val, color }) => (
                   <div key={label} style={{ background: '#fff', borderRadius: 10, padding: '18px 22px', border: '1px solid #e2e8f0', flex: 1, minWidth: 160 }}>

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { clientService, ClientProfile } from '@/lib/services/clientService';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 
 /**
  * The client's own details.
@@ -93,7 +93,7 @@ export default function ClientProfilePage() {
       </p>
 
       {notice && (
-        <div style={{ marginBottom: 18, padding: '10px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 8, color: '#047857', fontSize: 13, fontWeight: 600 }}>
+        <div style={{ marginBottom: 18, padding: '10px 14px', background: '#E9EDF2', border: '1px solid #E6E2D9', borderRadius: 8, color: '#15283C', fontSize: 13, fontWeight: 600 }}>
           {notice}
         </div>
       )}
@@ -194,7 +194,7 @@ export default function ClientProfilePage() {
           disabled={saving}
           style={{
             padding: '10px 22px', borderRadius: 8, border: 'none',
-            background: saving ? '#a7f3d0' : GREEN, color: '#fff',
+            background: saving ? '#203750' : GREEN, color: '#fff',
             fontWeight: 600, fontSize: 14, cursor: saving ? 'not-allowed' : 'pointer',
           }}
         >

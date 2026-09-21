@@ -7,7 +7,7 @@ import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
 const SC: Record<string, { bg: string; color: string }> = {
   sent:           { bg: '#eff6ff', color: '#2563eb' },
   overdue:        { bg: '#fef2f2', color: '#dc2626' },
-  paid:           { bg: '#ecfdf5', color: '#059669' },
+  paid:           { bg: '#E9EDF2', color: '#081B2D' },
   partially_paid: { bg: '#fffbeb', color: '#d97706' },
   cancelled:      { bg: '#f1f5f9', color: '#64748b' },
 };
@@ -48,9 +48,9 @@ export default function ClientInvoicesPage() {
             <button key={s} onClick={() => { setStatus(s); load(s); }} style={{
               padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500, cursor: 'pointer',
               border: '1px solid',
-              borderColor: status === s ? '#10b981' : '#e2e8f0',
-              background: status === s ? '#ecfdf5' : '#fff',
-              color: status === s ? '#10b981' : '#64748b',
+              borderColor: status === s ? '#081B2D' : '#e2e8f0',
+              background: status === s ? '#E9EDF2' : '#fff',
+              color: status === s ? '#081B2D' : '#64748b',
             }}>{s || 'All'}</button>
           ))}
         </div>
@@ -87,8 +87,8 @@ export default function ClientInvoicesPage() {
                     </td>
                     <td style={{ padding: '12px 20px', textAlign: 'right' }}>
                       <Link href={`/client/invoices/${inv.id}`} style={{
-                        fontSize: 12, color: '#10b981', fontWeight: 600, textDecoration: 'none',
-                        padding: '4px 12px', border: '1px solid #a7f3d0', borderRadius: 6,
+                        fontSize: 12, color: '#081B2D', fontWeight: 600, textDecoration: 'none',
+                        padding: '4px 12px', border: '1px solid #E6E2D9', borderRadius: 6,
                       }}>View</Link>
                     </td>
                   </tr>

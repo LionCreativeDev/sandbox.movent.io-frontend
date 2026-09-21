@@ -52,7 +52,7 @@ export default function ClientForgotPasswordPage() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 50%, #f8fafc 100%)',
+      background: 'linear-gradient(135deg, #E9EDF2 0%, #E9EDF2 50%, #f8fafc 100%)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20,
     }}>
@@ -66,7 +66,7 @@ export default function ClientForgotPasswordPage() {
         <div style={{ textAlign: 'center', marginBottom: 30 }}>
           <div style={{
             width: 56, height: 56, borderRadius: 16,
-            background: 'linear-gradient(135deg, #10b981, #059669)',
+            background: 'linear-gradient(135deg, #081B2D, #203750)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             margin: '0 auto 14px',
           }}>
@@ -87,9 +87,9 @@ export default function ClientForgotPasswordPage() {
         {sent ? (
           <>
             <div style={{
-              background: '#ecfdf5', border: '1px solid #a7f3d0',
+              background: '#E9EDF2', border: '1px solid #E6E2D9',
               borderRadius: 8, padding: '14px 16px',
-              color: '#047857', fontSize: 13, lineHeight: 1.6,
+              color: '#15283C', fontSize: 13, lineHeight: 1.6,
             }}>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>Reset link sent</div>
               We&apos;ve emailed a password reset link to <strong>{email}</strong>.
@@ -100,9 +100,9 @@ export default function ClientForgotPasswordPage() {
               onClick={() => { setSent(false); setError(''); }}
               style={{
                 width: '100%', marginTop: 16, padding: '11px',
-                background: '#fff', color: '#10b981',
+                background: '#fff', color: '#081B2D',
                 fontWeight: 600, fontSize: 14,
-                border: '1.5px solid #a7f3d0', borderRadius: 8, cursor: 'pointer',
+                border: '1.5px solid #E6E2D9', borderRadius: 8, cursor: 'pointer',
               }}>
               Send to a different email
             </button>
@@ -131,7 +131,7 @@ export default function ClientForgotPasswordPage() {
                   borderRadius: 8,
                   fontSize: 14, outline: 'none', boxSizing: 'border-box',
                 }}
-                onFocus={e => (e.target.style.borderColor = error ? '#fca5a5' : '#10b981')}
+                onFocus={e => (e.target.style.borderColor = error ? '#fca5a5' : '#081B2D')}
                 onBlur={e => (e.target.style.borderColor = error ? '#fca5a5' : '#e2e8f0')}
               />
 
@@ -149,7 +149,7 @@ export default function ClientForgotPasswordPage() {
               disabled={loading}
               style={{
                 width: '100%', padding: '11px',
-                background: loading ? '#a7f3d0' : '#10b981',
+                background: loading ? '#E6E2D9' : '#081B2D',
                 color: '#fff', fontWeight: 600, fontSize: 14,
                 border: 'none', borderRadius: 8, cursor: loading ? 'not-allowed' : 'pointer',
                 transition: 'background 0.15s',
@@ -160,7 +160,7 @@ export default function ClientForgotPasswordPage() {
         )}
 
         <div style={{ textAlign: 'center', marginTop: 20 }}>
-          <Link href="/client/login" style={{ fontSize: 13, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}>
+          <Link href="/client/login" style={{ fontSize: 13, color: '#081B2D', fontWeight: 600, textDecoration: 'none' }}>
             ← Back to Sign In
           </Link>
         </div>

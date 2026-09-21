@@ -1,0 +1,57 @@
+<svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ecomBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdf8ef"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#ecomBg)"/>
+  <circle cx="60" cy="90" r="80" fill="#efe7d3" opacity="0.6"/>
+  <circle cx="570" cy="300" r="90" fill="#efe7d3" opacity="0.5"/>
+
+  <!-- browser window -->
+  <rect x="140" y="44" width="360" height="234" rx="12" fill="#ffffff" stroke="#a7f3d0" stroke-width="2"/>
+  <rect x="140" y="44" width="360" height="26" rx="12" fill="#ecfdf5"/>
+  <circle cx="158" cy="57" r="4" fill="#34d399"/>
+  <circle cx="172" cy="57" r="4" fill="#6ee7b7"/>
+  <circle cx="186" cy="57" r="4" fill="#a7f3d0"/>
+
+  <!-- product grid -->
+  <g>
+    <rect x="160" y="88" width="90" height="76" rx="6" fill="#f0fdf4" stroke="#bbf7d0"/>
+    <rect x="172" y="98" width="66" height="42" rx="4" fill="#a7f3d0"/>
+    <rect x="172" y="146" width="40" height="7" rx="3" fill="#6ee7b7"/>
+    <rect x="220" y="146" width="20" height="7" rx="3" fill="#059669"/>
+
+    <rect x="260" y="88" width="90" height="76" rx="6" fill="#f0fdf4" stroke="#bbf7d0"/>
+    <rect x="272" y="98" width="66" height="42" rx="4" fill="#a7f3d0"/>
+    <rect x="272" y="146" width="40" height="7" rx="3" fill="#6ee7b7"/>
+    <rect x="320" y="146" width="20" height="7" rx="3" fill="#059669"/>
+
+    <rect x="160" y="174" width="90" height="76" rx="6" fill="#f0fdf4" stroke="#bbf7d0"/>
+    <rect x="172" y="184" width="66" height="42" rx="4" fill="#a7f3d0"/>
+    <rect x="172" y="232" width="40" height="7" rx="3" fill="#6ee7b7"/>
+    <rect x="220" y="232" width="20" height="7" rx="3" fill="#059669"/>
+
+    <rect x="260" y="174" width="90" height="76" rx="6" fill="#f0fdf4" stroke="#bbf7d0"/>
+    <rect x="272" y="184" width="66" height="42" rx="4" fill="#a7f3d0"/>
+    <rect x="272" y="232" width="40" height="7" rx="3" fill="#6ee7b7"/>
+    <rect x="320" y="232" width="20" height="7" rx="3" fill="#059669"/>
+  </g>
+
+  <!-- checkout / cart panel -->
+  <rect x="368" y="88" width="112" height="162" rx="8" fill="#f0fdf4" stroke="#bbf7d0"/>
+  <rect x="382" y="102" width="84" height="8" rx="4" fill="#6ee7b7"/>
+  <rect x="382" y="122" width="84" height="6" rx="3" fill="#a7f3d0"/>
+  <rect x="382" y="136" width="60" height="6" rx="3" fill="#a7f3d0"/>
+  <rect x="382" y="208" width="84" height="26" rx="6" fill="#059669"/>
+  <rect x="396" y="216" width="56" height="10" rx="5" fill="#ffffff" opacity="0.85"/>
+
+  <!-- cart badge -->
+  <g transform="translate(500,290)">
+    <circle r="30" fill="#059669"/>
+    <path d="M-13 -8 h4 l3 15 h13 l3 -11 h-16" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="-3" cy="12" r="2.6" fill="#ffffff"/>
+    <circle cx="9" cy="12" r="2.6" fill="#ffffff"/>
+  </g>
+</svg>

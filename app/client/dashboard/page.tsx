@@ -4,33 +4,13 @@ import type { AxiosError } from 'axios';
 import Link from 'next/link';
 import { clientService } from '@/lib/services/clientService';
 import RecommendedServices from '@/components/client/RecommendedServices';
-
-const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  sent:           { bg: '#eff6ff', color: '#2563eb', label: 'Sent' },
-  overdue:        { bg: '#fef2f2', color: '#dc2626', label: 'Overdue' },
-  paid:           { bg: '#ecfdf5', color: '#059669', label: 'Paid' },
-  partially_paid: { bg: '#fff7ed', color: '#ea580c', label: 'Partial' },
-  planning:       { bg: '#eff6ff', color: '#2563eb', label: 'Planning' },
-  active:         { bg: '#ecfdf5', color: '#059669', label: 'Active' },
-  on_hold:        { bg: '#fffbeb', color: '#d97706', label: 'On Hold' },
-  completed:      { bg: '#f0fdf4', color: '#16a34a', label: 'Completed' },
-};
-
-type AiService = {
-  // null for the pre-first-invoice bootstrap fallback catalog (see
-  // Api\Client\DashboardController::aiServicesFor()) — that list isn't
-  // backed by a persisted client_ai_service_batch_items row, so there's no
-  // real id to send anywhere; `key` remains the stable identifier either way.
-  id: number | null;
-  key: string;
-  name: string;
-  category: string;
-  summary: string;
-  timeline: string;
-  // 'taken' only ever comes from the client's own persisted batch — the
-  // bootstrap fallback catalog always reports 'available'.
-  status: 'available' | 'requested' | 'taken';
-};
+import { AiService } from '@/components/client/ai-services/types';
+import { aiServiceCategoryStyle } from '@/components/client/ai-services/categoryStyle';
+import SectionHeader from '@/components/client/ai-services/SectionHeader';
+import CategoryFilter from '@/components/client/ai-services/CategoryFilter';
+import FeaturedServiceCard from '@/components/client/ai-services/FeaturedServiceCard';
+import ServiceCard from '@/components/client/ai-services/ServiceCard';
+import { AI_THEME } from '@/components/client/ai-services/theme';
 
 type DashboardStats = {
   total_invoices?: number;
@@ -45,26 +25,8 @@ type DashboardStats = {
   completed_projects?: number;
 };
 
-type RecentInvoice = {
-  id: number;
-  invoice_number: string;
-  total_amount?: number;
-  paid_amount?: number;
-  currency?: string;
-  status: string;
-  due_date?: string | null;
-};
-
-type RecentProject = {
-  id: number;
-  name: string;
-  status: string;
-};
-
 type DashboardData = {
   stats?: DashboardStats;
-  recent_invoices?: RecentInvoice[];
-  recent_projects?: RecentProject[];
   portal_available?: Record<string, boolean>;
   portal_permissions?: Record<string, boolean>;
   ai_services?: AiService[];
@@ -95,6 +57,8 @@ export default function ClientDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [requestingService, setRequestingService] = useState<string | null>(null);
   const [serviceMessage, setServiceMessage] = useState('');
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     clientService.dashboard()
@@ -128,8 +92,6 @@ export default function ClientDashboardPage() {
   const invoicesAllowed   = allowed.invoices !== false;
   const projectsAllowed   = allowed.projects !== false;
 
-  const recentInvoices: RecentInvoice[] = data?.recent_invoices || [];
-  const recentProjects: RecentProject[] = data?.recent_projects || [];
   const aiServices: AiService[] = data?.ai_services || [];
   const overdueCount = s.overdue_count ?? 0;
 
@@ -155,6 +117,24 @@ export default function ClientDashboardPage() {
     }
   };
 
+  const toggleExpand = (key: string) => {
+    setExpandedKeys(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
+  // Buckets in first-seen order across this client's own suggestion list —
+  // never a fixed hardcoded set, so a filter tab never shows with nothing
+  // behind it (see CategoryFilter.tsx).
+  const aiServiceCategories = Array.from(new Set(aiServices.map(sv => aiServiceCategoryStyle(sv.category).bucket)));
+
+  const featuredService = activeCategory === 'All' ? aiServices[0] : undefined;
+  const gridServices = featuredService
+    ? aiServices.slice(1)
+    : aiServices.filter(sv => aiServiceCategoryStyle(sv.category).bucket === activeCategory);
+
   return (
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1e293b', margin: '0 0 4px' }}>Dashboard</h1>
@@ -178,7 +158,7 @@ export default function ClientDashboardPage() {
               label="Paid Invoices"
               value={s.paid_count ?? 0}
               sub={fmt(s.paid_amount ?? 0, 'USD')}
-              color="#059669"
+              color={AI_THEME.navy}
               href={invoicesAllowed ? '/client/invoices' : undefined}
             />
             <StatCard
@@ -213,7 +193,7 @@ export default function ClientDashboardPage() {
             <StatCard
               label="Completed Projects"
               value={s.completed_projects ?? 0}
-              color="#16a34a"
+              color={AI_THEME.navy}
               href={projectsAllowed ? '/client/projects' : undefined}
             />
           </>
@@ -231,87 +211,57 @@ export default function ClientDashboardPage() {
           switched the section off for this client, so it never leaves an empty
           heading — or a gap — behind. `compact` trims each list to three cards
           with a link through to the full page. */}
-      <RecommendedServices compact />
+      <RecommendedServices compact variant="navy" />
 
       {aiServices.length > 0 && (
-        <section style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', padding: 20, marginBottom: 24 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#1e293b' }}>AI Suggested IT Services</h2>
-              <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>Choose a service and your admin team will receive the request by email.</p>
-            </div>
-            {serviceMessage && (
-              <div style={{ fontSize: 12, color: serviceMessage.includes('Could not') ? '#dc2626' : '#059669', fontWeight: 700, textAlign: 'right' }}>
+        // No boxed/bordered wrapper — the page background is already this
+        // section's cream, so a nested card here would be cream-on-cream.
+        // Page spacing (this margin) and the hero/cards' own white surfaces
+        // do the separating instead.
+        <section style={{ marginBottom: 24 }}>
+          <SectionHeader
+            title="AI Suggested IT Services"
+            subtitle="Choose a service and your admin team will receive the request by email."
+            right={serviceMessage && (
+              <div style={{ fontSize: 12, color: serviceMessage.includes('Could not') ? '#dc2626' : AI_THEME.navy, fontWeight: 700, textAlign: 'right' }}>
                 {serviceMessage}
               </div>
             )}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-            {aiServices.map(service => {
-              const requesting = requestingService === service.key;
-              const taken = service.status === 'taken';
-              const requested = service.status === 'requested';
+          />
 
-              return (
-                <div
-                  key={service.key}
-                  style={{
-                    border: '1px solid #e2e8f0',
-                    borderRadius: 12,
-                    padding: 16,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    minHeight: 190,
-                    opacity: taken ? 0.65 : 1,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <span style={{ fontSize: 11, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: 999, fontWeight: 700 }}>{service.category}</span>
-                    <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{service.timeline}</span>
-                  </div>
-                  <h3 style={{ margin: '0 0 8px', fontSize: 15, lineHeight: 1.25, fontWeight: 800, color: '#0f172a' }}>{service.name}</h3>
-                  <p style={{ margin: 0, fontSize: 12, color: '#64748b', lineHeight: 1.55, flex: 1 }}>{service.summary}</p>
-                  {taken ? (
-                    <div
-                      style={{
-                        marginTop: 14,
-                        width: '100%',
-                        textAlign: 'center',
-                        borderRadius: 8,
-                        padding: '10px 12px',
-                        background: '#f1f5f9',
-                        color: '#475569',
-                        fontSize: 12,
-                        fontWeight: 800,
-                      }}
-                    >
-                      ✓ Fulfilled
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={requesting || requested}
-                      onClick={() => requestAiService(service)}
-                      style={{
-                        marginTop: 14,
-                        width: '100%',
-                        border: 'none',
-                        borderRadius: 8,
-                        padding: '10px 12px',
-                        background: requested ? '#ecfdf5' : '#10b981',
-                        color: requested ? '#047857' : '#fff',
-                        fontSize: 12,
-                        fontWeight: 800,
-                        cursor: requesting || requested ? 'default' : 'pointer',
-                      }}
-                    >
-                      {requesting ? 'Sending...' : requested ? 'Requested' : 'Request Service'}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+          {aiServiceCategories.length > 1 && (
+            <CategoryFilter categories={aiServiceCategories} active={activeCategory} onChange={setActiveCategory} />
+          )}
+
+          {featuredService && (
+            <FeaturedServiceCard
+              service={featuredService}
+              requesting={requestingService === featuredService.key}
+              onRequest={requestAiService}
+            />
+          )}
+
+          <div className="ai-services-grid">
+            {gridServices.map(service => (
+              <ServiceCard
+                key={service.key}
+                service={service}
+                requesting={requestingService === service.key}
+                expanded={expandedKeys.has(service.key)}
+                onToggleExpand={() => toggleExpand(service.key)}
+                onRequest={requestAiService}
+              />
+            ))}
           </div>
+          <style jsx>{`
+            .ai-services-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+            @media (max-width: 900px) {
+              .ai-services-grid { grid-template-columns: repeat(2, 1fr); }
+            }
+            @media (max-width: 600px) {
+              .ai-services-grid { grid-template-columns: 1fr; }
+            }
+          `}</style>
         </section>
       )}
 
@@ -326,69 +276,6 @@ export default function ClientDashboardPage() {
           <div style={{ fontSize: 13, color: '#94a3b8' }}>Your invoices will appear here once they have been sent to you</div>
         </div>
       )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: projectsAllowed && recentProjects.length > 0 ? '1fr 1fr' : '1fr', gap: 20 }}>
-
-        {/* ── Recent Invoices — the LIST, so it is withheld entirely when the
-            module is off. The backend already returns an empty array in that
-            case; this guard makes the rule explicit at the render site too. ── */}
-        {invoicesAllowed && recentInvoices.length > 0 && (
-          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1e293b' }}>Recent Invoices</h3>
-              <Link href="/client/invoices" style={{ fontSize: 12, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}>View all →</Link>
-            </div>
-            {recentInvoices.map((inv, i) => {
-              const st = STATUS_STYLE[inv.status] || { bg: '#f1f5f9', color: '#64748b', label: inv.status };
-              const balance = (inv.total_amount || 0) - (inv.paid_amount || 0);
-              return (
-                <Link key={inv.id} href={`/client/invoices/${inv.id}`} style={{ textDecoration: 'none' }}>
-                  <div style={{ padding: '13px 20px', borderBottom: i < recentInvoices.length - 1 ? '1px solid #f8fafc' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                    onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8fafc'}
-                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = ''}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#2563eb' }}>{inv.invoice_number}</div>
-                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
-                        {inv.due_date ? `Due: ${new Date(inv.due_date).toLocaleDateString('en-GB')}` : 'No due date'}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>{fmt(inv.total_amount || 0, inv.currency || 'USD')}</div>
-                      {balance > 0 && inv.status !== 'paid' && (
-                        <div style={{ fontSize: 11, color: '#ea580c', marginTop: 1 }}>Balance: {fmt(balance, inv.currency || 'USD')}</div>
-                      )}
-                      <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, marginTop: 2, display: 'inline-block', ...st }}>{st.label}</span>
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── Recent Projects — same rule as Recent Invoices above ── */}
-        {projectsAllowed && recentProjects.length > 0 && (
-          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#1e293b' }}>Recent Projects</h3>
-              <Link href="/client/projects" style={{ fontSize: 12, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}>View all →</Link>
-            </div>
-            {recentProjects.map((p, i) => {
-              const st = STATUS_STYLE[p.status] || { bg: '#f1f5f9', color: '#64748b', label: p.status };
-              return (
-                <Link key={p.id} href={`/client/projects/${p.id}`} style={{ textDecoration: 'none' }}>
-                  <div style={{ padding: '13px 20px', borderBottom: i < recentProjects.length - 1 ? '1px solid #f8fafc' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                    onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8fafc'}
-                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = ''}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, flexShrink: 0, marginLeft: 8, ...st }}>{st.label}</span>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
       {/* ── Overdue alert banner ── */}
       {overdueCount > 0 && (

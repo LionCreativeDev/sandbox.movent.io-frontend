@@ -2,22 +2,30 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { clientService, SavedCardCompany } from "@/lib/services/clientService";
+import AddCardInline from "@/components/client/AddCardInline";
 import toast from "react-hot-toast";
 
-const GREEN = "#10b981";
+const GREEN = "#081B2D";
 
 /**
  * The client's saved cards.
  *
- * No card details are typed on this screen and none are shown. "Add Payment
- * Method" opens the gateway's own hosted page; what comes back is a token this
- * app stores and can only hand back to that gateway. A card is described here
- * as "Visa •••• 4242" and nothing more, because that is all the API returns.
+ * No card detail is ever handled by this screen and none is shown. "Add
+ * Payment Method" now opens the provider's card fields IN PLACE — Stripe
+ * Elements' own cross-origin iframe, which this page cannot read — so the
+ * client no longer leaves the portal to save a card. A company whose gateway
+ * cannot do that still falls back to the hosted page, exactly as before.
+ *
+ * Either way what comes back is a token this app stores and can only hand back
+ * to that gateway. A card is described here as "Visa •••• 4242" and nothing
+ * more, because that is all the API returns.
  */
 export default function ClientPaymentMethodsPage() {
   const [companies, setCompanies] = useState<SavedCardCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // Which company's inline card form is open, if any.
+  const [addingFor, setAddingFor] = useState<number | null>(null);
 
   const load = useCallback(() => {
     return clientService.paymentMethods
@@ -246,16 +254,37 @@ export default function ClientPaymentMethodsPage() {
             </div>
           ))}
 
-          {c.can_add ? (
+          {/* Inline: the provider's card fields, right here. */}
+          {c.can_add && addingFor === c.company_id && (
+            <div style={{ marginTop: 16 }}>
+              <AddCardInline
+                companyId={c.company_id}
+                onSaved={(card) => {
+                  setAddingFor(null);
+                  toast.success(`${card.label} added.`);
+                  load();
+                }}
+                onCancel={() => setAddingFor(null)}
+              />
+            </div>
+          )}
+
+          {c.can_add && addingFor !== c.company_id ? (
             <button
               disabled={busy}
-              onClick={() => addCard(c.company_id)}
+              onClick={() =>
+                // Inline where the gateway supports it; the hosted page only
+                // for one that cannot, which is what every company did before.
+                c.can_add_inline
+                  ? setAddingFor(c.company_id)
+                  : addCard(c.company_id)
+              }
               style={{
                 marginTop: 14,
                 padding: "10px 20px",
                 borderRadius: 8,
                 border: "none",
-                background: busy ? "#a7f3d0" : GREEN,
+                background: busy ? "#203750" : GREEN,
                 color: "#fff",
                 fontWeight: 600,
                 fontSize: 13.5,
@@ -264,12 +293,12 @@ export default function ClientPaymentMethodsPage() {
             >
               + Add Payment Method
             </button>
-          ) : (
+          ) : !c.can_add ? (
             <div style={{ marginTop: 12, fontSize: 12, color: "#94a3b8" }}>
               Saving a card isn&apos;t available for this company. You can still
               pay each invoice through the Payment Assistant.
             </div>
-          )}
+          ) : null}
         </div>
       ))}
     </div>

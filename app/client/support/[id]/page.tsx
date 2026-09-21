@@ -6,13 +6,13 @@ import { TICKET_CATEGORIES } from '@/lib/services/adminSupportService';
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(TICKET_CATEGORIES.map(c => [c.value, c.label]));
 const SC: Record<string, { bg: string; color: string }> = {
   open:        { bg: '#eff6ff', color: '#2563eb' },
   in_progress: { bg: '#fffbeb', color: '#d97706' },
   on_hold:     { bg: '#fef3c7', color: '#92400e' },
-  resolved:    { bg: '#ecfdf5', color: '#059669' },
+  resolved:    { bg: '#E9EDF2', color: '#081B2D' },
   closed:      { bg: '#f1f5f9', color: '#64748b' },
 };
 // Client can still reply while paused (on_hold) — agent is usually waiting
@@ -134,7 +134,7 @@ export default function ClientTicketDetailPage() {
                 <div key={r.id} style={{ display: 'flex', flexDirection: isClient ? 'row-reverse' : 'row', gap: 10, marginBottom: 14 }}>
                   <div style={{
                     width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
-                    background: isClient ? 'linear-gradient(135deg,#10b981,#059669)' : '#e2e8f0',
+                    background: isClient ? 'linear-gradient(135deg,#081B2D,#203750)' : '#e2e8f0',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 12, fontWeight: 700, color: isClient ? '#fff' : '#64748b',
                   }}>
@@ -146,8 +146,8 @@ export default function ClientTicketDetailPage() {
                     </div>
                     <div style={{
                       padding: '10px 14px', borderRadius: 10,
-                      background: isClient ? GREEN : '#f1f5f9',
-                      color: isClient ? '#fff' : '#1e293b',
+                      background: isClient ? '#E9EDF2' : '#f1f5f9',
+                      color: isClient ? '#15283C' : '#1e293b',
                       fontSize: 13, lineHeight: 1.5,
                     }}>
                       {r.message}
@@ -186,7 +186,7 @@ export default function ClientTicketDetailPage() {
               <button
                 type="submit" disabled={sending || (!replyMsg.trim() && !file)}
                 style={{
-                  padding: '8px 20px', background: sending ? '#a7f3d0' : GREEN,
+                  padding: '8px 20px', background: sending ? '#E9EDF2' : GREEN,
                   color: '#fff', border: 'none', borderRadius: 8,
                   fontSize: 13, fontWeight: 600, cursor: sending ? 'not-allowed' : 'pointer',
                 }}>

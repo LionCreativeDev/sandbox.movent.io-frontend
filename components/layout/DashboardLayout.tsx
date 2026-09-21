@@ -3,9 +3,17 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { isAuthenticated, getAuthType, getAuthUser, setAuthData, getToken, logout, getActiveCompany, setActiveCompany, clearActiveCompany } from '@/lib/auth';
 import { Admin, User } from '@/types';
+import dynamic from 'next/dynamic';
 import Sidebar from './Sidebar';
 import Navbar from './Navbar';
 import api from '@/lib/axios';
+
+// Loaded on demand (ssr: false): a cookie-reading, client-only widget that
+// nobody needs in the first paint of a dashboard.
+const StaffAssistant = dynamic(
+  () => import('@/components/assistant/StaffAssistant'),
+  { ssr: false },
+);
 
 export default function DashboardLayout({
   children,
@@ -264,6 +272,14 @@ export default function DashboardLayout({
           </a>
         </div>
       )}
+
+      {/* AI Assistance, mounted ONCE here rather than per page.
+          Every staff and Company Admin screen already wraps itself in this
+          layout, so this puts the widget on all of them without any page
+          knowing about it — and makes a second instance impossible. A sibling
+          of the content, never inside it, so no scroll container or stacking
+          context can trap it. */}
+      <StaffAssistant />
     </div>
   );
 }

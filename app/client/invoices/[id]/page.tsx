@@ -7,11 +7,11 @@ import PaymentProgressBar from '@/components/invoices/PaymentProgressBar';
 import { progressOf } from '@/lib/paymentStatus';
 import { handleNotFound } from '@/lib/notFound';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 const SC: Record<string, { bg: string; color: string }> = {
   sent:            { bg: '#eff6ff', color: '#2563eb' },
   overdue:         { bg: '#fef2f2', color: '#dc2626' },
-  paid:            { bg: '#ecfdf5', color: '#059669' },
+  paid:            { bg: '#E9EDF2', color: '#081B2D' },
   partially_paid:  { bg: '#fffbeb', color: '#d97706' },
   payment_pending: { bg: '#f5f3ff', color: '#7c3aed' },
   cancelled:       { bg: '#f1f5f9', color: '#64748b' },
@@ -168,8 +168,8 @@ export default function ClientInvoiceDetailPage() {
           )}
           {Number(inv.discount_amount) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <span style={{ fontSize: 13, color: '#10b981' }}>Discount</span>
-              <span style={{ fontSize: 13, color: '#10b981' }}>-{Number(inv.discount_amount).toLocaleString()}</span>
+              <span style={{ fontSize: 13, color: '#081B2D' }}>Discount</span>
+              <span style={{ fontSize: 13, color: '#081B2D' }}>-{Number(inv.discount_amount).toLocaleString()}</span>
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: '2px solid #e2e8f0' }}>

@@ -33,7 +33,7 @@ export default function ClientLoginPage() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 50%, #f8fafc 100%)',
+      background: 'linear-gradient(135deg, #E9EDF2 0%, #E9EDF2 50%, #f8fafc 100%)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20,
     }}>
@@ -48,7 +48,7 @@ export default function ClientLoginPage() {
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{
             width: 56, height: 56, borderRadius: 16,
-            background: 'linear-gradient(135deg, #10b981, #059669)',
+            background: 'linear-gradient(135deg, #081B2D, #203750)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             margin: '0 auto 14px',
           }}>
@@ -89,7 +89,7 @@ export default function ClientLoginPage() {
                 fontSize: 14, outline: 'none', boxSizing: 'border-box',
                 transition: 'border-color 0.15s',
               }}
-              onFocus={e => (e.target.style.borderColor = '#10b981')}
+              onFocus={e => (e.target.style.borderColor = '#081B2D')}
               onBlur={e => (e.target.style.borderColor = '#e2e8f0')}
             />
           </div>
@@ -109,7 +109,7 @@ export default function ClientLoginPage() {
                 border: '1px solid #e2e8f0', borderRadius: 8,
                 fontSize: 14, outline: 'none', boxSizing: 'border-box',
               }}
-              onFocus={e => (e.target.style.borderColor = '#10b981')}
+              onFocus={e => (e.target.style.borderColor = '#081B2D')}
               onBlur={e => (e.target.style.borderColor = '#e2e8f0')}
             />
           </div>
@@ -119,7 +119,7 @@ export default function ClientLoginPage() {
             disabled={loading}
             style={{
               width: '100%', padding: '11px',
-              background: loading ? '#a7f3d0' : '#10b981',
+              background: loading ? '#E6E2D9' : '#081B2D',
               color: '#fff', fontWeight: 600, fontSize: 14,
               border: 'none', borderRadius: 8, cursor: loading ? 'not-allowed' : 'pointer',
               transition: 'background 0.15s',
@@ -139,7 +139,7 @@ export default function ClientLoginPage() {
         <div style={{ textAlign: 'center', marginTop: 18 }}>
           <Link
             href="/client/forgot-password"
-            style={{ fontSize: 13, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}
+            style={{ fontSize: 13, color: '#081B2D', fontWeight: 600, textDecoration: 'none' }}
           >
             Forgot your password?
           </Link>

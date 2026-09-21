@@ -1,0 +1,50 @@
+<svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="appsBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdf8ef"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+    <linearGradient id="appsHeader" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#appsBg)"/>
+  <circle cx="90" cy="80" r="80" fill="#efe7d3" opacity="0.6"/>
+  <circle cx="560" cy="290" r="90" fill="#efe7d3" opacity="0.5"/>
+
+  <!-- back phone -->
+  <rect x="330" y="46" width="150" height="270" rx="26" fill="#1e293b"/>
+  <rect x="340" y="66" width="130" height="230" rx="4" fill="#ffffff"/>
+  <rect x="392" y="54" width="26" height="6" rx="3" fill="#334155"/>
+  <rect x="352" y="80" width="106" height="30" rx="5" fill="#ddd6fe"/>
+  <rect x="352" y="120" width="106" height="14" rx="4" fill="#f1f5f9"/>
+  <rect x="352" y="140" width="106" height="14" rx="4" fill="#f1f5f9"/>
+  <rect x="352" y="160" width="106" height="14" rx="4" fill="#f1f5f9"/>
+
+  <!-- front phone -->
+  <rect x="150" y="76" width="164" height="290" rx="28" fill="#1e293b"/>
+  <rect x="161" y="98" width="142" height="248" rx="4" fill="#ffffff"/>
+  <rect x="218" y="84" width="28" height="7" rx="3.5" fill="#334155"/>
+
+  <!-- app header -->
+  <rect x="161" y="98" width="142" height="46" fill="url(#appsHeader)"/>
+  <rect x="177" y="114" width="70" height="9" rx="4" fill="#ffffff" opacity="0.9"/>
+  <circle cx="286" cy="119" r="9" fill="#ffffff" opacity="0.85"/>
+
+  <!-- list rows -->
+  <rect x="173" y="156" width="118" height="34" rx="6" fill="#f5f3ff" stroke="#e9d5ff"/>
+  <rect x="173" y="198" width="118" height="34" rx="6" fill="#f5f3ff" stroke="#e9d5ff"/>
+  <rect x="173" y="240" width="118" height="34" rx="6" fill="#f5f3ff" stroke="#e9d5ff"/>
+  <circle cx="190" cy="173" r="8" fill="#c4b5fd"/>
+  <circle cx="190" cy="215" r="8" fill="#c4b5fd"/>
+  <circle cx="190" cy="257" r="8" fill="#c4b5fd"/>
+  <rect x="206" y="168" width="66" height="6" rx="3" fill="#ddd6fe"/>
+  <rect x="206" y="210" width="66" height="6" rx="3" fill="#ddd6fe"/>
+  <rect x="206" y="252" width="66" height="6" rx="3" fill="#ddd6fe"/>
+
+  <!-- floating action button -->
+  <circle cx="270" cy="312" r="20" fill="#7c3aed"/>
+  <rect x="264" y="310" width="12" height="4" rx="2" fill="#ffffff"/>
+  <rect x="268" y="306" width="4" height="12" rx="2" fill="#ffffff"/>
+</svg>

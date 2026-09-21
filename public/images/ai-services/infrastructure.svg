@@ -1,0 +1,51 @@
+<svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="infraBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdf8ef"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#infraBg)"/>
+  <circle cx="70" cy="90" r="80" fill="#efe7d3" opacity="0.6"/>
+  <circle cx="570" cy="300" r="90" fill="#efe7d3" opacity="0.5"/>
+
+  <!-- cloud -->
+  <g fill="#a5f3fc" opacity="0.9">
+    <ellipse cx="440" cy="90" rx="70" ry="36"/>
+    <ellipse cx="400" cy="76" rx="40" ry="30"/>
+    <ellipse cx="480" cy="76" rx="40" ry="30"/>
+  </g>
+  <path d="M400 130 L380 90 M440 130 L440 84 M480 130 L500 90" stroke="#22d3ee" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- server rack -->
+  <rect x="150" y="70" width="180" height="200" rx="8" fill="#0e7490"/>
+  <g fill="#0891b2">
+    <rect x="162" y="82" width="156" height="34" rx="4"/>
+    <rect x="162" y="124" width="156" height="34" rx="4"/>
+    <rect x="162" y="166" width="156" height="34" rx="4"/>
+    <rect x="162" y="208" width="156" height="34" rx="4"/>
+  </g>
+  <circle cx="176" cy="99" r="4" fill="#5eead4"/>
+  <circle cx="190" cy="99" r="4" fill="#67e8f9"/>
+  <circle cx="176" cy="141" r="4" fill="#5eead4"/>
+  <circle cx="190" cy="141" r="4" fill="#67e8f9"/>
+  <circle cx="176" cy="183" r="4" fill="#5eead4"/>
+  <circle cx="190" cy="183" r="4" fill="#67e8f9"/>
+  <circle cx="176" cy="225" r="4" fill="#5eead4"/>
+  <circle cx="190" cy="225" r="4" fill="#67e8f9"/>
+  <rect x="230" y="90" width="72" height="14" rx="3" fill="#a5f3fc"/>
+  <rect x="230" y="132" width="72" height="14" rx="3" fill="#a5f3fc"/>
+  <rect x="230" y="174" width="72" height="14" rx="3" fill="#a5f3fc"/>
+  <rect x="230" y="216" width="72" height="14" rx="3" fill="#a5f3fc"/>
+
+  <!-- terminal window -->
+  <rect x="350" y="150" width="200" height="128" rx="8" fill="#0f172a"/>
+  <rect x="350" y="150" width="200" height="20" rx="8" fill="#1e293b"/>
+  <circle cx="364" cy="160" r="3" fill="#f87171"/>
+  <circle cx="376" cy="160" r="3" fill="#fbbf24"/>
+  <circle cx="388" cy="160" r="3" fill="#34d399"/>
+  <text x="364" y="192" font-family="monospace" font-size="12" fill="#22d3ee">$ deploy --prod</text>
+  <text x="364" y="212" font-family="monospace" font-size="12" fill="#5eead4">✓ build complete</text>
+  <text x="364" y="232" font-family="monospace" font-size="12" fill="#5eead4">✓ 3 nodes healthy</text>
+  <text x="364" y="252" font-family="monospace" font-size="12" fill="#67e8f9">uptime 99.98%</text>
+</svg>

@@ -9,7 +9,7 @@ import InlineGatewayPayment, { InlineGatewayPaymentHandle } from '@/components/p
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 
 interface ConversionPreview {
   amount: number;
@@ -145,17 +145,17 @@ export default function ClientPaymentPage() {
 
   if (receipt) return (
     <div style={{ maxWidth: 480, marginLeft: 'auto', marginRight: 'auto' }}>
-      <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 14, padding: '32px 28px', textAlign: 'center' }}>
-        <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#dcfce7', border: '3px solid #86efac', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', fontSize: 28 }}>✅</div>
-        <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#15803d' }}>
+      <div style={{ background: '#E9EDF2', border: '1.5px solid #E6E2D9', borderRadius: 14, padding: '32px 28px', textAlign: 'center' }}>
+        <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#E9EDF2', border: '3px solid #E6E2D9', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', fontSize: 28 }}>✅</div>
+        <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#15283C' }}>
           {receipt.paid ? 'Payment Successful' : 'Payment Submitted'}
         </h2>
-        <p style={{ margin: '0 0 24px', fontSize: 13, color: '#166534' }}>
+        <p style={{ margin: '0 0 24px', fontSize: 13, color: '#15283C' }}>
           {receipt.paid
             ? 'Payment successful. Thank you.'
             : 'Your payment is pending verification. Our team will confirm within 1–2 business days.'}
         </p>
-        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #bbf7d0', padding: '18px 20px', textAlign: 'left', marginBottom: 20 }}>
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E6E2D9', padding: '18px 20px', textAlign: 'left', marginBottom: 20 }}>
           {receipt.number && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
               <span style={{ fontSize: 12, color: '#64748b' }}>Receipt #</span>
@@ -176,7 +176,7 @@ export default function ClientPaymentPage() {
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px solid #e2e8f0' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Amount</span>
-            <span style={{ fontSize: 16, fontWeight: 800, color: '#15803d' }}>{receipt.currency} {receipt.amount.toLocaleString()}</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: '#15283C' }}>{receipt.currency} {receipt.amount.toLocaleString()}</span>
           </div>
         </div>
         <button
@@ -274,7 +274,7 @@ export default function ClientPaymentPage() {
 
       {/* Amount Due Banner */}
       <div style={{
-        background: 'linear-gradient(135deg, #065f46, #10b981)',
+        background: 'linear-gradient(135deg, #081B2D, #203750)',
         borderRadius: 12, padding: '20px 24px', marginBottom: 24, color: '#fff',
       }}>
         <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 4 }}>Amount Due</div>
@@ -315,7 +315,7 @@ export default function ClientPaymentPage() {
                       display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px',
                       border: `2px solid ${active ? GREEN : '#e2e8f0'}`,
                       borderRadius: 10, cursor: 'pointer',
-                      background: active ? '#f0fdf4' : '#fff',
+                      background: active ? '#E9EDF2' : '#fff',
                     }}>
                     <input
                       type="radio"
@@ -451,7 +451,7 @@ export default function ClientPaymentPage() {
             disabled={paying || !selectedMethod}
             style={{
               width: '100%', padding: 14,
-              background: paying ? '#a7f3d0' : GREEN,
+              background: paying ? '#203750' : GREEN,
               color: '#fff', border: 'none', borderRadius: 10,
               fontSize: 15, fontWeight: 700,
               cursor: paying ? 'not-allowed' : 'pointer',

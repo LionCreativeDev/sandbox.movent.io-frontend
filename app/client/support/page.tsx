@@ -11,7 +11,7 @@ const SC: Record<string, { bg: string; color: string }> = {
   open:        { bg: '#eff6ff', color: '#2563eb' },
   in_progress: { bg: '#fffbeb', color: '#d97706' },
   on_hold:     { bg: '#fef3c7', color: '#92400e' },
-  resolved:    { bg: '#ecfdf5', color: '#059669' },
+  resolved:    { bg: '#E9EDF2', color: '#081B2D' },
   closed:      { bg: '#f1f5f9', color: '#64748b' },
 };
 
@@ -37,7 +37,7 @@ export default function ClientSupportPage() {
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1e293b', margin: 0 }}>Support Tickets</h1>
         {!notEnabled && (
           <Link href="/client/support/create" style={{
-            padding: '8px 18px', background: '#10b981', color: '#fff',
+            padding: '8px 18px', background: '#081B2D', color: '#fff',
             borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: 'none',
           }}>+ Raise Ticket</Link>
         )}
@@ -50,7 +50,7 @@ export default function ClientSupportPage() {
           <PortalModuleDisabled feature="Support Tickets" />
         ) : tickets.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
-            No tickets yet. <Link href="/client/support/create" style={{ color: '#10b981' }}>Raise one</Link>
+            No tickets yet. <Link href="/client/support/create" style={{ color: '#081B2D' }}>Raise one</Link>
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -82,8 +82,8 @@ export default function ClientSupportPage() {
                     <td style={{ padding: '12px 20px', fontSize: 12, color: '#64748b' }}>{t.created_at?.split('T')[0]}</td>
                     <td style={{ padding: '12px 20px', textAlign: 'right' }}>
                       <Link href={`/client/support/${t.id}`} style={{
-                        fontSize: 12, color: '#10b981', fontWeight: 600, textDecoration: 'none',
-                        padding: '4px 12px', border: '1px solid #a7f3d0', borderRadius: 6,
+                        fontSize: 12, color: '#081B2D', fontWeight: 600, textDecoration: 'none',
+                        padding: '4px 12px', border: '1px solid #E6E2D9', borderRadius: 6,
                       }}>View</Link>
                     </td>
                   </tr>

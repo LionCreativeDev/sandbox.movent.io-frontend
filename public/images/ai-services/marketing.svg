@@ -1,0 +1,37 @@
+<svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mktBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdf8ef"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#mktBg)"/>
+  <circle cx="70" cy="70" r="80" fill="#efe7d3" opacity="0.6"/>
+  <circle cx="560" cy="300" r="90" fill="#efe7d3" opacity="0.5"/>
+
+  <!-- monitor -->
+  <rect x="150" y="48" width="330" height="220" rx="12" fill="#1e293b"/>
+  <rect x="162" y="60" width="306" height="188" rx="4" fill="#ffffff"/>
+  <rect x="290" y="268" width="50" height="10" rx="2" fill="#334155"/>
+  <rect x="250" y="278" width="130" height="8" rx="4" fill="#475569"/>
+
+  <!-- bar chart -->
+  <rect x="180" y="180" width="20" height="50" rx="2" fill="#fb923c"/>
+  <rect x="208" y="150" width="20" height="80" rx="2" fill="#f97316"/>
+  <rect x="236" y="165" width="20" height="65" rx="2" fill="#fdba74"/>
+  <rect x="264" y="130" width="20" height="100" rx="2" fill="#ea580c"/>
+  <line x1="172" y1="234" x2="300" y2="234" stroke="#e2e8f0" stroke-width="2"/>
+
+  <!-- line chart -->
+  <polyline points="320,190 350,160 380,175 410,120 440,140" fill="none" stroke="#ea580c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="440" cy="140" r="6" fill="#ea580c"/>
+  <rect x="316" y="82" width="140" height="12" rx="6" fill="#ffedd5"/>
+
+  <!-- megaphone -->
+  <g transform="translate(470,210)">
+    <path d="M0 20 L36 0 L36 60 L0 40 Z" fill="#ea580c"/>
+    <rect x="-14" y="14" width="14" height="26" rx="4" fill="#c2410c"/>
+    <path d="M36 12 Q56 30 36 48" fill="none" stroke="#fb923c" stroke-width="4" stroke-linecap="round"/>
+    <path d="M-4 44 L-10 62" stroke="#c2410c" stroke-width="5" stroke-linecap="round"/>
+  </g>
+</svg>

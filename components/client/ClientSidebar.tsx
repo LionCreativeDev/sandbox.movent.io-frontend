@@ -6,9 +6,10 @@ import Cookies from 'js-cookie';
 import {
   HiSquares2X2, HiFolder, HiDocumentText, HiCreditCard,
   HiArrowDownTray, HiLifebuoy, HiChartBar, HiSparkles, HiUserCircle,
-  HiChatBubbleLeftRight, HiWallet,
+  HiWallet,
 } from 'react-icons/hi2';
 import clientApi from '@/lib/clientAxios';
+import { DASHBOARD_THEME } from './dashboardTheme';
 
 // Module key → nav item map (Dashboard is always visible)
 //
@@ -24,9 +25,18 @@ const NAV = [
   { key: 'projects',  label: 'Projects',  icon: HiFolder,              path: '/client/projects' },
   { key: 'invoices',  label: 'Invoices',  icon: HiDocumentText,        path: '/client/invoices' },
   { key: 'payments',  label: 'Payments',  icon: HiCreditCard,          path: '/client/payments' },
-  // Sits under the invoices module because that is what it acts on — a client
-  // whose Invoices access is switched off has nothing to pay here.
-  { key: 'invoices',  label: 'Payment Assistant', icon: HiChatBubbleLeftRight, path: '/client/payment-assistant' },
+  // No "Payment Assistant" entry (hidden 2026-09-21). The floating AI
+  // Assistance widget now does the same job from every portal page —
+  // "Pay an Invoice" walks through the same lookup, the same saved cards and
+  // the same confirmation, sharing the very same server-side session
+  // (payment_assistant_sessions) — so a separate sidebar link was a second
+  // door onto one room.
+  //
+  // The PAGE itself is untouched and still served at
+  // /client/payment-assistant, along with all its /client/payment-assistant/*
+  // endpoints. Only the nav entry is gone, so anyone with the URL (or an old
+  // bookmark, or the "Continue to Payment Assistant" button on the
+  // card-added screen) still lands on a working screen.
   { key: 'invoices',  label: 'Payment Methods',   icon: HiWallet,              path: '/client/payment-methods' },
   { key: 'documents', label: 'Documents', icon: HiArrowDownTray,       path: '/client/documents' },
   { key: 'support',   label: 'Support',   icon: HiLifebuoy,            path: '/client/support' },
@@ -42,10 +52,14 @@ const NAV = [
 const GREEN   = '#10b981';
 const GREENBG = '#ecfdf5';
 
-export default function ClientSidebar() {
+// `variant="navy"` is passed only from ClientLayout when the current route
+// is /client/dashboard — every other portal page renders the default green
+// sidebar unchanged. See dashboardTheme.ts for why this exists at all.
+export default function ClientSidebar({ variant = 'default' }: { variant?: 'default' | 'navy' }) {
   const pathname = usePathname();
   const [perms, setPerms] = useState<Record<string, boolean> | null>(null);
   const [companyName, setCompanyName] = useState('');
+  const navy = variant === 'navy';
 
   useEffect(() => {
     try {
@@ -69,24 +83,28 @@ export default function ClientSidebar() {
 
   return (
     <aside style={{
-      width: 240, minHeight: '100vh', background: '#fff',
-      borderRight: '1px solid #e2e8f0',
+      width: 240, minHeight: '100vh',
+      background: navy ? DASHBOARD_THEME.navy : '#fff',
+      borderRight: navy ? 'none' : '1px solid #e2e8f0',
       position: 'fixed', top: 0, left: 0,
       display: 'flex', flexDirection: 'column', zIndex: 40,
     }}>
       {/* Logo */}
-      <div style={{ padding: '20px 16px 14px', borderBottom: '1px solid #f1f5f9' }}>
+      <div style={{
+        padding: '20px 16px 14px',
+        borderBottom: navy ? '1px solid rgba(255,255,255,0.08)' : '1px solid #f1f5f9',
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
             width: 36, height: 36, borderRadius: 10,
-            background: 'linear-gradient(135deg, #10b981, #059669)',
+            background: navy ? DASHBOARD_THEME.navyActive : 'linear-gradient(135deg, #10b981, #059669)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <span style={{ color: '#fff', fontWeight: 800, fontSize: 16 }}>C</span>
+            <span style={{ color: navy ? DASHBOARD_THEME.gold : '#fff', fontWeight: 800, fontSize: 16 }}>C</span>
           </div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b' }}>Client Portal</div>
-            <div style={{ fontSize: 11, color: '#94a3b8' }}>{companyName || 'Secure Access'}</div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: navy ? '#fff' : '#1e293b' }}>Client Portal</div>
+            <div style={{ fontSize: 11, color: navy ? 'rgba(255,255,255,0.55)' : '#94a3b8' }}>{companyName || 'Secure Access'}</div>
           </div>
         </div>
       </div>
@@ -100,15 +118,18 @@ export default function ClientSidebar() {
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '9px 12px', borderRadius: 8, marginBottom: 2,
-                background: active ? GREENBG : 'transparent',
-                color: active ? GREEN : '#64748b',
+                background: active ? (navy ? DASHBOARD_THEME.navyActive : GREENBG) : 'transparent',
+                color: active ? (navy ? '#fff' : GREEN) : (navy ? 'rgba(255,255,255,0.65)' : '#64748b'),
                 fontWeight: active ? 600 : 400, fontSize: 13,
                 transition: 'all 0.15s', cursor: 'pointer',
               }}>
                 <Icon size={18} />
                 {label}
                 {active && (
-                  <div style={{ marginLeft: 'auto', width: 4, height: 4, borderRadius: '50%', background: GREEN }} />
+                  <div style={{
+                    marginLeft: 'auto', width: 4, height: 4, borderRadius: '50%',
+                    background: navy ? DASHBOARD_THEME.gold : GREEN,
+                  }} />
                 )}
               </div>
             </Link>
@@ -117,8 +138,11 @@ export default function ClientSidebar() {
       </nav>
 
       {/* Footer */}
-      <div style={{ padding: '12px 16px', borderTop: '1px solid #f1f5f9' }}>
-        <div style={{ fontSize: 11, color: '#cbd5e1', textAlign: 'center' }}>
+      <div style={{
+        padding: '12px 16px',
+        borderTop: navy ? '1px solid rgba(255,255,255,0.08)' : '1px solid #f1f5f9',
+      }}>
+        <div style={{ fontSize: 11, color: navy ? 'rgba(255,255,255,0.35)' : '#cbd5e1', textAlign: 'center' }}>
           Client Portal v1.0
         </div>
       </div>

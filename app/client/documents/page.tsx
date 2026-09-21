@@ -7,7 +7,7 @@ import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
 import ReceiptViewer from '@/components/ui/ReceiptViewer';
 import { receiptSummary } from '@/lib/receiptFields';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 const TYPE_OPTS = ['', 'pdf', 'spreadsheet', 'word', 'image', 'other'];
 
 export default function ClientDocumentsPage() {
@@ -114,7 +114,7 @@ export default function ClientDocumentsPage() {
             padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500, cursor: 'pointer',
             border: '1px solid',
             borderColor: type === t ? GREEN : '#e2e8f0',
-            background: type === t ? '#ecfdf5' : '#fff',
+            background: type === t ? '#E9EDF2' : '#fff',
             color: type === t ? GREEN : '#64748b',
           }}>{t || 'All'}</button>
         ))}
@@ -181,7 +181,7 @@ export default function ClientDocumentsPage() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 5 }}>
                             <span style={{
                               fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase',
-                              padding: '2px 7px', borderRadius: 5, background: '#ecfdf5', color: GREEN,
+                              padding: '2px 7px', borderRadius: 5, background: '#E9EDF2', color: GREEN,
                             }}>Receipt</span>
                             <span style={{ fontSize: 11.5, color: '#64748b' }}>
                               {receiptSummary(doc.receipt).join('  ·  ')}
@@ -217,7 +217,7 @@ export default function ClientDocumentsPage() {
                       disabled={dlId === doc.id}
                       style={{
                         fontSize: 12, color: dlId === doc.id ? '#94a3b8' : GREEN, fontWeight: 600,
-                        background: 'none', border: `1px solid ${dlId === doc.id ? '#e2e8f0' : '#a7f3d0'}`,
+                        background: 'none', border: `1px solid ${dlId === doc.id ? '#e2e8f0' : '#E6E2D9'}`,
                         borderRadius: 6, padding: '4px 12px', cursor: dlId === doc.id ? 'not-allowed' : 'pointer',
                       }}>
                       {dlId === doc.id ? '…' : 'Download'}

@@ -12,7 +12,7 @@ import RecommendedServices from '@/components/client/RecommendedServices';
 export default function ClientServicesPage() {
   return (
     <div style={{ maxWidth: 1100 }}>
-      <RecommendedServices />
+      <RecommendedServices variant="navy" />
     </div>
   );
 }

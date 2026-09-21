@@ -15,7 +15,7 @@ import {
 } from "@/lib/services/clientService";
 import toast from "react-hot-toast";
 
-const GREEN = "#10b981";
+const GREEN = "#081B2D";
 
 // ── Assistant chat palette ───────────────────────────────────────────────────
 // A blue conversation surface, matching the agreed design: one rounded,
@@ -629,8 +629,8 @@ export default function PaymentAssistantPage() {
                     // colour. Every other bubble keeps the shared tint, so
                     // this reads as a result rather than as another message.
                     background:
-                      "tag" in b && b.tag === "success" ? "#ecfdf5" : BUBBLE,
-                    color: "tag" in b && b.tag === "success" ? "#047857" : INK,
+                      "tag" in b && b.tag === "success" ? "#E9EDF2" : BUBBLE,
+                    color: "tag" in b && b.tag === "success" ? "#081B2D" : INK,
                     fontWeight: "tag" in b && b.tag === "success" ? 700 : 400,
                     display: "flex",
                     alignItems: "center",

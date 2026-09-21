@@ -89,6 +89,12 @@ export interface SavedCardCompany {
   company_name?: string | null;
   /** False when this company's gateway cannot vault a card — hides the Add button. */
   can_add: boolean;
+  /**
+   * True when the card can be added without leaving the portal. False falls
+   * back to the gateway's hosted page — which is what every company did before
+   * inline setup existed, so it is a fallback, not a failure.
+   */
+  can_add_inline?: boolean;
   payment_methods: SavedCard[];
 }
 
@@ -148,6 +154,34 @@ export const clientService = {
       (await clientApi.post('/client/payment-methods/setup', { company_id: companyId })).data.data,
     complete: async (companyId: number, sessionId: string): Promise<{ payment_method: SavedCard }> =>
       (await clientApi.post('/client/payment-methods/complete', { company_id: companyId, session_id: sessionId })).data.data,
+
+    // ── Adding a card without leaving the portal ─────────────────────────────
+    //
+    // Same end state as startSetup/complete above — a card vaulted against this
+    // client's gateway customer, chargeable later — but the fields are Stripe
+    // Elements' own cross-origin iframe instead of Stripe's hosted page.
+    //
+    // What comes back from inlineSetup() is a PUBLISHABLE key and a single-use
+    // client secret: enough for that iframe to collect and authorise one card,
+    // and not enough to charge anything. The card number is typed into Stripe's
+    // frame and submitted by Stripe's script — it never enters this app's DOM,
+    // its JavaScript or its network traffic, and nothing here ever holds it.
+    inlineSetup: async (companyId: number): Promise<{
+      publishable_key: string;
+      client_secret: string;
+      setup_intent_id: string;
+    }> =>
+      (await clientApi.post('/client/payment-methods/inline-setup', { company_id: companyId })).data.data,
+
+    // Saves the card the setup left on file. The server asks Stripe whether the
+    // setup actually succeeded before storing anything, so this call reports an
+    // outcome rather than deciding one.
+    inlineComplete: async (companyId: number, setupIntentId: string): Promise<{ payment_method: SavedCard }> =>
+      (await clientApi.post('/client/payment-methods/inline-complete', {
+        company_id: companyId,
+        setup_intent_id: setupIntentId,
+      })).data.data,
+
     setDefault: async (id: number) =>
       (await clientApi.post(`/client/payment-methods/${id}/default`)).data,
     remove: async (id: number) =>

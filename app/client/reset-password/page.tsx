@@ -57,7 +57,7 @@ function ClientResetPasswordContent() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 50%, #f8fafc 100%)',
+      background: 'linear-gradient(135deg, #E9EDF2 0%, #E9EDF2 50%, #f8fafc 100%)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20,
     }}>
@@ -69,7 +69,7 @@ function ClientResetPasswordContent() {
         <div style={{ textAlign: 'center', marginBottom: 30 }}>
           <div style={{
             width: 56, height: 56, borderRadius: 16,
-            background: 'linear-gradient(135deg, #10b981, #059669)',
+            background: 'linear-gradient(135deg, #081B2D, #203750)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             margin: '0 auto 14px',
           }}>
@@ -93,21 +93,21 @@ function ClientResetPasswordContent() {
             }}>
               This password reset link is invalid.
             </div>
-            <Link href="/client/forgot-password" style={{ fontSize: 13, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}>
+            <Link href="/client/forgot-password" style={{ fontSize: 13, color: '#081B2D', fontWeight: 600, textDecoration: 'none' }}>
               Request a new link
             </Link>
           </div>
         ) : done ? (
           <div style={{ textAlign: 'center' }}>
             <div style={{
-              background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 8,
-              padding: '14px 16px', color: '#047857', fontSize: 13, lineHeight: 1.6, marginBottom: 22,
+              background: '#E9EDF2', border: '1px solid #E6E2D9', borderRadius: 8,
+              padding: '14px 16px', color: '#15283C', fontSize: 13, lineHeight: 1.6, marginBottom: 22,
             }}>
               Your password has been reset. You can sign in now.
             </div>
             <Link href="/client/login" style={{
               display: 'inline-block', padding: '10px 22px', borderRadius: 8,
-              background: '#10b981', color: '#fff', fontWeight: 600, fontSize: 14, textDecoration: 'none',
+              background: '#081B2D', color: '#fff', fontWeight: 600, fontSize: 14, textDecoration: 'none',
             }}>
               Go to Sign In →
             </Link>
@@ -136,7 +136,7 @@ function ClientResetPasswordContent() {
                   autoFocus
                   placeholder="Min 8 characters"
                   style={input}
-                  onFocus={e => (e.target.style.borderColor = '#10b981')}
+                  onFocus={e => (e.target.style.borderColor = '#081B2D')}
                   onBlur={e => (e.target.style.borderColor = '#e2e8f0')}
                 />
                 <button
@@ -180,7 +180,7 @@ function ClientResetPasswordContent() {
               disabled={loading}
               style={{
                 width: '100%', padding: '11px',
-                background: loading ? '#a7f3d0' : '#10b981',
+                background: loading ? '#E6E2D9' : '#081B2D',
                 color: '#fff', fontWeight: 600, fontSize: 14,
                 border: 'none', borderRadius: 8, cursor: loading ? 'not-allowed' : 'pointer',
               }}>
@@ -188,7 +188,7 @@ function ClientResetPasswordContent() {
             </button>
 
             <div style={{ textAlign: 'center', marginTop: 18 }}>
-              <Link href="/client/login" style={{ fontSize: 13, color: '#10b981', fontWeight: 600, textDecoration: 'none' }}>
+              <Link href="/client/login" style={{ fontSize: 13, color: '#081B2D', fontWeight: 600, textDecoration: 'none' }}>
                 ← Back to Sign In
               </Link>
             </div>

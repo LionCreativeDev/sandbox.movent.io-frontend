@@ -9,19 +9,19 @@ import { clientPortalSenderName, isOwnClientMessage } from '@/lib/chatSender';
 import { handleNotFound } from '@/lib/notFound';
 import RichText from '@/components/ui/RichText';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 const SC: Record<string, { bg: string; color: string }> = {
   planning:           { bg: '#eff6ff', color: '#2563eb' },
-  active:             { bg: '#ecfdf5', color: '#059669' },
+  active:             { bg: '#E9EDF2', color: '#081B2D' },
   on_hold:            { bg: '#fffbeb', color: '#d97706' },
-  completed:          { bg: '#f0fdf4', color: '#16a34a' },
+  completed:          { bg: '#E9EDF2', color: '#081B2D' },
   cancelled:          { bg: '#fef2f2', color: '#dc2626' },
   delivered:          { bg: '#eff6ff', color: '#2563eb' },
-  approved:           { bg: '#ecfdf5', color: '#059669' },
+  approved:           { bg: '#E9EDF2', color: '#081B2D' },
   revision_requested: { bg: '#fffbeb', color: '#d97706' },
   draft:              { bg: '#f1f5f9', color: '#64748b' },
   todo:               { bg: '#f1f5f9', color: '#64748b' },
-  in_progress:        { bg: '#ecfdf5', color: '#059669' },
+  in_progress:        { bg: '#E9EDF2', color: '#081B2D' },
 };
 
 const TABS = ['files', 'activity', 'chat'] as const;
@@ -32,8 +32,8 @@ type Tab = typeof TABS[number];
 const CHAT_FILE_TYPES = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'zip'];
 const CHAT_MAX_MB = 10;
 
-const MENTION_STYLE = { fontWeight: 700, color: '#047857', background: '#d1fae5', borderRadius: 4, padding: '0 3px' };
-const MENTION_STYLE_MINE = { fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,0.25)', borderRadius: 4, padding: '0 3px' };
+const MENTION_STYLE = { fontWeight: 700, color: '#15283C', background: '#E9EDF2', borderRadius: 4, padding: '0 3px' };
+const MENTION_STYLE_MINE = { fontWeight: 700, color: '#081B2D', background: 'rgba(8,27,45,0.12)', borderRadius: 4, padding: '0 3px' };
 
 function fmtChatTime(d: string | null | undefined): string {
   if (!d) return '';
@@ -224,16 +224,16 @@ export default function ClientProjectDetailPage() {
       <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>Progress</span>
         <div style={{ flex: 1, height: 8, background: '#f1f5f9', borderRadius: 4, overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: pct === 100 ? '#16a34a' : GREEN, borderRadius: 4, transition: 'width 0.4s' }} />
+          <div style={{ width: `${pct}%`, height: '100%', background: pct === 100 ? '#081B2D' : GREEN, borderRadius: 4, transition: 'width 0.4s' }} />
         </div>
-        <span style={{ fontSize: 13, fontWeight: 700, color: pct === 100 ? '#16a34a' : GREEN, minWidth: 36, textAlign: 'right' }}>{pct}%</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: pct === 100 ? '#081B2D' : GREEN, minWidth: 36, textAlign: 'right' }}>{pct}%</span>
       </div>
 
       {p.delivery_status === 'delivered_to_client' && (
-        <div style={{ background: '#ecfdf5', borderRadius: 10, border: '1px solid #bbf7d0', padding: '14px 18px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ background: '#E9EDF2', borderRadius: 10, border: '1px solid #E6E2D9', padding: '14px 18px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>Project delivery is ready</div>
-            <div style={{ fontSize: 12, color: '#047857', marginTop: 2 }}>{p.delivery_file_name || 'Final project package'}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#15283C' }}>Project delivery is ready</div>
+            <div style={{ fontSize: 12, color: '#15283C', marginTop: 2 }}>{p.delivery_file_name || 'Final project package'}</div>
           </div>
           <button
             onClick={downloadProjectDelivery}
@@ -347,7 +347,7 @@ export default function ClientProjectDetailPage() {
                 <div key={msg.id} style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', marginBottom: 12, gap: 8 }}>
                   <div style={{
                     width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                    background: isMe ? 'linear-gradient(135deg,#10b981,#059669)' : '#e2e8f0',
+                    background: isMe ? 'linear-gradient(135deg,#081B2D,#203750)' : '#e2e8f0',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 11, fontWeight: 700, color: isMe ? '#fff' : '#64748b',
                   }}>
@@ -359,13 +359,13 @@ export default function ClientProjectDetailPage() {
                     </div>
                     <div style={{
                       padding: '8px 12px', borderRadius: 10,
-                      background: isMe ? GREEN : '#fff',
-                      color: isMe ? '#fff' : '#1e293b',
+                      background: isMe ? '#E9EDF2' : '#fff',
+                      color: isMe ? '#15283C' : '#1e293b',
                       border: isMe ? 'none' : '1px solid #e2e8f0',
                       fontSize: 13, whiteSpace: 'pre-wrap',
                     }}>
                       {msg.is_deleted ? (
-                        <div style={{ fontStyle: 'italic', color: isMe ? 'rgba(255,255,255,0.75)' : '#94a3b8' }}>This message was deleted</div>
+                        <div style={{ fontStyle: 'italic', color: isMe ? '#626975' : '#94a3b8' }}>This message was deleted</div>
                       ) : (
                         <>
                           {renderWithMentions(msg.content, msg.mentions, mentionNameById, isMe ? MENTION_STYLE_MINE : MENTION_STYLE)}
@@ -375,9 +375,9 @@ export default function ClientProjectDetailPage() {
                               style={{
                                 display: 'block', marginTop: msg.content ? 6 : 0, padding: '4px 10px',
                                 borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                                border: `1px solid ${isMe ? 'rgba(255,255,255,0.35)' : '#e2e8f0'}`,
-                                background: isMe ? 'rgba(255,255,255,0.12)' : '#f8fafc',
-                                color: isMe ? '#fff' : GREEN,
+                                border: `1px solid ${isMe ? 'rgba(8,27,45,0.25)' : '#e2e8f0'}`,
+                                background: isMe ? 'rgba(8,27,45,0.08)' : '#f8fafc',
+                                color: isMe ? '#15283C' : GREEN,
                               }}>
                               📎 {msg.attachment_name}
                             </button>
@@ -433,7 +433,7 @@ export default function ClientProjectDetailPage() {
                 type="submit"
                 disabled={chatSending || (!chatText.trim() && !chatFile)}
                 style={{
-                  padding: '8px 18px', background: chatSending ? '#a7f3d0' : GREEN,
+                  padding: '8px 18px', background: chatSending ? '#203750' : GREEN,
                   color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
                   cursor: chatSending || (!chatText.trim() && !chatFile) ? 'not-allowed' : 'pointer',
                 }}>

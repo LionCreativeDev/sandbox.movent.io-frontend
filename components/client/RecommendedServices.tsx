@@ -6,6 +6,10 @@ import {
 } from '@/lib/services/clientServicesService';
 import { HiSparkles, HiStar, HiXMark } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
+import { DASHBOARD_THEME } from './dashboardTheme';
+import { aiServiceCategoryStyle } from './ai-services/categoryStyle';
+import CategoryImage from './ai-services/CategoryImage';
+import { AI_THEME } from './ai-services/theme';
 
 // "Grow Your Business With Us" — the company's services, on the client's own
 // dashboard and on /client/services.
@@ -38,6 +42,9 @@ const QUOTE_COPY = {
 };
 
 const GREEN = '#10b981';
+// `variant="navy"` is passed only from /client/dashboard (see dashboardTheme.ts)
+// — /client/services keeps the default green everywhere else this renders.
+const accentOf = (variant: 'default' | 'navy') => (variant === 'navy' ? DASHBOARD_THEME.navy : GREEN);
 
 // A safety net, not a substitute for getting the API right.
 //
@@ -53,13 +60,89 @@ const asList = <T,>(value: T[] | Record<string, T> | null | undefined): T[] => {
   return [];
 };
 
-function ServiceCard({ service, currency, onAct, expanded, onToggleExpand }: {
+// Two distinct card looks live in this one component:
+//  - default (the icon-row card, unchanged) on /client/services.
+//  - navy (matches AI Suggested IT Services' image-card style) only on the
+//    dashboard, where `navy` is passed true. Image order mirrors the AI
+//    section's own rule: this service's own uploaded icon_url first, then
+//    the category image keyed off its `group`, then the bundled fallback.
+function ServiceCard({ service, currency, onAct, expanded, onToggleExpand, accent, navy }: {
   service: PortalService;
   currency: string;
   onAct: (service: PortalService) => void;
   expanded: boolean;
   onToggleExpand: () => void;
+  accent: string;
+  navy: boolean;
 }) {
+  if (navy) {
+    const cat = aiServiceCategoryStyle(service.group || '');
+    const CatIcon = cat.icon;
+    return (
+      <div style={{
+        border: `1px solid ${AI_THEME.border}`, borderRadius: 14, overflow: 'hidden',
+        display: 'flex', flexDirection: 'column', background: AI_THEME.cardBg,
+      }}>
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: AI_THEME.imagePlaceholderBg }}>
+          {service.icon_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={service.icon_url} alt={service.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          ) : (
+            <CategoryImage src={cat.image} alt={`${service.group || service.name} illustration`} />
+          )}
+          <span style={{
+            position: 'absolute', top: 10, left: 10, display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 10.5, fontWeight: 700, color: AI_THEME.badgeText, background: AI_THEME.badgeBg, padding: '3px 9px 3px 7px', borderRadius: 999,
+            textTransform: 'uppercase', letterSpacing: '0.03em', boxShadow: '0 1px 3px rgba(27,46,75,.12)',
+          }}>
+            <CatIcon size={11} />
+            {service.group || 'Service'}
+          </span>
+          {service.is_featured && (
+            <span style={{
+              position: 'absolute', top: 10, right: 10, display: 'inline-flex', alignItems: 'center', gap: 3,
+              padding: '3px 8px', borderRadius: 999, background: AI_THEME.goldBg, color: AI_THEME.gold, fontSize: 10, fontWeight: 700,
+            }}>
+              <HiStar size={9} /> POPULAR
+            </span>
+          )}
+        </div>
+
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', flex: 1 }}>
+          <h3 style={{ margin: '0 0 6px', fontSize: 15, lineHeight: 1.25, fontWeight: 800, color: AI_THEME.heading }}>{service.name}</h3>
+          {service.short_description && (
+            <p style={{
+              margin: 0, fontSize: 12, color: AI_THEME.body, lineHeight: 1.55, flex: 1,
+              ...(expanded ? {} : { display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }),
+            }}>
+              {service.short_description}
+            </p>
+          )}
+          {service.starting_price !== null && (
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: accent, marginTop: 6 }}>
+              From {currency} {service.starting_price.toLocaleString()}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
+            <button onClick={onToggleExpand} style={{
+              flex: '0 0 auto', padding: '9px 12px', borderRadius: 8, border: `1.5px solid ${AI_THEME.navy}`,
+              background: 'transparent', color: AI_THEME.navy, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            }}>
+              {expanded ? 'Show Less' : 'Learn More'}
+            </button>
+            <button onClick={() => onAct(service)} style={{
+              flex: 1, border: 'none', borderRadius: 8, padding: '9px 12px',
+              background: accent, color: '#fff', fontSize: 12, fontWeight: 800, cursor: 'pointer',
+            }}>
+              Request Quote
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0',
@@ -96,7 +179,7 @@ function ServiceCard({ service, currency, onAct, expanded, onToggleExpand }: {
             </p>
           )}
           {service.starting_price !== null && (
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: GREEN, marginTop: 6 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: accent, marginTop: 6 }}>
               From {currency} {service.starting_price.toLocaleString()}
             </div>
           )}
@@ -112,7 +195,7 @@ function ServiceCard({ service, currency, onAct, expanded, onToggleExpand }: {
         </button>
         <button onClick={() => onAct(service)} style={{
           padding: '6px 12px', borderRadius: 7, border: 'none',
-          background: GREEN, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          background: accent, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
         }}>
           Request Quote
         </button>
@@ -126,10 +209,14 @@ export default function RecommendedServices({
   // The dashboard shows a trimmed section with a link through to the full
   // page; /client/services shows everything.
   compact = false,
+  variant = 'default',
 }: {
   currency?: string;
   compact?: boolean;
+  variant?: 'default' | 'navy';
 }) {
+  const accent = accentOf(variant);
+  const navy = variant === 'navy';
   const router = useRouter();
   const [data, setData]       = useState<PortalServices | null>(null);
   const [loading, setLoading] = useState(true);
@@ -192,8 +279,8 @@ export default function RecommendedServices({
     return (
       <div style={{ marginBottom: 22 }}>
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>{title}</div>
-          {subtitle && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{subtitle}</div>}
+          <div style={{ fontSize: 14, fontWeight: 700, color: navy ? AI_THEME.heading : '#1e293b' }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 12, color: navy ? AI_THEME.muted : '#94a3b8', marginTop: 2 }}>{subtitle}</div>}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
           {shown.map(s => (
@@ -204,6 +291,8 @@ export default function RecommendedServices({
               onAct={openDialog}
               expanded={expanded === s.id}
               onToggleExpand={() => setExpanded(prev => (prev === s.id ? null : s.id))}
+              accent={accent}
+              navy={navy}
             />
           ))}
         </div>
@@ -219,8 +308,8 @@ export default function RecommendedServices({
     // following it; /client/services ends the page.
     <div style={{ marginTop: 8, ...(compact ? { marginBottom: 24 } : {}) }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <HiSparkles size={18} color={GREEN} />
-        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1e293b' }}>Grow Your Business With Us</h2>
+        <HiSparkles size={18} color={variant === 'navy' ? DASHBOARD_THEME.gold : GREEN} />
+        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: variant === 'navy' ? DASHBOARD_THEME.textPrimary : '#1e293b' }}>Grow Your Business With Us</h2>
       </div>
       <p style={{ margin: '0 0 18px', fontSize: 12.5, color: '#94a3b8' }}>
         Other things we can take off your hands.
@@ -240,8 +329,10 @@ export default function RecommendedServices({
 
       {compact && (
         <button onClick={() => router.push('/client/services')} style={{
-          padding: '9px 18px', borderRadius: 8, border: '1.5px solid #bbf7d0',
-          background: '#f0fdf4', color: '#059669', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          padding: '9px 18px', borderRadius: 8,
+          border: `1.5px solid ${variant === 'navy' ? DASHBOARD_THEME.border : '#bbf7d0'}`,
+          background: variant === 'navy' ? DASHBOARD_THEME.badgeBg : '#f0fdf4',
+          color: accent, fontSize: 13, fontWeight: 600, cursor: 'pointer',
         }}>
           See all services →
         </button>
@@ -289,7 +380,7 @@ export default function RecommendedServices({
               </button>
               <button onClick={submit} disabled={sending} style={{
                 padding: '9px 20px', borderRadius: 8, border: 'none',
-                background: sending ? '#cbd5e1' : GREEN, color: '#fff', fontSize: 13, fontWeight: 600,
+                background: sending ? '#cbd5e1' : accent, color: '#fff', fontSize: 13, fontWeight: 600,
                 cursor: sending ? 'wait' : 'pointer',
               }}>
                 {sending ? 'Sending…' : 'Send Request'}

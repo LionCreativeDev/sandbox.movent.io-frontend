@@ -5,13 +5,13 @@ import { fmtDateLong as fmtDate } from '@/lib/date';
 import Link from 'next/link';
 import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 const STATUS_OPTS = ['', 'planning', 'active', 'on_hold', 'completed', 'cancelled'];
 const SC: Record<string, { bg: string; color: string }> = {
   planning:  { bg: '#eff6ff', color: '#2563eb' },
-  active:    { bg: '#ecfdf5', color: '#059669' },
+  active:    { bg: '#E9EDF2', color: '#081B2D' },
   on_hold:   { bg: '#fffbeb', color: '#d97706' },
-  completed: { bg: '#f0fdf4', color: '#16a34a' },
+  completed: { bg: '#E9EDF2', color: '#081B2D' },
   cancelled: { bg: '#fef2f2', color: '#dc2626' },
 };
 
@@ -72,7 +72,7 @@ export default function ClientProjectsPage() {
               padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500, cursor: 'pointer',
               border: '1px solid',
               borderColor: status === s ? GREEN : '#e2e8f0',
-              background: status === s ? '#ecfdf5' : '#fff',
+              background: status === s ? '#E9EDF2' : '#fff',
               color: status === s ? GREEN : '#64748b',
             }}>
             {s || 'All'}
@@ -123,7 +123,7 @@ export default function ClientProjectsPage() {
                     <td style={{ padding: '12px 18px', minWidth: 100 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1, height: 6, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                          <div style={{ width: `${pct}%`, height: '100%', background: pct === 100 ? '#16a34a' : GREEN, borderRadius: 3 }} />
+                          <div style={{ width: `${pct}%`, height: '100%', background: pct === 100 ? '#081B2D' : GREEN, borderRadius: 3 }} />
                         </div>
                         <span style={{ fontSize: 11, color: '#64748b', whiteSpace: 'nowrap' }}>{pct}%</span>
                       </div>
@@ -134,7 +134,7 @@ export default function ClientProjectsPage() {
                     <td style={{ padding: '12px 18px', textAlign: 'right' }}>
                       <Link href={`/client/projects/${p.id}`} style={{
                         fontSize: 12, color: GREEN, fontWeight: 600, textDecoration: 'none',
-                        padding: '4px 12px', border: '1px solid #a7f3d0', borderRadius: 6,
+                        padding: '4px 12px', border: '1px solid #E6E2D9', borderRadius: 6,
                       }}>View</Link>
                     </td>
                   </tr>

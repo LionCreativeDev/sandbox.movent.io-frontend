@@ -4,7 +4,7 @@ import { clientService } from '@/lib/services/clientService';
 import PortalModuleDisabled from '@/components/client/PortalModuleDisabled';
 
 const SC: Record<string, { bg: string; color: string }> = {
-  confirmed:            { bg: '#ecfdf5', color: '#059669' },
+  confirmed:            { bg: '#E9EDF2', color: '#081B2D' },
   pending_verification: { bg: '#fffbeb', color: '#d97706' },
   failed:               { bg: '#fef2f2', color: '#dc2626' },
 };

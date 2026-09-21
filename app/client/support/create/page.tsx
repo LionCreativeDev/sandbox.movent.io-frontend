@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 
 interface ClientProject { id: number; name: string; status: string; }
 interface ClientInvoice { id: number; invoice_number: string; total_amount: string; status: string; }
@@ -161,7 +161,7 @@ export default function ClientCreateTicketPage() {
             <SubmitButton
               loading={loading} loadingText="Submitting Ticket…"
               style={{
-                padding: '10px 24px', background: loading ? '#a7f3d0' : GREEN,
+                padding: '10px 24px', background: loading ? '#E9EDF2' : GREEN,
                 color: '#fff', fontWeight: 600, fontSize: 14,
                 border: 'none', borderRadius: 8,
               }}>

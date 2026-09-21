@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { clientService } from '@/lib/services/clientService';
 
-const GREEN = '#10b981';
+const GREEN = '#081B2D';
 
 /**
  * Where the gateway sends the client back after they add a card.
@@ -60,8 +60,8 @@ function AddedContent() {
         {status === 'done' && (
           <>
             <div style={{
-              background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 8,
-              padding: '14px 16px', color: '#047857', fontSize: 13.5, lineHeight: 1.6, marginBottom: 20,
+              background: '#E9EDF2', border: '1px solid #E6E2D9', borderRadius: 8,
+              padding: '14px 16px', color: '#081B2D', fontSize: 13.5, lineHeight: 1.6, marginBottom: 20,
             }}>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>Payment method added</div>
               {label} is ready to use.
