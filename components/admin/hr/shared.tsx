@@ -15,6 +15,12 @@ export const ATTENDANCE_SC: Record<string, { bg: string; color: string }> = {
   late:     { bg: '#fffbeb', color: '#d97706' },
   half_day: { bg: '#eff6ff', color: '#2563eb' },
   holiday:  { bg: '#f1f5f9', color: '#64748b' },
+  leave:    { bg: '#f5f3ff', color: '#7c3aed' },
+  off_day:  { bg: '#f8fafc', color: '#94a3b8' },
+  pending:  { bg: '#fffbeb', color: '#b45309' },
+  not_checked_in: { bg: '#f8fafc', color: '#64748b' },
+  working: { bg: '#ecfeff', color: '#0891b2' },
+  checked_out: { bg: '#eef2ff', color: '#4f46e5' },
 };
 
 export const LEAVE_SC: Record<string, { bg: string; color: string }> = {

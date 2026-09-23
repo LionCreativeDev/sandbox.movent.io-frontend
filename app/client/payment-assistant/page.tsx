@@ -22,11 +22,11 @@ const GREEN = "#081B2D";
 // blue-bordered container, tinted bubbles either side, dark-navy avatar for the
 // client. GREEN above stays the portal's action colour so the buttons still
 // read as the Client Portal's, not a second brand.
-const BLUE = "#0aa473"; // container border + send control
+const BLUE = "#203750"; // container border + send control
 const BUBBLE = "#e7f0fd"; // message background, both speakers
 const INK = "#14284a"; // message text
 const LINE = "#dbe7f8"; // hairlines on the blue surface
-const NAVY = "#0aa473"; // client avatar
+const NAVY = "#081B2D"; // client avatar
 
 /**
  * How close to the bottom still counts as "reading the latest".

@@ -374,6 +374,21 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
       'canDownloadOrExportInvoices', 'canViewPayments', 'canRecordPayments',
       'canSendPaymentReminders', 'canManageBillingClients', 'canViewInvoiceReports',
     ],
+    // Finance Area — Seller is one of the two roles with Finance access by
+    // default (Company Admin being the other). READ + RECORD only:
+    // canReconcilePayments/canReconcilePaymentDetails and every canExport*
+    // key are deliberately absent (sign-off and bulk data export are
+    // explicit Company Admin grants), as is canViewAllCompanyFinance — so
+    // opening Finance to a Seller never widens which invoices they can see.
+    // Mirrors App\Services\RoleDefaultPermissions' 'seller' entry; keep both
+    // in step. Only granted at all when the company has the Finance module.
+    finance: [
+      'canViewFinanceDashboard', 'canViewRevenueDashboard',
+      'canViewFinanceInvoices', 'canCreateFinanceInvoices', 'canUpdateFinanceInvoices',
+      'canViewPayments', 'canRecordPayments', 'canViewPaymentDetails',
+      'canCreateInvoiceReminders', 'canSendInvoiceReminders', 'canTrackInvoiceReminders',
+      'canViewFinanceReports', 'canViewRevenueReports', 'canViewPaymentReports',
+    ],
     // canCreateLinkedProjectTask is deliberately NOT granted — the Task
     // feature is retired for this role entirely (backend hard-blocks it
     // regardless of any permission held).
@@ -502,17 +517,38 @@ const ROLE_DEFAULT_PERMISSIONS: Record<string, Record<string, string[]>> = {
     ],
   },
   hr: {
+    // Mirrors app/Services/RoleDefaultPermissions.php's 'hr' entry — keep
+    // both lists identical (see that file's own comment).
+    // canCreateEmployees/canEditEmployees/canApproveLeave removed from
+    // defaults on request — still valid, grantable permissions, just no
+    // longer auto-applied to a new HR user.
     hr: [
-      'canViewHRDashboard', 'canViewEmployees', 'canCreateEmployees', 'canEditEmployees',
-      'canViewLeave', 'canApproveLeave', 'canViewPayroll', 'canViewHRReports',
+      'canViewHRDashboard', 'canViewEmployees',
+      'canManageEmployeeDocuments',
+      'canViewAttendance', 'canUpdateAttendance',
+      'canViewLeave', 'canApplyLeave',
+      'canViewPayroll', 'canUpdatePayroll', 'canProcessPayroll',
+      'canViewRecruitment', 'canCreateRecruitment', 'canUpdateRecruitment', 'canManageRecruitment',
+      'canViewHRReports', 'canExportHRReports',
     ],
     account: ['canUseGeneralChat'],
   },
+  // "Finance User" — the role the Finance Area exists for, so it gets the
+  // whole module including the two things a Seller deliberately does not:
+  // reconciliation and exports. Mirrors App\Services\RoleDefaultPermissions'
+  // 'finance' entry exactly; keep both in step.
   finance: {
     finance: [
-      'canViewFinanceDashboard', 'canViewRevenueDashboard', 'canViewPayments',
-      'canViewFinanceReports', 'canExportFinanceReports', 'canViewFinanceInvoices',
-      'canViewPaymentDetails',
+      'canViewFinanceDashboard', 'canViewRevenueDashboard',
+      'canViewFinanceInvoices', 'canCreateFinanceInvoices',
+      'canUpdateFinanceInvoices', 'canExportFinanceInvoices',
+      'canViewPayments', 'canRecordPayments', 'canReconcilePayments',
+      'canViewPaymentDetails', 'canReconcilePaymentDetails', 'canExportPaymentDetails',
+      'canViewAllCompanyFinance',
+      'canCreateInvoiceReminders', 'canSendInvoiceReminders', 'canTrackInvoiceReminders',
+      'canViewFinanceReports', 'canExportFinanceReports',
+      'canViewRevenueReports', 'canExportRevenueReports',
+      'canViewPaymentReports', 'canExportPaymentReports',
     ],
     account: ['canUseGeneralChat'],
   },

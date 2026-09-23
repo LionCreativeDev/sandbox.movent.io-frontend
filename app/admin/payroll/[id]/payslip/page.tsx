@@ -60,6 +60,23 @@ export default function PayslipPage() {
                 <td style={{ padding: '10px 0', fontSize: 13, color: '#64748b' }}>Deductions</td>
                 <td style={{ padding: '10px 0', fontSize: 13, textAlign: 'right', color: '#dc2626' }}>- {payroll.deductions}</td>
               </tr>
+              {payroll.attendance_deduction > 0 && (
+                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '10px 0', fontSize: 13, color: '#64748b' }}>
+                    Attendance Deduction
+                    {payroll.attendance_deduction_breakdown && (
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                        {(['late', 'half_day', 'absent', 'off_day'] as const)
+                          .map(key => ({ key, b: payroll.attendance_deduction_breakdown?.[key] }))
+                          .filter(({ b }) => b && b.billable_count > 0)
+                          .map(({ key, b }) => `${key.replace('_', ' ')} ×${b!.billable_count}`)
+                          .join(', ')}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: '10px 0', fontSize: 13, textAlign: 'right', color: '#dc2626' }}>- {payroll.attendance_deduction}</td>
+                </tr>
+              )}
               <tr>
                 <td style={{ padding: '14px 0 0', fontSize: 15, fontWeight: 700, color: '#1e293b' }}>Net Pay</td>
                 <td style={{ padding: '14px 0 0', fontSize: 15, fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>{payroll.net_pay}</td>

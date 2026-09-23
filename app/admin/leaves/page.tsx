@@ -15,6 +15,7 @@ export default function LeavesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusF, setStatusF] = useState('');
+  const [employeeF, setEmployeeF] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [employeeId, setEmployeeId] = useState('');
   const [leaveType, setLeaveType] = useState<LeaveType>('annual');
@@ -33,12 +34,13 @@ export default function LeavesPage() {
     try {
       const params: Record<string, string> = {};
       if (statusF) params.status = statusF;
+      if (employeeF) params.employee_id = employeeF;
       setLeaves(await adminHrService.leaves.list(params));
     } catch { toast.error('Failed to load leave requests'); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [statusF]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [statusF, employeeF]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,12 +113,16 @@ export default function LeavesPage() {
         </form>
       )}
 
-      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '12px 16px', marginBottom: 16 }}>
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', padding: '12px 16px', marginBottom: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <select value={statusF} onChange={e => setStatusF(e.target.value)} style={{ ...inp, width: 180, background: '#fff' }}>
           <option value="">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
+        </select>
+        <select value={employeeF} onChange={e => setEmployeeF(e.target.value)} style={{ ...inp, width: 200, background: '#fff' }}>
+          <option value="">All Employees</option>
+          {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
         </select>
       </div>
 
@@ -126,7 +132,8 @@ export default function LeavesPage() {
         ) : leaves.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>No leave requests found.</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 {['Employee', 'Type', 'From', 'To', 'Days', 'Reason', 'Status', 'Actions'].map(h => (
@@ -156,6 +163,7 @@ export default function LeavesPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </DashboardLayout>

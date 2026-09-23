@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useModuleGuard } from '@/hooks/useModuleGuard';
-import { adminHrService, Recruitment, ApplicantStatus } from '@/lib/services/adminHrService';
+import { adminHrService, Recruitment, ApplicantStatus, RecruitmentStatus } from '@/lib/services/adminHrService';
 import { Badge, inp, lbl, card } from '@/components/admin/projects/shared';
 import { RECRUITMENT_SC, APPLICANT_SC } from '@/components/admin/hr/shared';
 import toast from 'react-hot-toast';
@@ -27,6 +27,15 @@ export default function RecruitmentDetailPage() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [removing, setRemoving] = useState(false);
+
+  // "Edit Posting" — position/department/openings/description/status.
+  const [editing, setEditing] = useState(false);
+  const [editPosition, setEditPosition] = useState('');
+  const [editDepartment, setEditDepartment] = useState('');
+  const [editOpenings, setEditOpenings] = useState('1');
+  const [editDescription, setEditDescription] = useState('');
+  const [editStatus, setEditStatus] = useState<RecruitmentStatus>('open');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const load = async () => {
     try { setPosting(await adminHrService.recruitment.getOne(recruitmentId)); }
@@ -60,6 +69,35 @@ export default function RecruitmentDetailPage() {
     finally { setBusyId(null); }
   };
 
+  const startEdit = () => {
+    if (!posting) return;
+    setEditPosition(posting.position);
+    setEditDepartment(posting.department ?? '');
+    setEditOpenings(String(posting.openings));
+    setEditDescription(posting.description ?? '');
+    setEditStatus(posting.status);
+    setEditing(true);
+  };
+
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPosition) { toast.error('Position is required'); return; }
+    setSavingEdit(true);
+    try {
+      await adminHrService.recruitment.update(recruitmentId, {
+        position: editPosition,
+        department: editDepartment || undefined,
+        openings: editOpenings ? Number(editOpenings) : undefined,
+        description: editDescription || undefined,
+        status: editStatus,
+      });
+      toast.success('Posting updated');
+      setEditing(false);
+      load();
+    } catch (err: any) { toast.error(err?.response?.data?.message || 'Failed to update posting'); }
+    finally { setSavingEdit(false); }
+  };
+
   const removePosting = async () => {
     if (!confirm('Delete this job posting? This cannot be undone.')) return;
     setRemoving(true);
@@ -82,13 +120,48 @@ export default function RecruitmentDetailPage() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <Badge label={posting.status} sc={RECRUITMENT_SC[posting.status]} />
+          <button onClick={() => (editing ? setEditing(false) : startEdit())} style={{ padding: '8px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+            {editing ? 'Cancel' : 'Edit'}
+          </button>
           <button onClick={removePosting} disabled={removing} style={{ padding: '8px 16px', background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: removing ? 'not-allowed' : 'pointer' }}>
             {removing ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       </div>
 
-      {posting.description && (
+      {editing ? (
+        <form onSubmit={saveEdit} style={{ ...card, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div>
+              <label style={lbl}>Position *</label>
+              <input value={editPosition} onChange={e => setEditPosition(e.target.value)} style={inp} required />
+            </div>
+            <div>
+              <label style={lbl}>Department</label>
+              <input value={editDepartment} onChange={e => setEditDepartment(e.target.value)} style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Openings</label>
+              <input type="number" min={1} value={editOpenings} onChange={e => setEditOpenings(e.target.value)} style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Status</label>
+              <select value={editStatus} onChange={e => setEditStatus(e.target.value as RecruitmentStatus)} style={inp}>
+                <option value="open">Open</option>
+                <option value="on_hold">On Hold</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={lbl}>Description</label>
+            <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} style={{ ...inp, minHeight: 80, resize: 'vertical' }} />
+          </div>
+          <button type="submit" disabled={savingEdit} style={{ padding: '9px 20px', background: savingEdit ? '#93c5fd' : '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: savingEdit ? 'not-allowed' : 'pointer' }}>
+            {savingEdit ? 'Saving…' : 'Save Changes'}
+          </button>
+        </form>
+      ) : posting.description && (
         <div style={{ ...card, marginBottom: 20 }}>
           <p style={{ fontSize: 13, color: '#475569', margin: 0, whiteSpace: 'pre-wrap' }}>{posting.description}</p>
         </div>
@@ -127,7 +200,8 @@ export default function RecruitmentDetailPage() {
         {!posting.applicants || posting.applicants.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>No applicants yet.</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 {['Name', 'Email', 'Phone', 'Status', 'Actions'].map(h => (
@@ -156,6 +230,7 @@ export default function RecruitmentDetailPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </DashboardLayout>

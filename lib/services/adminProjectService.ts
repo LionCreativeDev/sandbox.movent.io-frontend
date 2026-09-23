@@ -165,10 +165,16 @@ export interface ProjectAttachment {
   uploaded_by_user_id: number | null;
   original_name: string;
   file_name: string;
-  file_path: string;
+  file_path: string | null;
   file_type: string | null;
   file_size: number | null;
   is_visible_to_client: boolean;
+  // Google Drive company storage — 'internal' has file_path and no
+  // google_drive_*; 'google_drive' is the reverse. See
+  // App\Services\AttachmentStorageService.
+  storage_type?: 'internal' | 'google_drive';
+  google_drive_file_id?: string | null;
+  google_drive_folder_id?: string | null;
   created_at: string;
   updated_at: string;
   uploaded_by_admin?: { id: number; name: string } | null;

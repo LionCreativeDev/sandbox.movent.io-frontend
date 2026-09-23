@@ -48,12 +48,30 @@ export default function HrDashboardPage() {
             <StatCard label="Payroll Pending" value={String(stats.payroll_pending)} color="#d97706" />
           </div>
 
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
             <Link href="/admin/employees" style={{ padding: '10px 18px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#1e293b', textDecoration: 'none' }}>Manage Employees</Link>
             <Link href="/admin/attendance" style={{ padding: '10px 18px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#1e293b', textDecoration: 'none' }}>Mark Attendance</Link>
             <Link href="/admin/leaves" style={{ padding: '10px 18px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#1e293b', textDecoration: 'none' }}>Review Leave Requests</Link>
             <Link href="/admin/payroll" style={{ padding: '10px 18px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#1e293b', textDecoration: 'none' }}>Process Payroll</Link>
             <Link href="/admin/recruitment" style={{ padding: '10px 18px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#1e293b', textDecoration: 'none' }}>Recruitment</Link>
+          </div>
+
+          <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, color: '#0f172a', fontSize: 14 }}>Recent HR Activity</div>
+            {stats.recent_activity.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No HR activity yet.</div>
+            ) : (
+              <div>
+                {stats.recent_activity.map(a => (
+                  <div key={a.id} style={{ padding: '10px 20px', borderBottom: '1px solid #f8fafc', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <span style={{ fontSize: 13, color: '#1e293b' }}>
+                      {a.action.replace(/_/g, ' ')}{a.entity_type ? ` — ${a.entity_type}${a.entity_id ? ` #${a.entity_id}` : ''}` : ''}
+                    </span>
+                    <span style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap' }}>{new Date(a.created_at).toLocaleString('en-GB')}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </>
       )}

@@ -47,7 +47,11 @@ export default function InvoicesPage() {
   const [deletingId, setDeletingId]     = useState<number | null>(null);
   const isAdmin = getAuthType() === 'admin';
 
-  useEffect(() => { setCanCreate(can('invoice', 'canCreateInvoices')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Either module's create right — see the note on the same pair in
+  // app/invoices/new/page.tsx.
+  useEffect(() => {
+    setCanCreate(can('invoice', 'canCreateInvoices') || can('finance', 'canCreateFinanceInvoices'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = async () => {
     const sub = getAuthType() === 'user';

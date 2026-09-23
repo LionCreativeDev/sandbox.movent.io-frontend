@@ -205,7 +205,14 @@ function NewInvoiceForm() {
 
   // Load companies on mount — also resolves isAdmin from cookies (client-only)
   useEffect(() => {
-    if (!can('invoice', 'canCreateInvoices')) { router.replace('/invoices'); return; }
+    // Either module's create right opens this form. The Finance Area has no
+    // invoice-writing screen of its own — it links here — and POST
+    // /user/invoices now accepts finance.canCreateFinanceInvoices alongside
+    // invoice.canCreateInvoices, which is the real gate.
+    if (!can('invoice', 'canCreateInvoices') && !can('finance', 'canCreateFinanceInvoices')) {
+      router.replace('/invoices');
+      return;
+    }
     const adminFlag = getAuthType() === 'admin';
     setIsAdmin(adminFlag);
     setAuthResolved(true);

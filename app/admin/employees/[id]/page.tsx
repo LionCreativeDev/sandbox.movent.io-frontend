@@ -18,8 +18,6 @@ export default function EmployeeDetailPage() {
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [loading, setLoading]   = useState(true);
-  const [noteBody, setNoteBody] = useState('');
-  const [savingNote, setSavingNote] = useState(false);
   const [docTitle, setDocTitle] = useState('');
   const [docFile, setDocFile]   = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -37,24 +35,27 @@ export default function EmployeeDetailPage() {
   useEffect(() => { load(); }, [employeeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deactivate = async () => {
-    if (!confirm('Deactivate this employee?')) return;
+    if (!confirm('Deactivate this employee? They will stay on the Employees list marked Terminated — this does not delete their record.')) return;
     try {
-      await adminHrService.employees.remove(employeeId);
+      setEmployee(await adminHrService.employees.deactivate(employeeId));
       toast.success('Employee deactivated');
-      router.push('/admin/employees');
     } catch { toast.error('Failed to deactivate employee'); }
   };
 
-  const addNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!noteBody.trim()) return;
-    setSavingNote(true);
+  const reactivate = async () => {
     try {
-      await adminHrService.employees.notes.add(employeeId, noteBody);
-      setNoteBody('');
-      load();
-    } catch { toast.error('Failed to add note'); }
-    finally { setSavingNote(false); }
+      setEmployee(await adminHrService.employees.reactivate(employeeId));
+      toast.success('Employee reactivated');
+    } catch { toast.error('Failed to reactivate employee'); }
+  };
+
+  const deleteEmployee = async () => {
+    if (!confirm('Delete this employee permanently? This removes them from every list — attendance/leave/payroll history is kept, but the employee record itself cannot be recovered from the UI. This is different from Deactivate.')) return;
+    try {
+      await adminHrService.employees.remove(employeeId);
+      toast.success('Employee deleted');
+      router.push('/admin/employees');
+    } catch { toast.error('Failed to delete employee'); }
   };
 
   const uploadDoc = async (e: React.FormEvent) => {
@@ -71,7 +72,7 @@ export default function EmployeeDetailPage() {
   };
 
   if (loading) return <DashboardLayout title="Employee"><div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Loading…</div></DashboardLayout>;
-  if (!employee) return null;
+  if (!employee) return <DashboardLayout title="Employee"><div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>Employee not found.</div></DashboardLayout>;
 
   return (
     <DashboardLayout title={employee.name}>
@@ -86,22 +87,29 @@ export default function EmployeeDetailPage() {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Link href={`/admin/employees/${employeeId}/edit`} style={{ padding: '9px 16px', border: '1px solid #e2e8f0', background: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#1e293b', textDecoration: 'none' }}>Edit</Link>
-            {employee.status !== 'terminated' && (
-              <button onClick={deactivate} style={{ padding: '9px 16px', border: '1px solid #fecaca', background: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#dc2626', cursor: 'pointer' }}>Deactivate</button>
+            {employee.status === 'terminated' ? (
+              <button onClick={reactivate} style={{ padding: '9px 16px', border: '1px solid #bbf7d0', background: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#059669', cursor: 'pointer' }}>Reactivate</button>
+            ) : (
+              <button onClick={deactivate} style={{ padding: '9px 16px', border: '1px solid #fde68a', background: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#d97706', cursor: 'pointer' }}>Deactivate</button>
             )}
+            <button onClick={deleteEmployee} style={{ padding: '9px 16px', border: '1px solid #fecaca', background: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#dc2626', cursor: 'pointer' }}>Delete</button>
           </div>
         </div>
 
-        {/* Info */}
+        {/* Info — auto-fit rather than a fixed 4 columns, so 8 fields don't
+            leave an uneven trailing row and it collapses cleanly on narrow
+            screens instead of compressing 4-across. */}
         <div style={card}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Email</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.email ?? '—'}</div></div>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Phone</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.phone ?? '—'}</div></div>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Department</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.department ?? '—'}</div></div>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Designation</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.designation ?? '—'}</div></div>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Employment Type</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.employment_type.replace('_', ' ')}</div></div>
+            <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Shift</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.shift ? `${employee.shift.name} (${employee.shift_start_time?.slice(0, 5)} – ${employee.shift_end_time?.slice(0, 5)})` : (employee.shift_start_time && employee.shift_end_time ? `${employee.shift_start_time.slice(0, 5)} – ${employee.shift_end_time.slice(0, 5)}` : '—')}</div></div>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Salary</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.salary ?? '—'}</div></div>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Join Date</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.join_date ? new Date(employee.join_date).toLocaleDateString('en-GB') : '—'}</div></div>
+            <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Company</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.company?.name ?? '—'}</div></div>
           </div>
         </div>
 
@@ -187,29 +195,6 @@ export default function EmployeeDetailPage() {
                 <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: '#f8fafc', borderRadius: 8 }}>
                   <span style={{ fontSize: 13, color: '#0f172a' }}>{d.title}</span>
                   <span style={{ fontSize: 12, color: '#94a3b8' }}>{fmtFileSize(d.file_size_bytes)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Notes / Activity */}
-        <div style={card}>
-          <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 14, marginBottom: 14 }}>Notes / Activity</div>
-          <form onSubmit={addNote} style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-            <input value={noteBody} onChange={e => setNoteBody(e.target.value)} placeholder="Add a note…" style={{ ...inp, flex: 1 }} />
-            <button type="submit" disabled={savingNote} style={{ padding: '9px 18px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontSize: 13, fontWeight: 600, cursor: savingNote ? 'wait' : 'pointer' }}>
-              Add
-            </button>
-          </form>
-          {!employee.notes || employee.notes.length === 0 ? (
-            <div style={{ color: '#94a3b8', fontSize: 13 }}>No notes yet.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {employee.notes.map(n => (
-                <div key={n.id} style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: 8 }}>
-                  <div style={{ fontSize: 13, color: '#0f172a' }}>{n.body}</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>{n.author_admin?.name ?? 'Admin'} · {new Date(n.created_at).toLocaleString('en-GB')}</div>
                 </div>
               ))}
             </div>

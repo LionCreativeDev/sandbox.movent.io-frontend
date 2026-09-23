@@ -9,6 +9,8 @@ import { adminProjectService, ProjectAttachment, ProjectTaskAttachment, Task } f
 import ProjectTabs from '@/components/admin/projects/ProjectTabs';
 import { card, fmtDate, fmtFileSize, ALLOWED_ATTACHMENT_TYPES, DRAFT_HINT, DraftNotice } from '@/components/admin/projects/shared';
 import { handleNotFound } from '@/lib/notFound';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
+import { useDriveOAuthResult } from '@/hooks/useDriveOAuthResult';
 
 interface TaskAttachmentGroup {
   task: Task;
@@ -24,6 +26,10 @@ export default function ProjectAttachmentsPage() {
   const [attachments, setAttachments] = useState<ProjectAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  // Section 10's "Storage Limit Reached" modal — shown once per failed
+  // upload batch, not once per file, so uploading three files that all fail
+  // for the same reason does not stack three modals.
+  const [storageFull, setStorageFull] = useState(false);
   // Files can't be added to a draft — see the isDraft() guard in
   // Api\Admin\ProjectAttachmentController::store().
   const [projectDraft, setProjectDraft] = useState(false);
@@ -62,6 +68,14 @@ export default function ProjectAttachmentsPage() {
     adminProjectService.getOne(projectId).then(p => setProjectDraft(p.status === 'draft')).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Lands here directly after Google Drive OAuth completes — see
+  // components/storage/StorageLimitModal, which sends the admin to Google
+  // with THIS exact page as return_to instead of Settings. No manual
+  // refresh or renavigation needed: this is a fresh page load either way,
+  // so the attachment list/upload control below already read current
+  // state; the hook only needs to show the outcome toast.
+  useDriveOAuthResult();
+
   const downloadTaskAttachment = async (taskId: number, a: ProjectTaskAttachment) => {
     try { await adminProjectService.taskAttachments.download(projectId, taskId, a.id, a.original_name); }
     catch { toast.error('Download failed'); }
@@ -76,9 +90,13 @@ export default function ProjectAttachmentsPage() {
       if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${file.name}: file type not allowed`); failed++; continue; }
       try {
         await adminProjectService.attachments.upload(projectId, file);
-      } catch {
+      } catch (err) {
         failed++;
-        toast.error(`${file.name}: upload failed`);
+        if (isStorageLimitError(err)) {
+          setStorageFull(true);
+        } else {
+          toast.error(`${file.name}: upload failed`);
+        }
       }
     }
     if (failed < files.length) toast.success('Attachment(s) uploaded');
@@ -208,6 +226,8 @@ export default function ProjectAttachmentsPage() {
           </div>
         )}
       </div>
+
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

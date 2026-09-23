@@ -2,9 +2,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { adminInvoiceService } from '@/lib/services/adminInvoiceService';
 import { Invoice, InvoiceItem } from '@/types';
 import api from '@/lib/axios';
+import { getAuthType, can } from '@/lib/auth';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { HiArrowLeft, HiPlusCircle, HiTrash } from 'react-icons/hi2';
 import { handleNotFound } from '@/lib/notFound';
@@ -36,6 +36,15 @@ export default function EditInvoicePage() {
   const params = useParams<{ id: string }>();
   const invoiceId = Number(params.id);
 
+  // This screen used to be Company Admin-only: every call below was
+  // hardcoded to /admin/*, so canEditInvoices was grantable to staff but
+  // never usable by them. Finance > Invoices needs Update to work for a
+  // staff user, and PUT /user/invoices/{id} now exists to serve it, so the
+  // page reads its prefix from the session instead. Cookie-derived, so it
+  // must be state — reading it during the first render would differ between
+  // server and client and trip a hydration mismatch.
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
@@ -64,7 +73,23 @@ export default function EditInvoicePage() {
   const onlyOneBrand = brands.length === 1;
 
   useEffect(() => {
-    adminInvoiceService.getOne(invoiceId).then(inv => {
+    const admin = getAuthType() === 'admin';
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsAdmin(admin);
+
+    // Staff need one of the two edit rights — the Invoice module's own, or
+    // the Finance module's equivalent. Both are accepted by PUT
+    // /user/invoices/{id}, which is the real gate; this only avoids
+    // rendering a form that could never save.
+    if (!admin && !can('invoice', 'canEditInvoices') && !can('finance', 'canUpdateFinanceInvoices')) {
+      router.replace(`/invoices/${invoiceId}`);
+      return;
+    }
+
+    const prefix = admin ? '/admin' : '/user';
+
+    api.get(`${prefix}/invoices/${invoiceId}`).then(r => {
+      const inv = r.data.data as Invoice;
       setInvoice(inv);
       setCurrency(inv.currency);
       // due_date comes back as a full ISO timestamp
@@ -83,7 +108,10 @@ export default function EditInvoicePage() {
 
       setInvoiceType(inv.invoice_type === 'brand' ? 'brand' : 'company');
       setBrandId(inv.brand_id ?? 0);
-      api.get(`/admin/invoices/brands?company_id=${inv.company_id}`)
+      // The staff endpoint scopes the list to brands assigned to this user
+      // (and to their active company), so it needs no company_id argument —
+      // and must not accept one.
+      api.get(admin ? `/admin/invoices/brands?company_id=${inv.company_id}` : '/user/invoices/brands')
         .then(r => {
           const list = r.data.data ?? [];
           setBrands(list);
@@ -94,15 +122,21 @@ export default function EditInvoicePage() {
         })
         .catch(() => setBrands([]));
 
-      api.get('/admin/settings').then(r => {
-        const accounts = (r.data.data.gateways as GatewayAccountOption[]).filter(g => g.is_active);
+      // Settings is Company Admin-only; staff read the same active accounts
+      // through the invoice form's own endpoint, which already returns them
+      // pre-filtered to active and carries no credentials either way.
+      const gatewaysRequest = admin
+        ? api.get('/admin/settings').then(r => (r.data.data.gateways as GatewayAccountOption[]).filter(g => g.is_active))
+        : api.get('/user/invoices/gateway-accounts').then(r => (r.data.data.accounts as GatewayAccountOption[]));
+
+      gatewaysRequest.then(accounts => {
         setGatewayAccounts(accounts);
         const explicit = inv.gateway_account_ids ?? [];
         setSelectedGatewayIds(explicit.length ? explicit : defaultGatewaySelection(accounts));
         setGatewaysLoaded(true);
       }).catch(() => setGatewaysLoaded(true));
     }).catch((err) => { if (!handleNotFound(err, router)) setError('Failed to load invoice'); }).finally(() => setLoading(false));
-  }, [invoiceId]);
+  }, [invoiceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Only one account per gateway TYPE can be selected at once for an invoice
   // — selecting one clears any other selected account of that same type.
@@ -138,7 +172,10 @@ export default function EditInvoicePage() {
     if (subtotal <= 0) { setError('Invoice amount must be greater than 0'); return; }
     setSaving(true); setError('');
     try {
-      await adminInvoiceService.update(invoiceId, {
+      // Same payload either way — PUT /user/invoices/{id} is a deliberate
+      // mirror of the Admin route, so the form has nothing to branch on but
+      // the prefix.
+      await api.put(`${isAdmin ? '/admin' : '/user'}/invoices/${invoiceId}`, {
         invoice_type:    invoiceType,
         brand_id:        invoiceType === 'brand' ? brandId : null,
         tax_rate:        taxRate,
@@ -148,7 +185,7 @@ export default function EditInvoicePage() {
         items: items.map(r => ({ description: r.description, quantity: r.quantity, unit_price: r.unit_price })),
         gateway_account_ids: selectedGatewayIds,
       });
-      router.push(`/invoices/${invoiceId}`);
+      router.push(`${isAdmin ? '/admin' : ''}/invoices/${invoiceId}`);
     } catch (err: unknown) {
       const ex = err as { response?: { data?: { message?: string; errors?: Record<string, string[]> } } };
       const msgs = ex.response?.data?.errors;

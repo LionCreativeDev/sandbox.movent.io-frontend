@@ -22,6 +22,7 @@ export default function RecruitmentPage() {
   const [openings, setOpenings] = useState('1');
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
+  const [filterStatus, setFilterStatus] = useState('');
 
   useEffect(() => {
     adminClientService.companies().then(cs => {
@@ -38,12 +39,12 @@ export default function RecruitmentPage() {
 
   const load = async () => {
     setLoading(true);
-    try { setPostings(await adminHrService.recruitment.list()); }
+    try { setPostings(await adminHrService.recruitment.list(filterStatus ? { status: filterStatus } : undefined)); }
     catch { toast.error('Failed to load recruitment postings'); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [filterStatus]);
 
   const effectiveCompanyId = companyId || companies[0]?.id || 0;
 
@@ -76,6 +77,18 @@ export default function RecruitmentPage() {
         <button onClick={() => setShowForm(s => !s)} style={{ padding: '9px 18px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           {showForm ? 'Cancel' : '+ Add Posting'}
         </button>
+      </div>
+
+      <div style={{ ...card, display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 16 }}>
+        <div>
+          <label style={lbl}>Status</label>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ ...inp, minWidth: 160 }}>
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="on_hold">On Hold</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
       </div>
 
       {showForm && (
@@ -118,7 +131,8 @@ export default function RecruitmentPage() {
         ) : postings.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>No job postings found.</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
                 {['Position', 'Department', 'Openings', 'Applicants', 'Status', 'Actions'].map(h => (
@@ -141,6 +155,7 @@ export default function RecruitmentPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </DashboardLayout>

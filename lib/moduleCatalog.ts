@@ -125,17 +125,53 @@ export const MODULE_CATALOG: ModuleDef[] = [
     key: 'hr',
     name: 'HR',
     color: '#7c3aed',
+    // Extended 2026-09-21 alongside the new staff-facing HR module
+    // (Api\User\Employee/Attendance/Leave/Payroll/RecruitmentController) —
+    // canViewAttendance/canUpdateAttendance, canApplyLeave, canUpdatePayroll
+    // and canCreateRecruitment/canUpdateRecruitment are all real, enforced
+    // checks now, not just entries in ModuleCatalog.php's backend list. This
+    // file is what actually renders the checkboxes on the Add/Edit User
+    // screen — missing an entry here means the box can never be ticked for
+    // anyone, no matter what the backend allows.
     permissions: [
       { key: 'canViewHRDashboard',   label: 'View HR Dashboard' },
       { key: 'canViewEmployees',     label: 'View Employees' },
       { key: 'canCreateEmployees',   label: 'Create Employees' },
       { key: 'canEditEmployees',     label: 'Edit Employees' },
       { key: 'canDeleteEmployees',   label: 'Delete Employees' },
+      // Not in this role's default set on purpose — Deactivate/Reactivate
+      // used to ride on canEditEmployees (a default), so every HR user
+      // implicitly got it for free. Split out so it's Admin-only until
+      // explicitly granted.
+      { key: 'canDeactivateEmployees', label: 'Deactivate/Reactivate Employees' },
+      // Same split-out reasoning as canDeactivateEmployees above (Document
+      // upload/delete used to ride on canEditEmployees too) — but IS in
+      // this role's default set (see roleUtils.ts), unlike the others
+      // here, per explicit request.
+      { key: 'canManageEmployeeDocuments', label: 'Manage Employee Documents' },
+      { key: 'canViewAttendance',    label: 'View Attendance' },
+      { key: 'canUpdateAttendance',  label: 'Mark Attendance' },
+      // Not in this role's default set on purpose (see roleUtils.ts) —
+      // affects payroll deduction rules for every employee, so it's
+      // Admin-only until explicitly granted here.
+      { key: 'canManageAttendancePolicy', label: 'Manage Attendance Policy' },
+      // Also not in this role's default set on purpose — Shift CRUD used
+      // to ride on canCreate/Edit/DeleteEmployees, which ARE defaults, so
+      // every HR user implicitly got it for free. Split out so it's
+      // Admin-only until explicitly granted.
+      { key: 'canManageShifts',      label: 'Manage Shifts' },
+      // Same exclusion-from-defaults reasoning as canManageShifts above —
+      // see roleUtils.ts — Admin-only until explicitly granted here.
+      { key: 'canManageDepartments', label: 'Manage Departments' },
       { key: 'canViewRecruitment',   label: 'View Recruitment' },
+      { key: 'canCreateRecruitment', label: 'Create Recruitment' },
+      { key: 'canUpdateRecruitment', label: 'Update Recruitment' },
       { key: 'canManageRecruitment', label: 'Manage Recruitment' },
       { key: 'canViewPayroll',       label: 'View Payroll' },
+      { key: 'canUpdatePayroll',     label: 'Update Payroll' },
       { key: 'canProcessPayroll',    label: 'Process Payroll' },
       { key: 'canViewLeave',         label: 'View Leave' },
+      { key: 'canApplyLeave',        label: 'Apply Leave' },
       { key: 'canApproveLeave',      label: 'Approve Leave' },
       { key: 'canViewHRReports',     label: 'View HR Reports' },
       { key: 'canExportHRReports',   label: 'Export HR Reports' },
@@ -171,25 +207,55 @@ export const MODULE_CATALOG: ModuleDef[] = [
   },
 
   // ── Finance ───────────────────────────────────────────────────────────────
+  // Grouped to mirror the Finance Area's own navigation (Dashboard,
+  // Invoices, Payments, Payment Details, Invoice Reminders, Reports), so the
+  // checkboxes a Company Admin ticks read in the same order and under the
+  // same headings as the screens they unlock. Mirrors
+  // App\Services\ModuleCatalog's finance entry — keep both in step, or a key
+  // ticked here is silently dropped by isValidPermission() on save.
   {
     key: 'finance',
     name: 'Finance',
     color: '#d97706',
     requires: ['invoice'],
     permissions: [
-      { key: 'canViewFinanceDashboard',   label: 'View Finance Dashboard' },
-      { key: 'canViewRevenueDashboard',   label: 'View Revenue Dashboard' },
-      { key: 'canViewFinanceInvoices',    label: 'View Finance Invoices' },
-      { key: 'canViewPayments',           label: 'View Payments' },
-      { key: 'canRecordPayments',         label: 'Record Payments' },
-      { key: 'canReconcilePayments',      label: 'Reconcile Payments' },
-      { key: 'canViewPaymentDetails',     label: 'View Payment Details' },
-      { key: 'canSendInvoiceReminders',   label: 'Send Invoice Reminders' },
-      { key: 'canViewFinanceReports',     label: 'View Finance Reports' },
-      { key: 'canExportFinanceReports',   label: 'Export Finance Reports' },
-      { key: 'canViewRevenueReports',     label: 'View Revenue Reports' },
-      { key: 'canExportRevenueReports',   label: 'Export Revenue Reports' },
-      { key: 'canUseFinanceChat',         label: 'Use Finance Chat' },
+      { key: 'canViewFinanceDashboard',   label: 'View',                    group: 'Dashboard' },
+      { key: 'canViewRevenueDashboard',   label: 'View Revenue Overview',   group: 'Dashboard' },
+
+      { key: 'canViewFinanceInvoices',    label: 'View',   group: 'Invoices' },
+      { key: 'canCreateFinanceInvoices',  label: 'Create', group: 'Invoices' },
+      { key: 'canUpdateFinanceInvoices',  label: 'Update', group: 'Invoices' },
+      { key: 'canExportFinanceInvoices',  label: 'Export', group: 'Invoices' },
+
+      { key: 'canViewPayments',           label: 'View',      group: 'Payments' },
+      { key: 'canRecordPayments',         label: 'Record',    group: 'Payments' },
+      { key: 'canReconcilePayments',      label: 'Reconcile', group: 'Payments' },
+
+      { key: 'canViewPaymentDetails',       label: 'View',      group: 'Payment Details' },
+      { key: 'canReconcilePaymentDetails',  label: 'Reconcile', group: 'Payment Details' },
+      { key: 'canExportPaymentDetails',     label: 'Export',    group: 'Payment Details' },
+
+      { key: 'canCreateInvoiceReminders', label: 'Create', group: 'Invoice Reminders' },
+      { key: 'canSendInvoiceReminders',   label: 'Send',   group: 'Invoice Reminders' },
+      { key: 'canTrackInvoiceReminders',  label: 'Track',  group: 'Invoice Reminders' },
+
+      { key: 'canViewFinanceReports',     label: 'Finance',          group: 'Reports' },
+      { key: 'canExportFinanceReports',   label: 'Finance — Export', group: 'Reports' },
+      { key: 'canViewRevenueReports',     label: 'Revenue',          group: 'Reports' },
+      { key: 'canExportRevenueReports',   label: 'Revenue — Export', group: 'Reports' },
+      { key: 'canViewPaymentReports',     label: 'Payments',         group: 'Reports' },
+      { key: 'canExportPaymentReports',   label: 'Payments — Export', group: 'Reports' },
+
+      // Data scope override — without it the Finance Area shows only records
+      // this person is already tied to (their invoices, their leads' and
+      // clients' and projects'), exactly as the Invoice module's
+      // canViewAllCompanyInvoices already works. Never company-spanning:
+      // it widens within ONE company, never across them.
+      { key: 'canViewAllCompanyFinance',  label: 'View All Company Finance Data (not just own)', group: 'Data Scope' },
+
+      // No Finance-specific chat surface exists yet; kept so existing grants
+      // of it stay valid. See the matching note in App\Services\ModuleCatalog.
+      { key: 'canUseFinanceChat',         label: 'Use Finance Chat', group: 'Other' },
     ],
   },
 

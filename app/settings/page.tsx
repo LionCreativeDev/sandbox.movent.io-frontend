@@ -8,6 +8,7 @@ import { getAuthType } from '@/lib/auth';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { moduleUpgradeService, ModuleCatalog } from '@/lib/services/moduleUpgradeService';
 import PhoneInput from '@/components/ui/PhoneInput';
+import StorageSettingsPanel from '@/components/settings/StorageSettingsPanel';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface CompanySettings {
@@ -142,7 +143,7 @@ export default function SettingsPage() {
   // The topbar company filter is on "All Companies", so there is no single
   // company whose settings these would be.
   const [needsCompany, setNeedsCompany] = useState(false);
-  const [tab, setTab] = useState<'company' | 'invoice' | 'bank' | 'gateways' | 'dealWorkflow' | 'subscription'>('invoice');
+  const [tab, setTab] = useState<'company' | 'invoice' | 'bank' | 'gateways' | 'dealWorkflow' | 'storage' | 'subscription'>('invoice');
   const [loading, setLoading] = useState(true);
   const [toast, setToast]     = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
@@ -238,6 +239,16 @@ export default function SettingsPage() {
     const type = getAuthType() as 'admin' | 'user' | null;
     if (type !== 'admin' && type !== 'user') { router.replace('/login'); return; }
     setAuthType(type);
+
+    // Google Drive's OAuth round trip is a full page navigation away and
+    // back (see Auth\GoogleDriveConnectionController), landing here with
+    // ?tab=storage — read straight off window.location rather than
+    // next/navigation's useSearchParams(), which would force this whole
+    // page into a <Suspense> boundary for one one-time read.
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'storage') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTab('storage');
+    }
 
     const apiBase = type === 'admin' ? '/admin/settings' : '/user/settings';
     loadSettings(apiBase);
@@ -512,6 +523,11 @@ export default function SettingsPage() {
             ['bank','Bank / Payment'],
             ['gateways','Gateways'],
             ['dealWorkflow','Deal Workflow'],
+            // Company Admin only — see the note on the 'subscription' panel
+            // below; Storage (Google Drive connect/disconnect) is the same
+            // "spends the tenant's own account, owner's call" restriction,
+            // and the backend has no staff-guard route for it at all.
+            ...(isStaff ? [] : [['storage','Storage'] as const]),
             ...(isStaff ? [] : [['subscription','Subscription'] as const]),
           ] as const).map(([k, l]) => (
             <Tab key={k} label={l} active={tab === k} onClick={() => setTab(k)} />
@@ -952,6 +968,9 @@ export default function SettingsPage() {
             </div>
           )
         )}
+
+        {/* ── Storage ── */}
+        {tab === 'storage' && !isStaff && <StorageSettingsPanel />}
 
         {/* ── Subscription ── */}
         {/* Admin-only, matching the tab bar above — a staff member can never
