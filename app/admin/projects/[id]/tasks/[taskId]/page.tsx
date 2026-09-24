@@ -8,7 +8,7 @@ import { adminProjectService, Task, TaskActivity, ProjectComment, ProjectTaskAtt
 import { getAuthUser } from '@/lib/auth';
 import { ROLE_LABELS } from '@/lib/roleUtils';
 import { Admin } from '@/types';
-import { card, lbl, inp, Badge, ThumbIcon, TASK_SC, PRIORITY_SC, fmtDate, fmtFileSize, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, asRelation } from '@/components/admin/projects/shared';
+import { card, lbl, inp, Badge, ThumbIcon, TASK_SC, PRIORITY_SC, fmtDate, fmtFileSize, ALLOWED_ATTACHMENT_TYPES, asRelation } from '@/components/admin/projects/shared';
 import { handleNotFound } from '@/lib/notFound';
 import RichText from '@/components/ui/RichText';
 
@@ -138,7 +138,9 @@ export default function AdminTaskDetailPage() {
     for (const file of Array.from(files)) {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
       if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${file.name}: file type not allowed`); failed++; continue; }
-      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) { toast.error(`${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); failed++; continue; }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
       try { await adminProjectService.taskAttachments.upload(projectId, taskId, file); }
       catch { failed++; toast.error(`${file.name}: upload failed`); }
     }

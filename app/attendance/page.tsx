@@ -8,7 +8,6 @@ import { hrService } from '@/lib/services/hrService';
 import { Attendance, AttendanceStatus, AttendanceSummary, Employee } from '@/lib/services/adminHrService';
 import { Badge, inp, lbl, card, StatCard } from '@/components/admin/projects/shared';
 import { ATTENDANCE_SC } from '@/components/admin/hr/shared';
-import TimeSelect from '@/components/ui/TimeSelect';
 import toast from 'react-hot-toast';
 
 const STATUSES: AttendanceStatus[] = ['present', 'late', 'absent', 'half_day', 'leave', 'holiday', 'off_day'];
@@ -42,7 +41,6 @@ function startOfMonth(): string {
 export default function AttendancePage() {
   useAdminGuard();
   const canView = usePermission('hr', 'canViewAttendance');
-  const canMark = usePermission('hr', 'canUpdateAttendance');
   // Separate from canView — Policy Settings affects payroll deduction
   // rules for every employee, so it's gated on its own dedicated
   // permission, not bundled with general attendance viewing.
@@ -53,18 +51,7 @@ export default function AttendancePage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [myAttendance, setMyAttendance] = useState<Attendance | null>(null);
-  const [hasOwnProfile, setHasOwnProfile] = useState(true);
-  const [punching, setPunching] = useState(false);
-
   const [date, setDate] = useState(todayStr());
-  const [employeeId, setEmployeeId] = useState('');
-  const [checkIn, setCheckIn] = useState('');
-  const [checkOut, setCheckOut] = useState('');
-  // Empty = Auto (let the calculator derive status from shift/check-in/
-  // grace) — only set this to force an explicit override.
-  const [status, setStatus] = useState<AttendanceStatus | ''>('');
-  const [saving, setSaving] = useState(false);
 
   const [filterEmployeeId, setFilterEmployeeId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -99,44 +86,6 @@ export default function AttendancePage() {
 
   useEffect(() => { load(); }, [canView, date, filterEmployeeId, filterStatus, rangeFrom, rangeTo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const punchIn = async () => {
-    setPunching(true);
-    try {
-      const row = await hrService.attendance.checkIn();
-      setMyAttendance(row);
-      toast.success('Checked in');
-      load();
-    } catch (err: any) {
-      if (err?.response?.data?.message?.includes('No employee profile')) setHasOwnProfile(false);
-      else toast.error(err?.response?.data?.message || 'Check-in failed');
-    } finally { setPunching(false); }
-  };
-
-  const punchOut = async () => {
-    setPunching(true);
-    try {
-      const row = await hrService.attendance.checkOut();
-      setMyAttendance(row);
-      toast.success('Checked out');
-      load();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Check-out failed');
-    } finally { setPunching(false); }
-  };
-
-  const mark = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!employeeId) { toast.error('Select an employee'); return; }
-    setSaving(true);
-    try {
-      await hrService.attendance.mark({ employee_id: Number(employeeId), date, status: status || undefined, check_in: checkIn || null, check_out: checkOut || null });
-      toast.success('Attendance marked');
-      setCheckIn(''); setCheckOut(''); setStatus('');
-      load();
-    } catch (err: any) { toast.error(err?.response?.data?.message || 'Failed to mark attendance'); }
-    finally { setSaving(false); }
-  };
-
   return (
     <DashboardLayout title="Attendance">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
@@ -150,26 +99,6 @@ export default function AttendancePage() {
           </Link>
         )}
       </div>
-
-      {hasOwnProfile && (
-        <div style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 13, color: '#1e293b' }}>My Attendance</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-              {myAttendance?.check_in ? `Checked in ${myAttendance.check_in.slice(0, 5)}` : 'Not checked in yet today'}
-              {myAttendance?.check_out ? ` · Checked out ${myAttendance.check_out.slice(0, 5)}` : ''}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={punchIn} disabled={punching || !!myAttendance?.check_in} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: myAttendance?.check_in ? '#94a3b8' : '#059669', color: '#fff', fontSize: 12, fontWeight: 600, cursor: punching || myAttendance?.check_in ? 'not-allowed' : 'pointer' }}>
-              Check In
-            </button>
-            <button onClick={punchOut} disabled={punching || !myAttendance?.check_in || !!myAttendance?.check_out} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: (!myAttendance?.check_in || myAttendance?.check_out) ? '#94a3b8' : '#dc2626', color: '#fff', fontSize: 12, fontWeight: 600, cursor: punching || !myAttendance?.check_in || myAttendance?.check_out ? 'not-allowed' : 'pointer' }}>
-              Check Out
-            </button>
-          </div>
-        </div>
-      )}
 
       {!canView ? (
         <div style={{ ...card, textAlign: 'center', color: '#94a3b8' }}>You do not have permission to view the attendance register.</div>
@@ -185,36 +114,6 @@ export default function AttendancePage() {
           <StatCard label="Half Day" value={String(summary.half_day)} color="#2563eb" />
           <StatCard label="Not Checked In" value={String(summary.not_checked_in)} color="#94a3b8" />
         </div>
-      )}
-
-      {canMark && (
-        <form onSubmit={mark} style={{ ...card, display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 16 }}>
-          <div style={{ flex: '1 1 200px' }}>
-            <label style={lbl}>Employee</label>
-            <select value={employeeId} onChange={e => setEmployeeId(e.target.value)} style={inp}>
-              <option value="">Select employee…</option>
-              {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_code})</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={lbl}>Check-in</label>
-            <TimeSelect value={checkIn} onChange={setCheckIn} allowClear />
-          </div>
-          <div>
-            <label style={lbl}>Check-out</label>
-            <TimeSelect value={checkOut} onChange={setCheckOut} allowClear />
-          </div>
-          <div>
-            <label style={lbl}>Status Override</label>
-            <select value={status} onChange={e => setStatus(e.target.value as AttendanceStatus | '')} style={inp}>
-              <option value="">Auto (calculate from shift)</option>
-              {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-            </select>
-          </div>
-          <button type="submit" disabled={saving} style={{ padding: '9px 20px', background: saving ? '#93c5fd' : '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Marking…' : 'Mark Attendance'}
-          </button>
-        </form>
       )}
 
       <div style={{ ...card, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>

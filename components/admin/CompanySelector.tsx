@@ -1,7 +1,25 @@
 'use client';
 import { useEffect, useState } from 'react';
 import api from '@/lib/axios';
-import { getActiveCompany, setActiveCompany } from '@/lib/auth';
+import { getActiveCompany, setActiveCompany, setAuthData, getToken } from '@/lib/auth';
+
+// admin.modules is resolved server-side for the active company (see
+// AdminResource), so after the company changes the cached session must be
+// re-read — otherwise the sidebar and module guards keep showing the
+// previous company's modules until DashboardLayout's next 60s poll. Same
+// setAuthData() + 'auth_refreshed' pattern DashboardLayout itself uses.
+const refreshAdminSession = () => {
+  api.get('/admin/me')
+    .then(res => {
+      const fresh = res.data?.data;
+      const token = getToken();
+      if (fresh && token) {
+        setAuthData(token, fresh, 'admin');
+        window.dispatchEvent(new Event('auth_refreshed'));
+      }
+    })
+    .catch(() => {});
+};
 
 interface CompanyOption {
   id: number;
@@ -46,7 +64,10 @@ export default function CompanySelector({ onChange }: { onChange?: (companyId: n
           ? current
           : lowestIdCompany.id;
         setSelected(initial);
-        if (initial !== current) setActiveCompany(initial);
+        if (initial !== current) {
+          setActiveCompany(initial);
+          refreshAdminSession();
+        }
       })
       .catch(() => {});
   }, []);
@@ -62,6 +83,7 @@ export default function CompanySelector({ onChange }: { onChange?: (companyId: n
     const id = value === 'all' ? 'all' : Number(value);
     setSelected(id);
     setActiveCompany(id);
+    refreshAdminSession();
     onChange?.(id);
   };
 

@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HiXMark, HiPaperAirplane } from 'react-icons/hi2';
 import { publicInvoiceChatService, PublicChatMessage } from '@/lib/services/publicInvoiceChatService';
-import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
+import { ALLOWED_ATTACHMENT_TYPES, fmtFileSize } from '@/components/admin/projects/shared';
 
 interface Props {
   token: string;
@@ -55,7 +55,9 @@ export default function ChatWithSellerDrawer({ token, sellerName, open, onClose,
     if (file) {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
       if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { setError(`${file.name}: file type not allowed`); return; }
-      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) { setError(`${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); return; }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
     }
     setSending(true); setError('');
     try {

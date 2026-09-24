@@ -105,4 +105,27 @@ export const adminSupportService = {
     const res = await api.patch(`/admin/support/${id}/status`, { status });
     return res.data.data;
   },
+
+  // Authenticated blob download for BOTH storage types — a Drive-backed
+  // attachment (large file, company had Google Drive connected) has no
+  // public attachment_url at all, so this is the one path that works for
+  // every ticket/reply attachment, same pattern as every other attachment
+  // download in this app (see adminProjectService.downloadAttachment()).
+  downloadAttachment: async (id: number, fileName: string): Promise<void> => {
+    const res = await api.get(`/admin/support/${id}/attachment`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  },
+
+  downloadReplyAttachment: async (id: number, replyId: number, fileName: string): Promise<void> => {
+    const res = await api.get(`/admin/support/${id}/replies/${replyId}/attachment`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  },
 };

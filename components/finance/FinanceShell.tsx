@@ -1,9 +1,9 @@
 'use client';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { getAuthType } from '@/lib/auth';
+import { getAuthType, hasCompanyModule, FINANCE_MODULE_KEY } from '@/lib/auth';
 import {
   financeService, FinanceCapabilities, FinanceCapabilityKey, CompanyOption,
 } from '@/lib/services/financeService';
@@ -74,6 +74,7 @@ export default function FinanceShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [capabilities, setCapabilities] = useState<FinanceCapabilities | null>(null);
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,12 +83,26 @@ export default function FinanceShell({
   // the same reason app/invoices/new/page.tsx keeps isAdmin in state.
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // No Finance module for the active company (never bought, or switched off
+  // by the Super Admin) — leave the area entirely, the same way
+  // useModuleGuard bounces a module page, rather than render a Finance frame
+  // that can never hold anything. A permission the user may still hold is
+  // irrelevant here: module entitlement comes first.
+  const leaveFinance = () => {
+    router.replace(getAuthType() === 'admin' ? '/admin/dashboard' : '/dashboard');
+  };
+
   const load = () => {
     financeService.capabilities()
       .then(d => { setCapabilities(d.capabilities); setCompanies(d.companies ?? []); })
-      // A 403/401 here means no Finance access at all; the NoAccess block
-      // below is the right answer, not an error toast.
-      .catch(() => setCapabilities(null))
+      .catch((err: { response?: { status?: number } }) => {
+        setCapabilities(null);
+        // 403 from /finance/capabilities means the route's
+        // module:finance_dashboard gate refused — the endpoint itself has no
+        // permission gate — so this company has no Finance at all. Anything
+        // else (network, 5xx) falls through to the NoAccess block below.
+        if (err?.response?.status === 403) leaveFinance();
+      })
       .finally(() => setLoading(false));
   };
 
@@ -95,10 +110,20 @@ export default function FinanceShell({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsAdmin(getAuthType() === 'admin');
     load();
-    // Re-read after a company switch — Finance permissions are per-company,
-    // so the tabs a user sees must change with the selector.
-    window.addEventListener('auth_refreshed', load);
-    return () => window.removeEventListener('auth_refreshed', load);
+    // Fired by DashboardLayout after every /me refresh (mount, 60s poll,
+    // company switch). That payload's module list is the active company's,
+    // so a Super Admin deactivation or a company switch is caught here
+    // without waiting for the next Finance request to 403. Finance
+    // permissions are per-company too, so capabilities are re-read as well.
+    const onAuthRefreshed = () => {
+      if (!hasCompanyModule(FINANCE_MODULE_KEY)) {
+        leaveFinance();
+        return;
+      }
+      load();
+    };
+    window.addEventListener('auth_refreshed', onAuthRefreshed);
+    return () => window.removeEventListener('auth_refreshed', onAuthRefreshed);
   }, []);
 
   const root = isAdmin ? '/admin/finance' : '/finance';

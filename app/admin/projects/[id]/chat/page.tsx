@@ -8,7 +8,6 @@ import ProjectTabs from "@/components/admin/projects/ProjectTabs";
 import {
     inp,
     ALLOWED_ATTACHMENT_TYPES,
-    MAX_ATTACHMENT_MB,
     fmtFileSize,
     DRAFT_HINT,
     DraftNotice,
@@ -156,12 +155,9 @@ export default function AdminProjectChatPage() {
                 toast.error(`${file.name}: file type not allowed`);
                 return;
             }
-            if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
-                toast.error(
-                    `${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`,
-                );
-                return;
-            }
+            // No client-side size cap here — the backend enforces it, generously
+            // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+            // otherwise (see AttachmentStorageService::maxUploadKb()).
         }
         setSending(true);
         try {

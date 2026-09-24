@@ -347,6 +347,25 @@ export const clientService = {
     });
     return res.data;
   },
+  // Authenticated blob download for BOTH storage types — a Drive-backed
+  // attachment (large file, company had Google Drive connected) has no
+  // public attachment_url at all, same pattern as downloadProjectFile() above.
+  ticketAttachmentDownload: async (id: number, fileName: string) => {
+    const res = await clientApi.get(`/client/support/${id}/attachment`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  },
+  ticketReplyAttachmentDownload: async (id: number, replyId: number, fileName: string) => {
+    const res = await clientApi.get(`/client/support/${id}/replies/${replyId}/attachment`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  },
   reportProjects: async () => {
     const res = await clientApi.get('/client/reports/projects');
     return res.data.data;

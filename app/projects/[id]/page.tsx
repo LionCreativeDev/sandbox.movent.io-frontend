@@ -34,7 +34,6 @@ import {
     lbl,
     fmtDate,
     ALLOWED_ATTACHMENT_TYPES,
-    MAX_ATTACHMENT_MB,
     fmtFileSize,
     asRelation,
     DRAFT_HINT,
@@ -499,13 +498,9 @@ export default function UserProjectDetailPage() {
                 failed++;
                 continue;
             }
-            if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
-                toast.error(
-                    `${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`,
-                );
-                failed++;
-                continue;
-            }
+            // No client-side size cap here — the backend enforces it, generously
+            // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+            // otherwise (see AttachmentStorageService::maxUploadKb()).
             try {
                 await userProjectService.attachments.upload(id, file);
             } catch {

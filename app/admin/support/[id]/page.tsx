@@ -172,10 +172,13 @@ export default function AdminSupportTicketPage() {
           <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: 18, marginBottom: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>Description</div>
             <div style={{ fontSize: 13, color: '#1e293b', lineHeight: 1.6 }}>{t.description}</div>
-            {t.attachment_url && (
-              <a href={t.attachment_url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 10, fontSize: 12, color: GREEN, fontWeight: 600 }}>
+            {t.attachment_name && (
+              <button
+                onClick={() => adminSupportService.downloadAttachment(t.id, t.attachment_name)}
+                style={{ display: 'inline-block', marginTop: 10, fontSize: 12, color: GREEN, fontWeight: 600, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+              >
                 📎 {t.attachment_name || 'Attachment'}
-              </a>
+              </button>
             )}
           </div>
         )}
@@ -213,10 +216,13 @@ export default function AdminSupportTicketPage() {
                       }}>
                         {r.message}
                       </div>
-                      {r.attachment_url && (
-                        <a href={r.attachment_url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 4, fontSize: 11, color: GREEN }}>
+                      {r.attachment_name && (
+                        <button
+                          onClick={() => adminSupportService.downloadReplyAttachment(t.id, r.id, r.attachment_name)}
+                          style={{ display: 'inline-block', marginTop: 4, fontSize: 11, color: GREEN, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                        >
                           📎 {r.attachment_name || 'Attachment'}
-                        </a>
+                        </button>
                       )}
                     </div>
                   </div>

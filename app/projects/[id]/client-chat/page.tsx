@@ -6,7 +6,7 @@ import { useAdminGuard } from '@/hooks/useAdminGuard';
 import toast from 'react-hot-toast';
 import { getAuthUser } from '@/lib/auth';
 import { User } from '@/types';
-import { inp, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize, DRAFT_HINT, DraftNotice } from '@/components/admin/projects/shared';
+import { inp, ALLOWED_ATTACHMENT_TYPES, fmtFileSize, DRAFT_HINT, DraftNotice } from '@/components/admin/projects/shared';
 import { userProjectClientChatService, ProjectClientChatPayload } from '@/lib/services/projectClientChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
 import { mentionQueryOf, matchMentionables, applyMention, renderWithMentions, roleLabel } from '@/lib/chatMentions';
@@ -82,7 +82,9 @@ export default function ProjectClientChatPage() {
     if (file) {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
       if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${file.name}: file type not allowed`); return; }
-      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) { toast.error(`${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); return; }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
     }
     setSending(true);
     try {

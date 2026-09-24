@@ -118,7 +118,9 @@ export default function ClientProjectDetailPage() {
     if (chatFile) {
       const ext = chatFile.name.split('.').pop()?.toLowerCase() ?? '';
       if (!CHAT_FILE_TYPES.includes(ext)) { toast.error(`${chatFile.name}: file type not allowed`); return; }
-      if (chatFile.size > CHAT_MAX_MB * 1024 * 1024) { toast.error(`${chatFile.name}: exceeds ${CHAT_MAX_MB}MB limit`); return; }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at CHAT_MAX_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
     }
     setChatSending(true);
     try {

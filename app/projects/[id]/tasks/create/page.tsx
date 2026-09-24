@@ -7,7 +7,7 @@ import { userProjectService } from '@/lib/services/userProjectService';
 import { TaskStatus } from '@/lib/services/adminProjectService';
 import { can, getAuthUser } from '@/lib/auth';
 import { roleDisplayLabel } from '@/lib/roleUtils';
-import { card, inp, lbl, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
+import { card, inp, lbl, ALLOWED_ATTACHMENT_TYPES, fmtFileSize } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
 import SubmitButton from '@/components/ui/SubmitButton';
@@ -124,7 +124,9 @@ export default function CreateTaskPage() {
     for (const file of Array.from(fileList)) {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
       if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${file.name}: file type not allowed`); continue; }
-      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) { toast.error(`${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); continue; }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
       accepted.push(file);
     }
     if (accepted.length) setFiles(prev => [...prev, ...accepted]);

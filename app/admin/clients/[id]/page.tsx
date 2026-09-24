@@ -14,7 +14,6 @@ import { ChatMessage } from "@/lib/services/adminProjectService";
 import { CompanyUser } from "@/lib/services/adminLeadService";
 import {
   ALLOWED_ATTACHMENT_TYPES,
-  MAX_ATTACHMENT_MB,
   fmtFileSize,
 } from "@/components/admin/projects/shared";
 import PhoneInput from "@/components/ui/PhoneInput";
@@ -309,10 +308,9 @@ export default function ClientDetailPage() {
         toast.error(`${chatFile.name}: file type not allowed`);
         return;
       }
-      if (chatFile.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
-        toast.error(`${chatFile.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`);
-        return;
-      }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
     }
     setSendingChat(true);
     try {

@@ -25,7 +25,14 @@ import {
   HiSparkles,
 } from "react-icons/hi2";
 import { useAuth } from "@/hooks/useAuth";
-import { getAuthType, getAuthUser, getActiveCompany, can } from "@/lib/auth";
+import {
+  getAuthType,
+  getAuthUser,
+  getActiveCompany,
+  can,
+  getCompanyModules,
+  FINANCE_MODULE_KEY,
+} from "@/lib/auth";
 import { Admin, User } from "@/types";
 import { notificationService } from "@/lib/services/notificationService";
 import { adminNotificationService } from "@/lib/services/adminNotificationService";
@@ -139,10 +146,11 @@ const ADMIN_NAV_GROUPS = [
     ],
   },
   {
-    // Finance Area. Each item rides the granular company_modules key its own
-    // backend routes are gated on (see routes/api.php's $financeRoutes), so
-    // a company that bought Invoice but not Finance still gets the
-    // invoice/payment sections and simply no Dashboard or Reports.
+    // Finance Area. The whole group requires the Finance module itself
+    // (`entitlement`) — the backend closes every /finance/* route behind
+    // module:finance_dashboard, so an Invoice-only company has nothing here
+    // to open. Each item then ALSO rides the granular company_modules key its
+    // own backend section is gated on (see routes/api.php's $financeRoutes).
     // Company Admin needs no permission of its own — the admin guard is the
     // gate — so unlike the staff group below these carry no permAny.
     label: "Finance",
@@ -152,36 +160,42 @@ const ADMIN_NAV_GROUPS = [
         icon: HiBanknotes,
         label: "Finance Overview",
         module: "finance_dashboard",
+        entitlement: FINANCE_MODULE_KEY,
       },
       {
         href: "/admin/finance/invoices",
         icon: HiDocumentText,
         label: "Finance Invoices",
         module: "invoices",
+        entitlement: FINANCE_MODULE_KEY,
       },
       {
         href: "/admin/finance/payments",
         icon: HiCurrencyDollar,
         label: "Finance Payments",
         module: "payments",
+        entitlement: FINANCE_MODULE_KEY,
       },
       {
         href: "/admin/finance/payment-details",
         icon: HiCurrencyDollar,
         label: "Payment Details",
         module: "payment_details",
+        entitlement: FINANCE_MODULE_KEY,
       },
       {
         href: "/admin/finance/invoice-reminders",
         icon: HiCalendarDays,
         label: "Invoice Reminders",
         module: "invoice_reminders",
+        entitlement: FINANCE_MODULE_KEY,
       },
       {
         href: "/admin/finance/reports",
         icon: HiChartBar,
         label: "Finance Reports",
         moduleAny: ["finance_reports", "revenue_reports", "payments_report"],
+        entitlement: FINANCE_MODULE_KEY,
       },
     ],
   },
@@ -469,14 +483,18 @@ const USER_NAV_GROUPS = [
     // that outlives a revoke (permAny reads the session cookie) lands on a
     // "no access" panel rather than data.
     //
-    // The `module: 'finance'` tag is what keeps this group out of a company
-    // that has no Finance module: enabledModules is derived from which
-    // permission BUCKETS a user holds (see CATALOG_TO_SIDEBAR below), so it
-    // contains 'finance' only when they hold at least one finance-bucket
-    // key. That matters because canViewPayments/canRecordPayments exist in
-    // the Invoice module too — without this tag, every Seller in an
-    // invoice-only company would see a lone "Finance Payments" link under a
-    // Finance heading that leads nowhere else.
+    // Two gates, in this order — module first, permission second:
+    //
+    //  • `entitlement` — the active company must hold the Finance module
+    //    (user.company.modules from /user/me). A Finance permission left over
+    //    on a user never unlocks Finance for a company that has not bought
+    //    it, or whose Finance the Super Admin switched off.
+    //  • `module: 'finance'` + permAny — enabledModules is derived from which
+    //    permission BUCKETS a user holds (see CATALOG_TO_SIDEBAR below), so
+    //    it contains 'finance' only when they hold at least one finance-bucket
+    //    key. That matters because canViewPayments/canRecordPayments exist in
+    //    the Invoice module too — without it, every Seller in a Finance
+    //    company would see a lone "Finance Payments" link.
     label: "Finance",
     items: [
       {
@@ -484,6 +502,7 @@ const USER_NAV_GROUPS = [
         icon: HiBanknotes,
         label: "Finance Dashboard",
         module: "finance",
+        entitlement: FINANCE_MODULE_KEY,
         permAny: ["canViewFinanceDashboard", "canViewRevenueDashboard"],
       },
       {
@@ -491,6 +510,7 @@ const USER_NAV_GROUPS = [
         icon: HiDocumentText,
         label: "Finance Invoices",
         module: "finance",
+        entitlement: FINANCE_MODULE_KEY,
         permAny: ["canViewFinanceInvoices"],
       },
       {
@@ -498,6 +518,7 @@ const USER_NAV_GROUPS = [
         icon: HiCurrencyDollar,
         label: "Finance Payments",
         module: "finance",
+        entitlement: FINANCE_MODULE_KEY,
         permAny: ["canViewPayments"],
       },
       {
@@ -505,6 +526,7 @@ const USER_NAV_GROUPS = [
         icon: HiCurrencyDollar,
         label: "Payment Details",
         module: "finance",
+        entitlement: FINANCE_MODULE_KEY,
         permAny: ["canViewPaymentDetails"],
       },
       {
@@ -512,6 +534,7 @@ const USER_NAV_GROUPS = [
         icon: HiCalendarDays,
         label: "Invoice Reminders",
         module: "finance",
+        entitlement: FINANCE_MODULE_KEY,
         permAny: [
           "canCreateInvoiceReminders",
           "canSendInvoiceReminders",
@@ -523,6 +546,7 @@ const USER_NAV_GROUPS = [
         icon: HiChartBar,
         label: "Finance Reports",
         module: "finance",
+        entitlement: FINANCE_MODULE_KEY,
         permAny: [
           "canViewFinanceReports",
           "canViewRevenueReports",
@@ -763,10 +787,18 @@ export default function Sidebar() {
   // own-assigned-tasks view — but the mechanism stays for the next
   // Seller-hidden link.
   const [isSeller, setIsSeller] = useState(false);
+  // What the active company has actually bought (getCompanyModules()) — read
+  // by the `entitlement` nav flag. Unlike enabledModules this has NO "not
+  // loaded yet, show everything" state: an entitlement-gated item stays
+  // hidden until the company is known to hold the module.
+  const [companyModules, setCompanyModules] = useState<string[]>([]);
 
   const refreshModules = () => {
     const type = getAuthType() as "user" | "admin" | null;
     setAuthType(type);
+    const entitled = getCompanyModules();
+    setCompanyModules(entitled);
+    const financeEntitled = entitled.includes(FINANCE_MODULE_KEY);
     if (type === "admin") {
       setProjectMgmtPerms(["*"]);
       setProjectMgmtOwnPerms(["*"]);
@@ -823,6 +855,9 @@ export default function Sidebar() {
         const sidebarModules = new Set<string>();
         for (const a of assignments) {
           for (const [catalogKey, permKeys] of Object.entries(a.permissions)) {
+            // Finance permissions count for nothing in a company without the
+            // Finance module — module entitlement comes before permission.
+            if (catalogKey === "finance" && !financeEntitled) continue;
             if ((permKeys as string[]).length > 0) {
               (CATALOG_TO_SIDEBAR[catalogKey] ?? [catalogKey]).forEach((k) =>
                 sidebarModules.add(k),
@@ -833,7 +868,7 @@ export default function Sidebar() {
         // Reports: only if admin granted canViewInvoiceReports (or finance reports) permission
         if (
           can("invoice", "canViewInvoiceReports") ||
-          can("finance", "canViewFinanceReports")
+          (financeEntitled && can("finance", "canViewFinanceReports"))
         ) {
           sidebarModules.add("reports");
         }
@@ -915,6 +950,10 @@ export default function Sidebar() {
     label: string;
     module?: string;
     moduleAny?: string[];
+    // Parent-module gate: the active company must hold this company_modules
+    // key, checked before and independently of module/permAny (see
+    // companyModules above).
+    entitlement?: string;
     hideIfModule?: string;
     permAny?: string[];
     fallbackLabel?: string;
@@ -925,6 +964,8 @@ export default function Sidebar() {
   const visibleGroups = NAV_GROUPS.map((group) => ({
     ...group,
     items: (group.items as NavItem[]).reduce((acc: NavItem[], item) => {
+      if (item.entitlement && !companyModules.includes(item.entitlement))
+        return acc;
       if (item.module && !isModuleEnabled(item.module)) return acc;
       if (item.moduleAny && !item.moduleAny.some((m) => isModuleEnabled(m)))
         return acc;

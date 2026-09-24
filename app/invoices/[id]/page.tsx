@@ -17,7 +17,7 @@ import LoadingOverlay from '@/components/ui/LoadingOverlay';
 import InvoiceIssuer from '@/components/invoices/InvoiceIssuer';
 import PaymentProgressBar from '@/components/invoices/PaymentProgressBar';
 import { progressOf } from '@/lib/paymentStatus';
-import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
+import { ALLOWED_ATTACHMENT_TYPES, fmtFileSize } from '@/components/admin/projects/shared';
 import { adminSalesChatService, userSalesChatService } from '@/lib/services/salesChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
 import toast from 'react-hot-toast';
@@ -61,6 +61,17 @@ const PROJECT_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
 
 const lbl: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 };
 
+// Same convention as app/leads/[id]/page.tsx's own fmtChatTime — today's
+// messages show a time, older ones a date, so the Sales Chat thread here
+// reads like every other chat surface in the app.
+function fmtChatTime(d: string | null | undefined): string {
+  if (!d) return '';
+  const date = new Date(d);
+  return date.toDateString() === new Date().toDateString()
+    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString([], { day: '2-digit', month: 'short' });
+}
+
 export default function InvoiceDetailPage() {
   useAdminGuard();
   const router = useRouter();
@@ -98,13 +109,28 @@ export default function InvoiceDetailPage() {
   // or Client's own Sales Chat tab instead (see App\Services\
   // InvoiceChatContext). Same canUseSalesChat gate as the Lead/Client detail
   // pages.
-  const authUser = getAuthUser() as { role_type?: string } | null;
+  const authUser = getAuthUser() as { id?: number; role_type?: string } | null;
   // A Lead Manager may also reach this now, but only for an invoice they
   // themselves actually created — enforced server-side in Api\User\
   // SalesChatController::invoice() (never their canViewAllCompanyLeads
   // company-wide bypass).
   const canUseSalesChat = isAdmin || ((authUser?.role_type === 'seller' || authUser?.role_type === 'lead_manager') && can('sales', 'canUseSalesChat'));
   const chatSvc = isAdmin ? adminSalesChatService : userSalesChatService;
+
+  /**
+   * Is this message the viewer's own — i.e. does it belong on the right?
+   * Mirrors app/leads/[id]/page.tsx's isOwnChatMessage(): a Company Admin
+   * lands on sender_admin_id, a staff member on sender_id, and a message
+   * with neither is the guest/client writing in — never "mine" here.
+   */
+  const isOwnChatMessage = (m: ChatMessage): boolean => {
+    const meId = authUser?.id;
+    if (!meId) return false;
+
+    return isAdmin
+      ? m.sender_admin_id != null && m.sender_admin_id === meId
+      : m.sender_id != null && m.sender_id === meId;
+  };
   const [chat, setChat]               = useState<ChatMessage[]>([]);
   const [chatText, setChatText]       = useState('');
   const [chatFile, setChatFile]       = useState<File | null>(null);
@@ -164,7 +190,9 @@ export default function InvoiceDetailPage() {
     if (chatFile) {
       const ext = chatFile.name.split('.').pop()?.toLowerCase() ?? '';
       if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${chatFile.name}: file type not allowed`); return; }
-      if (chatFile.size > MAX_ATTACHMENT_MB * 1024 * 1024) { toast.error(`${chatFile.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); return; }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
     }
     setSendingChat(true);
     try {
@@ -714,21 +742,41 @@ export default function InvoiceDetailPage() {
               <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 14 }}>No messages yet.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', marginBottom: 14 }}>
-                {chat.map(m => (
-                  <div key={m.id}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
-                      {chatSenderName(m, { adminSuffix: true, guestSuffix: true })}
+                {chat.map(m => {
+                  const isMine = isOwnChatMessage(m);
+                  return (
+                    <div key={m.id} style={{ display: 'flex', justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
+                      <div style={{ maxWidth: '75%', display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start' }}>
+                        {!isMine && (
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: '#475569', marginBottom: 3, marginLeft: 4 }}>
+                            {chatSenderName(m, { adminSuffix: true, guestSuffix: true })}
+                          </div>
+                        )}
+                        <div style={{
+                          padding: '9px 13px',
+                          borderRadius: isMine ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                          background: isMine ? '#2563eb' : '#fff',
+                          color: isMine ? '#fff' : '#1e293b',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                          border: isMine ? 'none' : '1px solid #f1f5f9',
+                        }}>
+                          {m.content && <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.content}</div>}
+                          {m.attachment_name && (
+                            <button onClick={() => downloadChatAttachment(m)} style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: m.content ? 6 : 0, padding: '4px 10px',
+                              borderRadius: 6, border: `1px solid ${isMine ? 'rgba(255,255,255,0.3)' : '#e2e8f0'}`,
+                              background: isMine ? 'rgba(255,255,255,0.1)' : '#f8fafc', color: isMine ? '#fff' : '#2563eb',
+                              fontSize: 12, cursor: 'pointer', width: 'fit-content',
+                            }}>📎 {m.attachment_name}</button>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 3, marginLeft: isMine ? 0 : 4, marginRight: isMine ? 4 : 0 }}>
+                          {fmtChatTime(m.sent_at)}
+                        </div>
+                      </div>
                     </div>
-                    {m.content && <div style={{ fontSize: 13, color: '#475569' }}>{m.content}</div>}
-                    {m.attachment_name && (
-                      <button onClick={() => downloadChatAttachment(m)} style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 4, padding: '4px 10px',
-                        borderRadius: 6, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#2563eb',
-                        fontSize: 12, cursor: 'pointer',
-                      }}>📎 {m.attachment_name}</button>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             {chatFile && (

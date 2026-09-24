@@ -8,7 +8,7 @@ import { userProjectService, ProjectAttachment } from '@/lib/services/userProjec
 import { userClientService } from '@/lib/services/userClientService';
 import { Project, Priority, ProjectStatus } from '@/lib/services/adminProjectService';
 import { User, Client } from '@/types';
-import { ALLOWED_ATTACHMENT_TYPES, DRAFT_HINT, fmtDate, fmtFileSize, inp, lbl, MAX_ATTACHMENT_MB } from '@/components/admin/projects/shared';
+import { ALLOWED_ATTACHMENT_TYPES, DRAFT_HINT, fmtDate, fmtFileSize, inp, lbl } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
 import RichTextField from '@/components/ui/RichTextField';
@@ -126,11 +126,9 @@ export default function UserEditProjectPage() {
         failed++;
         continue;
       }
-      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
-        toast.error(`${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`);
-        failed++;
-        continue;
-      }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
       try {
         await userProjectService.attachments.upload(projectId, file);
       } catch {

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import api from '@/lib/axios';
-import { getAuthType, getAuthUser } from '@/lib/auth';
+import { getAuthType, getAuthUser, hasCompanyModule, FINANCE_MODULE_KEY } from '@/lib/auth';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { User } from '@/types';
 import { MODULE_CATALOG } from '@/lib/moduleConfig';
@@ -184,6 +184,9 @@ export default function DashboardPage() {
         for (const [catalogKey, permKeys] of Object.entries(a.permissions ?? {})) {
           const keys = permKeys as string[];
           if (keys.length === 0) continue;
+          // Finance permissions count for nothing in a company without the
+          // Finance module — module entitlement comes before permission.
+          if (catalogKey === 'finance' && !hasCompanyModule(FINANCE_MODULE_KEY)) continue;
           if (catalogKey === 'project_management') {
             for (const [shortcut, requiredPerms] of Object.entries(PROJECT_MGMT_SHORTCUT_PERMS)) {
               if (requiredPerms.some(p => keys.includes(p))) mods.add(shortcut);
@@ -352,7 +355,9 @@ export default function DashboardPage() {
     // Placeholder — no Expense model/table exists in this codebase yet.
     // Reserves the card's spot in the layout for when that feature lands;
     // deliberately not wired to any query.
-    hasFinance      &&      { label: 'Expenses',     value: '—',                              sub: 'Coming soon',                                                      color: '#94a3b8', href: '' },
+    // Expenses is a Finance-module feature, so it rides the Finance
+    // entitlement key — unlike Revenue above, which is Invoice-module data.
+    has('finance_dashboard') && { label: 'Expenses',     value: '—',                              sub: 'Coming soon',                                                      color: '#94a3b8', href: '' },
     has('hr')       && s && { label: 'Employees',    value: s.employees.total,            sub: `${s.employees.users} system users`,                                    color: '#64748b', href: '/admin/hr' },
   ].filter(Boolean) as { label: string; value: string | number; sub: string; color: string; href: string }[];
 

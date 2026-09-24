@@ -171,12 +171,9 @@ function CreateProjectForm() {
                 toast.error(`${file.name}: file type not allowed`);
                 continue;
             }
-            if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
-                toast.error(
-                    `${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`,
-                );
-                continue;
-            }
+            // No client-side size cap here — the backend enforces it, generously
+            // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+            // otherwise (see AttachmentStorageService::maxUploadKb()).
             accepted.push(file);
         }
         if (accepted.length) setAttachments((prev) => [...prev, ...accepted]);

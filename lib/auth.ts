@@ -66,6 +66,37 @@ export const clearActiveCompany = () => {
   Cookies.remove('active_company_id');
 };
 
+// ── Module entitlement ───────────────────────────────────────────────────────
+// What the company the session is working in has actually bought — the
+// parent gate that comes BEFORE any permission check. A permission a user
+// holds never unlocks a module their company does not have; the server
+// enforces the same rule through CheckCompanyModule.
+
+// The company_modules key that means "this company has the Finance module" —
+// the same key routes/api.php gates the whole /finance/* area on.
+export const FINANCE_MODULE_KEY = 'finance_dashboard';
+
+// Company Admin: admin.modules, which AdminResource resolves for the company
+// picked in the Company Selector. Staff: user.company.modules, which /user/me
+// resolves for the active company — but only trusted when that company IS
+// the active one (the login payload carries the legacy primary company with
+// no module list, so until /me lands this is empty, never another company's).
+export const getCompanyModules = (): string[] => {
+  const type = getAuthType();
+  if (type === 'admin') return (getAuthUser() as Admin | null)?.modules ?? [];
+  if (type === 'user') {
+    const company  = (getAuthUser() as User | null)?.company;
+    const activeId = getActiveCompany();
+    if (!company?.modules) return [];
+    if (typeof activeId === 'number' && company.id !== activeId) return [];
+    return company.modules;
+  }
+  return [];
+};
+
+export const hasCompanyModule = (moduleKey: string): boolean =>
+  getCompanyModules().includes(moduleKey);
+
 // ── Permission helpers ────────────────────────────────────────────────────────
 
 // Returns the permission keys a sub-user has for a given module key, scoped to

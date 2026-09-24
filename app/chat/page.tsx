@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { userGeneralChatService, ChatThreadSummary, EligibleChatUser } from '@/lib/services/generalChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
-import { inp, ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
+import { inp, ALLOWED_ATTACHMENT_TYPES, fmtFileSize } from '@/components/admin/projects/shared';
 import { getAuthUser } from '@/lib/auth';
 import { User } from '@/types';
 import toast from 'react-hot-toast';
@@ -139,7 +139,9 @@ export default function ChatPage() {
     if (file) {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
       if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${file.name}: file type not allowed`); return; }
-      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) { toast.error(`${file.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); return; }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
+      // otherwise (see AttachmentStorageService::maxUploadKb()).
     }
     setSending(true);
     try {

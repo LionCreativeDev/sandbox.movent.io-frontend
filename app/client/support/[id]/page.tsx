@@ -152,10 +152,13 @@ export default function ClientTicketDetailPage() {
                     }}>
                       {r.message}
                     </div>
-                    {r.attachment_url && (
-                      <a href={r.attachment_url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 4, fontSize: 11, color: GREEN }}>
+                    {r.attachment_name && (
+                      <button
+                        onClick={() => clientService.ticketReplyAttachmentDownload(t.id, r.id, r.attachment_name)}
+                        style={{ display: 'inline-block', marginTop: 4, fontSize: 11, color: GREEN, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                      >
                         📎 {r.attachment_name || 'Attachment'}
-                      </a>
+                      </button>
                     )}
                   </div>
                 </div>

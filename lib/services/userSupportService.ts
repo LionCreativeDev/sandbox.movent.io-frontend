@@ -35,4 +35,24 @@ export const userSupportService = {
     const res = await api.patch(`/user/support/${id}/status`, { status });
     return res.data.data;
   },
+
+  // See adminSupportService.downloadAttachment() — same reasoning (works for
+  // both internal and Google-Drive-backed attachments).
+  downloadAttachment: async (id: number, fileName: string): Promise<void> => {
+    const res = await api.get(`/user/support/${id}/attachment`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  },
+
+  downloadReplyAttachment: async (id: number, replyId: number, fileName: string): Promise<void> => {
+    const res = await api.get(`/user/support/${id}/replies/${replyId}/attachment`, { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  },
 };

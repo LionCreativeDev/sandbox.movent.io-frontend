@@ -84,6 +84,10 @@ export interface Company {
   currency?: string;
   logo_path?: string;
   is_active?: boolean;
+  // Enabled company_modules keys (Super-Admin-deactivated modules already
+  // stripped). Only sent on user.company by /user/me, where it is the ACTIVE
+  // company's list — read it through getCompanyModules(), not directly.
+  modules?: string[] | null;
   // admin.currency is the tenant's Settings-configured currency —
   // authoritative for invoice creation, unlike the sibling `currency` above
   // (legacy, pre-tenant-refactor, per-Company column — see

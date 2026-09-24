@@ -6,7 +6,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { adminLeadService, userLeadService, Lead, FollowUp, LeadActivity, CompanyUser, DealEligibility, ChatInviteState } from '@/lib/services/adminLeadService';
 import { adminSalesChatService, userSalesChatService } from '@/lib/services/salesChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
-import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_MB, fmtFileSize } from '@/components/admin/projects/shared';
+import { ALLOWED_ATTACHMENT_TYPES, fmtFileSize } from '@/components/admin/projects/shared';
 import { getAuthType, getAuthUser, can, getUserModulePermissions } from '@/lib/auth';
 import { Admin } from '@/types';
 import { handleNotFound } from '@/lib/notFound';
@@ -314,7 +314,11 @@ export default function LeadDetailPage() {
     if (chatFile) {
       const ext = chatFile.name.split('.').pop()?.toLowerCase() ?? '';
       if (!ALLOWED_ATTACHMENT_TYPES.includes(ext)) { toast.error(`${chatFile.name}: file type not allowed`); return; }
-      if (chatFile.size > MAX_ATTACHMENT_MB * 1024 * 1024) { toast.error(`${chatFile.name}: exceeds ${MAX_ATTACHMENT_MB}MB limit`); return; }
+      // No client-side size cap here — the backend enforces it, generously
+      // once the company has Google Drive connected (see
+      // AttachmentStorageService::maxUploadKb()) and at MAX_ATTACHMENT_MB
+      // otherwise, returning a 'storage_limit_reached' error the upload's
+      // own catch block below can show a "Connect Google Drive" prompt for.
     }
     setSendingChat(true);
     try {
