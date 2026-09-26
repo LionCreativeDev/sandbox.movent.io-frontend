@@ -17,14 +17,15 @@ import {
   toggleCategorySelection,
 } from '@/lib/moduleCategories';
 
-// Statuses that must go through the module/package picker below before
-// checkout — an account that lost access and is reactivating, not a fresh
-// registration or a mid-checkout continuation (pending_payment covers those,
-// and must keep landing on payment-only exactly as before — see the register
-// page's own handleSubmit(), which pushes here with the choice already made
-// seconds ago). 'trial' (still active, paying early) and 'active' (changing
-// payment method) also don't show it, for the same reason.
-const PICKER_STATUSES = ['trial_expired', 'grace_period', 'suspended', 'cancelled'];
+// Statuses that go through the module/package picker below before checkout —
+// an account reactivating after losing access, or a still-active trial admin
+// choosing to pay early, both get the full choice. A fresh registration or a
+// mid-checkout continuation (pending_payment) must keep landing on
+// payment-only exactly as before — see the register page's own
+// handleSubmit(), which pushes here with the choice already made seconds
+// ago. 'active' (changing payment method) also doesn't show it, for the same
+// reason: there's nothing to reconsider, just a card to update.
+const PICKER_STATUSES = ['trial', 'trial_expired', 'grace_period', 'suspended', 'cancelled'];
 
 // Augment window for PayPal SDK and Accept.js
 declare global {
@@ -770,10 +771,12 @@ export default function PaymentPage() {
 
   // Payment not completed yet (pending_payment) — /admin/dashboard would just
   // bounce them straight to /login (see DashboardLayout's payment gate), so
-  // send them back to Register to change plan/modules instead. A reactivating
-  // account (PICKER_STATUSES) goes back to My Plan, not the dashboard — that
-  // API call would just 402 and bounce them right back here via the axios
-  // interceptor. Anyone else landing here already active (e.g. changing
+  // send them back to Register to change plan/modules instead. Anyone on a
+  // PICKER_STATUSES status goes back to My Plan instead of the dashboard —
+  // for a blocked account (trial_expired/grace_period/suspended/cancelled)
+  // that API call would just 402 and bounce them right back here via the
+  // axios interceptor; for a still-active trial it's simply where "Pay Now"
+  // was clicked from. Anyone else landing here already active (e.g. changing
   // payment method) goes to their dashboard as normal.
   const handleBack = () => {
     const cached = getAuthType() === 'admin' ? (getAuthUser() as Admin | null) : null;
@@ -817,10 +820,11 @@ export default function PaymentPage() {
                   handlePay's payload stay correct either way.
 
                   An account reactivating from trial_expired/grace_period/
-                  suspended/cancelled (PICKER_STATUSES) gets this section
-                  instead — same module/package selection registration uses,
-                  reusing the exact same plans/live-modules data and pricing/
-                  dependency logic this page already computes above. */}
+                  suspended/cancelled, or a still-active trial admin paying
+                  early (PICKER_STATUSES), gets this section instead — same
+                  module/package selection registration uses, reusing the
+                  exact same plans/live-modules data and pricing/dependency
+                  logic this page already computes above. */}
               {showPlanPicker && (
                 <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #e2e8f0', padding: 22, marginBottom: 18 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', marginBottom: 4 }}>Choose Your Plan</div>

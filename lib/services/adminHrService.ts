@@ -40,6 +40,7 @@ export interface Employee {
   user?: { id: number; name: string; email: string } | null;
   company?: { id: number; name: string } | null;
   shift?: Shift | null;
+  creator?: { id: number; name: string; type: 'user' | 'admin' } | null;
   today_attendance?: {
     id: number | null;
     date: string;

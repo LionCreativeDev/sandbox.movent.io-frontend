@@ -26,8 +26,40 @@ let last403ToastAt = 0;
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 403) {
-      // Every 403 in this app — a missing canX permission, a module the
+    if (error.response?.status === 403 && error.response?.data?.errors?.error_code === 'company_suspended') {
+      // A specific company was manually suspended (EnsureCompanyNotSuspended)
+      // — distinct from a missing permission (generic 403 below) and from a
+      // tenant-wide subscription block (402 'subscription_required' below):
+      // this one has its own resolution (reactivate the company, or switch to
+      // another one), so it must not fall through to either of those handlers.
+      // Never logs the session out — a multi-company staff member must stay
+      // signed in to switch to an authorized active company; a Company Admin
+      // must stay signed in to reach the company-management screen.
+      const now = Date.now();
+      if (now - last403ToastAt > 1000) {
+        last403ToastAt = now;
+        toast.error(error.response?.data?.message ?? 'This company is currently suspended.');
+      }
+
+      // Admin: redirect straight to the company-management screen — both of
+      // its endpoints (companies/manage) are exempt from this same block, so
+      // this never loops. Staff (authType 'user'): deliberately NOT redirected
+      // here — DashboardLayout's own /user/me poll (see that file) already
+      // detects "this session's active company dropped out of my active
+      // list" (the same UserResource status now reports 'suspended' for a
+      // company-level suspension, not just an unassignment) and either shows
+      // its "no company" empty state or bounces to /select-company itself.
+      // Forcing that same redirect here too, before the poll has run, could
+      // send them to /select-company with returnTo set to a page that just
+      // 403'd — which would send them right back to it and 403 again forever
+      // once /select-company's own single-active-company fallback replays
+      // that same returnTo.
+      const authType = Cookies.get('auth_type');
+      if (authType === 'admin' && !window.location.pathname.startsWith('/admin/companies')) {
+        window.location.href = '/admin/companies';
+      }
+    } else if (error.response?.status === 403) {
+      // Every other 403 in this app — a missing canX permission, a module the
       // company hasn't purchased/enabled, or an inactive subscription — is
       // something only a Company Admin can fix. Individual pages still
       // show their own "Failed to load X" fallback in most catch blocks

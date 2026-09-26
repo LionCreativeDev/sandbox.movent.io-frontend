@@ -118,6 +118,7 @@ export default function EmployeeDetailPage() {
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Salary</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.salary ?? '—'}</div></div>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Join Date</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.join_date ? new Date(employee.join_date).toLocaleDateString('en-GB') : '—'}</div></div>
             <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Company</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.company?.name ?? '—'}</div></div>
+            <div><div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Created By</div><div style={{ fontSize: 13, color: '#0f172a', marginTop: 4 }}>{employee.creator?.name ?? '—'}</div></div>
           </div>
         </div>
 

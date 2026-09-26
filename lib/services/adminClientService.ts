@@ -20,6 +20,15 @@ export interface ClientPayload {
 
 export interface ClientCompany { id: number; name: string; currency: string; }
 
+export interface ManagedCompany {
+  id: number;
+  name: string;
+  currency: string;
+  is_active: boolean;
+  suspended_at: string | null;
+  suspension_reason: string | null;
+}
+
 /**
  * A generated receipt for one confirmed payment of this client's.
  *
@@ -65,6 +74,26 @@ export interface InvoiceReceipt {
 export const adminClientService = {
   companies: async (): Promise<ClientCompany[]> => {
     const res = await api.get('/admin/companies');
+    return res.data.data;
+  },
+
+  // GET /admin/companies/manage — the company-management screen's own list,
+  // deliberately separate from companies() above: that one is shared with
+  // every picker/switcher in the app and stays filtered to operational
+  // companies only, while this one must still show a suspended company (to
+  // reactivate it).
+  manageCompanies: async (): Promise<ManagedCompany[]> => {
+    const res = await api.get('/admin/companies/manage');
+    return res.data.data;
+  },
+
+  suspendCompany: async (id: number, reason: string): Promise<ManagedCompany> => {
+    const res = await api.patch(`/admin/companies/${id}/suspend`, { reason });
+    return res.data.data;
+  },
+
+  reactivateCompany: async (id: number): Promise<{ company: ManagedCompany; fully_active: boolean; remaining_restriction: string | null }> => {
+    const res = await api.patch(`/admin/companies/${id}/reactivate`);
     return res.data.data;
   },
 

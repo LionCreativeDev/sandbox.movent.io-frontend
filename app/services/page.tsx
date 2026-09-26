@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import { useRouter } from 'next/navigation';
+import { getActiveCompany } from '@/lib/auth';
 import {
   companyServiceService, CompanyServiceRow, CompanyServiceIndex, ServiceRequestRow,
 } from '@/lib/services/companyServiceService';
@@ -70,6 +71,12 @@ export default function CompanyServicesPage() {
   const [newCount, setNewCount] = useState(0);
   const [requestsLoading, setRequestsLoading] = useState(false);
 
+  // Scoped to whatever company the topbar Company Switcher is set to (Navbar
+  // reloads the page on change, so this always reflects it) — that's the one
+  // company filter this screen needs, rather than a second picker in-page.
+  const activeCompany = getActiveCompany();
+  const companyF = activeCompany === null || activeCompany === 'all' ? '' : String(activeCompany);
+
   const [data, setData]       = useState<CompanyServiceIndex | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch]   = useState('');
@@ -95,18 +102,20 @@ export default function CompanyServicesPage() {
 
   const loadRequests = () => {
     setRequestsLoading(true);
-    // Merges every company this admin owns — each row carries its own
-    // company name (see the request card below), so nothing needs picking.
-    companyServiceService.requests()
+    // Scoped to the active company (via companyF) rather than merged across
+    // every company this admin owns, matching whatever the topbar Company
+    // Switcher is set to — new_count comes back scoped the same way, so the
+    // tab's badge only ever counts this company's new requests.
+    companyServiceService.requests(undefined, companyF ? Number(companyF) : undefined)
       .then(res => { setRequests(res.requests); setNewCount(res.new_count); })
       .catch(err => toast.error(errText(err, 'Failed to load requests')))
       .finally(() => setRequestsLoading(false));
   };
 
-  // The count is wanted on the tab itself even while the catalog tab is open,
-  // so it loads once up front rather than only when the tab is first clicked.
+  // Loads once up front rather than only when the tab is first clicked, so
+  // switching to it never shows a blank flash.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { loadRequests(); }, []);
+  useEffect(() => { loadRequests(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setRequestStatus = async (row: ServiceRequestRow, status: string) => {
     try {

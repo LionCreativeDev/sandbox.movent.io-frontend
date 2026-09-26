@@ -202,7 +202,7 @@ export default function EmployeesPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1180 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['Employee', 'Code', 'Phone', 'Department', 'Designation', 'Shift', "Today's Status", 'Check-in', 'Check-out', 'Status', 'Joined', 'Actions'].map(h => (
+                {['Employee', 'Code', 'Phone', 'Department', 'Designation', 'Shift', "Today's Status", 'Check-in', 'Check-out', 'Status', 'Joined', 'Created By', 'Actions'].map(h => (
                   <th key={h} style={{
                     padding: '10px 16px', textAlign: 'left', fontSize: 11,
                     fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap',
@@ -232,6 +232,7 @@ export default function EmployeesPage() {
                   <td style={{ padding: '12px 16px', fontSize: 12, color: '#0f172a' }}>{fmtTime(e.today_attendance?.check_out)}</td>
                   <td style={{ padding: '12px 16px' }}><Badge label={e.status} sc={EMPLOYEE_STATUS_SC[e.status]} /></td>
                   <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{e.join_date ? new Date(e.join_date).toLocaleDateString('en-GB') : '—'}</td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{e.creator?.name ?? '—'}</td>
                   <td style={{ padding: '12px 16px' }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap' }}>
                       {canMarkAttendance && attendanceButton(e)}

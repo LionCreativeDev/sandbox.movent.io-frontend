@@ -838,7 +838,7 @@ export default function PortalAssistant({ navy = false }: { navy?: boolean }) {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: INK }}>{ASSISTANT_NAME}</div>
-                  <div style={{ fontSize: 11, color: GREEN, fontWeight: 600 }}>Invoices · Projects · Your seller</div>
+                  <div style={{ fontSize: 11, color: accentDark, fontWeight: 600 }}>Invoices · Projects · Your seller</div>
                 </div>
 
                 <button

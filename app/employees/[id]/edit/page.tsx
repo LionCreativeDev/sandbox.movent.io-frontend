@@ -5,7 +5,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAdminGuard } from '@/hooks/useAdminGuard';
 import Link from 'next/link';
 import { hrService } from '@/lib/services/hrService';
-import { EmployeeStatus, EmploymentType, Shift } from '@/lib/services/adminHrService';
+import { Department, EmployeeStatus, EmploymentType, Shift } from '@/lib/services/adminHrService';
 import { inp, lbl, card } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
 import PhoneInput from '@/components/ui/PhoneInput';
@@ -24,6 +24,7 @@ export default function EditEmployeePage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [department, setDepartment] = useState('');
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [designation, setDesignation] = useState('');
   const [employmentType, setEmploymentType] = useState<EmploymentType>('full_time');
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -34,6 +35,7 @@ export default function EditEmployeePage() {
 
   useEffect(() => {
     hrService.shifts.list().then(setShifts).catch(() => {});
+    hrService.departments.list().then(setDepartments).catch(() => {});
     hrService.employees.getOne(employeeId).then(emp => {
       setCompanyName(emp.company?.name ?? '—');
       setName(emp.name);
@@ -98,7 +100,13 @@ export default function EditEmployeePage() {
             </div>
             <div>
               <label style={lbl}>Department</label>
-              <input style={inp} value={department} onChange={e => setDepartment(e.target.value)} />
+              <select style={inp} value={department} onChange={e => setDepartment(e.target.value)}>
+                <option value="">No department</option>
+                {departments.map(item => <option key={item.id} value={item.name}>{item.name}</option>)}
+              </select>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 6 }}>
+                <Link href="/departments" style={{ color: '#2563eb', fontWeight: 600 }}>Manage departments</Link>
+              </div>
             </div>
             <div>
               <label style={lbl}>Designation</label>

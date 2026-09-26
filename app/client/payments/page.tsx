@@ -9,6 +9,14 @@ const SC: Record<string, { bg: string; color: string }> = {
   failed:               { bg: '#fef2f2', color: '#dc2626' },
 };
 
+// A named month reads unambiguously everywhere, unlike a raw ISO timestamp
+// or numeric D/M/Y (which reads as M/D/Y to half the audience). Matches
+// frontend/app/client/invoices/page.tsx's fmtDate.
+const fmtDate = (d?: string | null) => {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
 export default function ClientPaymentsPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -49,7 +57,7 @@ export default function ClientPaymentsPage() {
                     <td style={{ padding: '12px 20px', fontSize: 13, fontWeight: 500, color: '#1e293b' }}>
                       {pay.invoice?.invoice_number || '—'}
                     </td>
-                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#64748b' }}>{pay.payment_date}</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#64748b' }}>{fmtDate(pay.payment_date)}</td>
                     <td style={{ padding: '12px 20px', fontSize: 13, fontWeight: 600, color: '#1e293b' }}>
                       {pay.invoice?.currency || ''} {Number(pay.amount).toLocaleString()}
                     </td>

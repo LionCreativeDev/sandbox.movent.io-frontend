@@ -288,6 +288,12 @@ const ADMIN_NAV_GROUPS = [
         module: "attendance",
       },
       {
+        href: "/admin/attendance/monthly-report",
+        icon: HiChartBar,
+        label: "Monthly Report",
+        module: "attendance",
+      },
+      {
         href: "/admin/leaves",
         icon: HiCalendarDays,
         label: "Leave",
@@ -666,6 +672,13 @@ const USER_NAV_GROUPS = [
         href: "/attendance",
         icon: HiCalendarDays,
         label: "Attendance",
+        module: "hr",
+        permAny: ["canViewAttendance"],
+      },
+      {
+        href: "/attendance/monthly-report",
+        icon: HiChartBar,
+        label: "Monthly Report",
         module: "hr",
         permAny: ["canViewAttendance"],
       },

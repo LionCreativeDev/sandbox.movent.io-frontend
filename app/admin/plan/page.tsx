@@ -196,7 +196,7 @@ export default function PlanPage() {
               <Link href="/payment" style={{
                 padding: '9px 20px', borderRadius: 8, background: '#d97706', color: '#fff',
                 fontSize: 13, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap',
-              }}>Pay Now →</Link>
+              }}>Choose a Plan & Pay →</Link>
             </div>
           )}
 

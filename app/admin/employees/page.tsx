@@ -180,7 +180,7 @@ export default function EmployeesPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1100 }}>
               <thead>
                 <tr style={{ background: '#f8fafc' }}>
-                  {['Employee', 'Department', 'Shift', "Today's Status", 'Check-in', 'Check-out', 'Company', 'Status', 'Actions'].map(h => (
+                  {['Employee', 'Department', 'Shift', "Today's Status", 'Check-in', 'Check-out', 'Company', 'Created By', 'Status', 'Actions'].map(h => (
                     <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -203,6 +203,7 @@ export default function EmployeesPage() {
                       <td style={{ padding: '12px 16px', fontSize: 12, color: '#0f172a' }}>{fmtTime(e.today_attendance?.check_in)}</td>
                       <td style={{ padding: '12px 16px', fontSize: 12, color: '#0f172a' }}>{fmtTime(e.today_attendance?.check_out)}</td>
                       <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{e.company?.name ?? '-'}</td>
+                      <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>{e.creator?.name ?? '-'}</td>
                       <td style={{ padding: '12px 16px' }}><Badge label={e.status} sc={EMPLOYEE_STATUS_SC[e.status]} /></td>
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap' }}>
