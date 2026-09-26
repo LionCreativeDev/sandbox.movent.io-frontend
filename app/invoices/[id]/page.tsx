@@ -18,6 +18,7 @@ import InvoiceIssuer from '@/components/invoices/InvoiceIssuer';
 import PaymentProgressBar from '@/components/invoices/PaymentProgressBar';
 import { progressOf } from '@/lib/paymentStatus';
 import { ALLOWED_ATTACHMENT_TYPES, fmtFileSize } from '@/components/admin/projects/shared';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 import { adminSalesChatService, userSalesChatService } from '@/lib/services/salesChatService';
 import { ChatMessage } from '@/lib/services/adminProjectService';
 import toast from 'react-hot-toast';
@@ -135,6 +136,7 @@ export default function InvoiceDetailPage() {
   const [chatText, setChatText]       = useState('');
   const [chatFile, setChatFile]       = useState<File | null>(null);
   const [sendingChat, setSendingChat] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
 
   const load = () => {
     const fetch = isSubUser
@@ -200,7 +202,10 @@ export default function InvoiceDetailPage() {
       setChatText('');
       setChatFile(null);
       loadChat();
-    } catch { toast.error('Failed to send message'); }
+    } catch (err) {
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error('Failed to send message');
+    }
     finally { setSendingChat(false); }
   };
 
@@ -806,6 +811,7 @@ export default function InvoiceDetailPage() {
           </div>
         )}
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

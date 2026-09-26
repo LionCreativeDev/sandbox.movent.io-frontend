@@ -8,6 +8,7 @@ import { getAuthUser } from '@/lib/auth';
 import { User } from '@/types';
 import toast from 'react-hot-toast';
 import { chatSenderName } from '@/lib/chatSender';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 // Avatar background rotates through a small fixed palette keyed off the
 // thread id, purely cosmetic — so a sidebar full of conversations doesn't
@@ -48,6 +49,7 @@ export default function ChatPage() {
   const [text, setText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
 
@@ -151,7 +153,8 @@ export default function ChatPage() {
       loadMessages(activeThreadId);
       loadThreads();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to send message');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to send message');
     } finally { setSending(false); }
   };
 
@@ -397,6 +400,7 @@ export default function ChatPage() {
           )}
         </div>
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

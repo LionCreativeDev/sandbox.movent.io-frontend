@@ -9,6 +9,8 @@ import api from '@/lib/axios';
  * unlike most other services in this app that switch prefix by auth type.
  */
 
+export type StorageWarningLevel = 'normal' | 'high' | 'critical' | 'full';
+
 export interface StorageStatus {
   limit_bytes: number;
   limit_mb: number;
@@ -16,12 +18,15 @@ export interface StorageStatus {
   remaining_bytes: number;
   used_percentage: number;
   is_full: boolean;
+  warning_level: StorageWarningLevel;
   drive: { connected: boolean; email: string | null; status: string | null };
 }
 
 export interface StorageBreakdownRow {
   label: string;
   internal_bytes: number;
+  drive_bytes: number;
+  total_bytes: number;
   internal_files: number;
   drive_files: number;
 }
@@ -34,12 +39,26 @@ export interface DriveSummary {
   last_error: string | null;
 }
 
+/** The connected Google account's REAL storage quota — null until Drive is connected. */
+export interface DriveQuota {
+  connected: boolean;
+  unlimited: boolean;
+  total_bytes: number | null;
+  used_bytes: number;
+  available_bytes: number | null;
+  used_percentage: number | null;
+  last_synced_at: string | null;
+  warning_level: StorageWarningLevel;
+  stale: boolean;
+}
+
 export interface StorageOverview {
   requires_company_selection: boolean;
   company_id?: number;
   storage?: StorageStatus;
   breakdown?: StorageBreakdownRow[];
   drive?: DriveSummary;
+  drive_quota?: DriveQuota | null;
   drive_configured?: boolean;
 }
 
@@ -63,11 +82,33 @@ export const storageService = {
 
   disconnect: async (): Promise<{ drive: DriveSummary }> =>
     (await api.post('/admin/storage/google-drive/disconnect')).data.data,
+
+  /** The "Refresh Storage" button — forces a live re-fetch past the passive cache window. */
+  refreshQuota: async (): Promise<{ drive_quota: DriveQuota }> =>
+    (await api.post('/admin/storage/google-drive/refresh')).data.data,
 };
 
-/** Bytes → "7.8 MB", the format every storage figure in this UI uses. */
+/** Bytes → "7.8 MB", the format every INTERNAL (small, MB-scale) storage figure in this UI uses. */
 export const formatBytes = (bytes: number): string => {
   if (bytes <= 0) return '0 MB';
   const mb = bytes / (1024 * 1024);
   return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+};
+
+/**
+ * Bytes → "850 MB" / "7.4 GB" / "1.2 TB" — auto-picks the unit, for
+ * GB-scale figures (the real Google Drive account quota, and breakdown
+ * totals once files have moved to Drive) where a fixed-MB format would read
+ * as an unreadable 5-6 digit number.
+ */
+export const formatStorageAuto = (bytes: number): string => {
+  if (bytes <= 0) return '0 MB';
+  const units: Array<[number, string]> = [[1024 ** 4, 'TB'], [1024 ** 3, 'GB'], [1024 ** 2, 'MB']];
+  for (const [factor, unit] of units) {
+    if (bytes >= factor) {
+      const value = bytes / factor;
+      return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
+    }
+  }
+  return `${(bytes / 1024).toFixed(0)} KB`;
 };

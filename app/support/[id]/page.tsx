@@ -7,6 +7,7 @@ import { can } from '@/lib/auth';
 import { userSupportService, TICKET_CATEGORIES, TICKET_STATUSES } from '@/lib/services/userSupportService';
 import { userProjectService } from '@/lib/services/userProjectService';
 import { handleNotFound } from '@/lib/notFound';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 const GREEN = '#2563eb';
 const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(TICKET_CATEGORIES.map(c => [c.value, c.label]));
@@ -36,6 +37,7 @@ export default function StaffSupportTicketPage() {
   // chosen filename. Bumping this key after every successful send remounts
   // the input fresh, which is the only way to actually reset it.
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [storageFull, setStorageFull] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastReplyCount = useRef<number | null>(null);
 
@@ -83,7 +85,10 @@ export default function StaffSupportTicketPage() {
       setFileInputKey(k => k + 1);
       toast.success('Reply sent');
       load();
-    } catch { toast.error('Failed to send reply'); }
+    } catch (err) {
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error('Failed to send reply');
+    }
     finally { setSending(false); }
   };
 
@@ -268,6 +273,7 @@ export default function StaffSupportTicketPage() {
           </div>
         )}
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

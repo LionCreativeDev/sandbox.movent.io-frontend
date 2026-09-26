@@ -1,12 +1,35 @@
 'use client';
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { storageService, formatBytes, StorageOverview } from '@/lib/services/storageService';
+import { storageService, formatBytes, formatStorageAuto, StorageOverview, StorageWarningLevel } from '@/lib/services/storageService';
 import { useDriveOAuthResult } from '@/hooks/useDriveOAuthResult';
 
 const card: React.CSSProperties = { background: '#fff', borderRadius: 14, border: '1px solid #f1f5f9', overflow: 'hidden', marginBottom: 20 };
 const cardHead: React.CSSProperties = { padding: '16px 24px', borderBottom: '1px solid #f1f5f9', background: '#fafafa' };
 const cardBody: React.CSSProperties = { padding: 24 };
+
+/** Normal/High/Critical/Full → bar + text color, shared by both the internal and the real Drive quota cards. */
+const warningColor = (level: StorageWarningLevel): string =>
+  level === 'full' ? '#dc2626' : level === 'critical' ? '#ea580c' : level === 'high' ? '#d97706' : '#2563eb';
+
+const warningMessage = (level: StorageWarningLevel): string | null => {
+  if (level === 'full') return 'Storage is full. New uploads here will be refused until space is freed or Drive is connected.';
+  if (level === 'critical') return 'Very little storage remains.';
+  if (level === 'high') return 'Storage usage is approaching the limit.';
+  return null;
+};
+
+// "3m ago" / "2h ago" / "5d ago" — same small local convention already used
+// in app/client/layout.tsx, not worth extracting for one more caller.
+function timeAgo(iso: string): string {
+  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 
 /**
  * Company Admin > Settings > Storage.
@@ -29,6 +52,7 @@ export default function StorageSettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [showAccountPicker, setShowAccountPicker] = useState<'connect' | 'change' | null>(null);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
 
@@ -56,6 +80,20 @@ export default function StorageSettingsPanel() {
       const msg = (err as { response?: { data?: { message?: string } } }).response?.data?.message;
       toast.error(msg ?? 'Could not start Google Drive connection');
       setConnecting(false);
+    }
+  };
+
+  const doRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const { drive_quota } = await storageService.refreshQuota();
+      setData(prev => (prev ? { ...prev, drive_quota } : prev));
+      toast.success('Storage refreshed');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } }).response?.data?.message;
+      toast.error(msg ?? 'Could not refresh storage');
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -92,7 +130,9 @@ export default function StorageSettingsPanel() {
 
   const s = data.storage!;
   const drive = data.drive!;
-  const barColor = s.is_full ? '#dc2626' : s.used_percentage > 80 ? '#ea580c' : '#2563eb';
+  const driveQuota = data.drive_quota ?? null;
+  const barColor = warningColor(s.warning_level);
+  const internalWarning = warningMessage(s.warning_level);
 
   return (
     <>
@@ -116,13 +156,16 @@ export default function StorageSettingsPanel() {
           <div style={{ height: 10, background: '#f1f5f9', borderRadius: 6, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${s.used_percentage}%`, background: barColor, borderRadius: 6, transition: 'width .3s' }} />
           </div>
-          {s.is_full && !drive.connected && (
+          {internalWarning && (s.is_full ? !drive.connected : true) && (
             <div style={{
               marginTop: 16, padding: '12px 16px', borderRadius: 10,
-              background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: 13, lineHeight: 1.6,
+              background: s.is_full ? '#fef2f2' : '#fffbeb',
+              border: `1px solid ${s.is_full ? '#fecaca' : '#fde68a'}`,
+              color: s.is_full ? '#991b1b' : '#92400e', fontSize: 13, lineHeight: 1.6,
             }}>
-              Your company storage limit has been reached. New uploads across the CRM will be refused until you
-              connect Google Drive or free up space.
+              {s.is_full
+                ? 'Your company storage limit has been reached. New uploads across the CRM will be refused until you connect Google Drive or free up space.'
+                : internalWarning}
             </div>
           )}
         </div>
@@ -185,6 +228,59 @@ export default function StorageSettingsPanel() {
         </div>
       </div>
 
+      {/* Google Drive Storage — the account's REAL quota (Google's own
+          about.storageQuota), only meaningful once actually connected. */}
+      {driveQuota && (
+        <div style={card}>
+          <div style={cardHead}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Google Drive Storage</div>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                  The connected Google account&apos;s real storage — across Drive, Gmail and Photos combined
+                </p>
+              </div>
+              <button onClick={doRefresh} disabled={refreshing} style={{ ...btn('ghost'), padding: '7px 14px', opacity: refreshing ? 0.6 : 1 }}>
+                {refreshing ? 'Refreshing…' : 'Refresh Storage'}
+              </button>
+            </div>
+          </div>
+          <div style={cardBody}>
+            {driveQuota.unlimited ? (
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                {formatStorageAuto(driveQuota.used_bytes)} used <span style={{ fontSize: 12, fontWeight: 500, color: '#94a3b8' }}>— Unlimited plan</span>
+              </p>
+            ) : driveQuota.total_bytes ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
+                    {formatStorageAuto(driveQuota.used_bytes)} <span style={{ fontSize: 13, fontWeight: 500, color: '#94a3b8' }}>/ {formatStorageAuto(driveQuota.total_bytes)} used</span>
+                  </span>
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                    {driveQuota.used_percentage}% used
+                    {driveQuota.available_bytes !== null && ` · Available: ${formatStorageAuto(driveQuota.available_bytes)}`}
+                  </span>
+                </div>
+                <div style={{ height: 10, background: '#f1f5f9', borderRadius: 6, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${driveQuota.used_percentage ?? 0}%`, background: warningColor(driveQuota.warning_level), borderRadius: 6, transition: 'width .3s' }} />
+                </div>
+                {warningMessage(driveQuota.warning_level) && (
+                  <div style={{ marginTop: 14, fontSize: 12.5, color: warningColor(driveQuota.warning_level), fontWeight: 600 }}>
+                    {warningMessage(driveQuota.warning_level)}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>Fetching storage details…</p>
+            )}
+            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#94a3b8' }}>
+              <span>{driveQuota.stale && driveQuota.last_synced_at ? 'Could not refresh just now — showing last known values.' : ' '}</span>
+              <span>{driveQuota.last_synced_at ? `Last synced: ${timeAgo(driveQuota.last_synced_at)}` : ''}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Breakdown */}
       {data.breakdown && data.breakdown.some(r => r.internal_files > 0 || r.drive_files > 0) && (
         <div style={card}>
@@ -195,7 +291,7 @@ export default function StorageSettingsPanel() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc' }}>
-                  {['Location', 'Internal Files', 'Internal Size', 'Google Drive Files'].map(h => (
+                  {['Location', 'File Count', 'Total Size', 'Internal Size', 'Google Drive Files'].map(h => (
                     <th key={h} style={{ padding: '10px 24px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>{h}</th>
                   ))}
                 </tr>
@@ -204,8 +300,9 @@ export default function StorageSettingsPanel() {
                 {data.breakdown.filter(r => r.internal_files > 0 || r.drive_files > 0).map(r => (
                   <tr key={r.label} style={{ borderTop: '1px solid #f8fafc' }}>
                     <td style={{ padding: '10px 24px', fontSize: 13, color: '#0f172a', fontWeight: 600 }}>{r.label}</td>
-                    <td style={{ padding: '10px 24px', fontSize: 13, color: '#475569' }}>{r.internal_files}</td>
-                    <td style={{ padding: '10px 24px', fontSize: 13, color: '#475569' }}>{formatBytes(r.internal_bytes)}</td>
+                    <td style={{ padding: '10px 24px', fontSize: 13, color: '#475569' }}>{r.internal_files + r.drive_files}</td>
+                    <td style={{ padding: '10px 24px', fontSize: 13, color: '#0f172a', fontWeight: 600 }}>{formatStorageAuto(r.total_bytes)}</td>
+                    <td style={{ padding: '10px 24px', fontSize: 13, color: '#475569' }}>{formatBytes(r.internal_bytes)} ({r.internal_files})</td>
                     <td style={{ padding: '10px 24px', fontSize: 13, color: '#475569' }}>{r.drive_files}</td>
                   </tr>
                 ))}

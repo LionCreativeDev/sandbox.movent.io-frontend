@@ -11,6 +11,7 @@ import { ChatMessage } from '@/lib/services/adminProjectService';
 import { mentionQueryOf, matchMentionables, applyMention, renderWithMentions, roleLabel } from '@/lib/chatMentions';
 import { handleNotFound } from '@/lib/notFound';
 import { chatSenderName } from '@/lib/chatSender';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 const MENTION_STYLE = { fontWeight: 700, color: '#047857', background: '#d1fae5', borderRadius: 4, padding: '0 3px' };
 const MENTION_STYLE_MINE = { fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,0.22)', borderRadius: 4, padding: '0 3px' };
@@ -40,6 +41,7 @@ export default function AdminProjectClientChatPage() {
   const [text, setText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // @mentions — Admin may tag anyone in the conversation (Client, Seller,
@@ -82,7 +84,8 @@ export default function AdminProjectClientChatPage() {
       setMentionQuery(null);
       load();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to send message');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to send message');
     } finally { setSending(false); }
   };
 
@@ -261,6 +264,7 @@ export default function AdminProjectClientChatPage() {
           )}
         </div>
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

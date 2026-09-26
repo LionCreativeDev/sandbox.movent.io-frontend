@@ -13,6 +13,7 @@ import { handleNotFound } from '@/lib/notFound';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
 import RichTextField from '@/components/ui/RichTextField';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 const TASK_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'review', 'completed', 'cancelled'];
 // These roles are excluded from the dropdown only for an actor who lacks
@@ -76,6 +77,11 @@ export default function CreateTaskPage() {
   const [taskType, setTaskType] = useState<'general' | 'production' | 'client_request' | 'internal'>('general');
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
+  // Set once the task itself is created — used to hold the redirect back
+  // until the storage-limit modal (if shown) is dismissed, so it isn't
+  // unmounted by navigation before the user can read it.
+  const [createdTaskId, setCreatedTaskId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!canCreateAnyTask) {
@@ -153,15 +159,21 @@ export default function CreateTaskPage() {
         task_type: taskType,
       });
       let failedCount = 0;
+      let hitStorageLimit = false;
       if (files.length > 0) {
         for (const file of files) {
           try { await userProjectService.taskAttachments.upload(projectId, task.id, file); }
           catch (err: any) {
             failedCount++;
-            const isForbidden = err?.response?.status === 403;
-            toast.error(isForbidden
-              ? `${file.name}: you don't have permission to upload task attachments`
-              : `${file.name}: upload failed`);
+            if (isStorageLimitError(err)) {
+              hitStorageLimit = true;
+              setStorageFull(true);
+            } else {
+              const isForbidden = err?.response?.status === 403;
+              toast.error(isForbidden
+                ? `${file.name}: you don't have permission to upload task attachments`
+                : `${file.name}: upload failed`);
+            }
           }
         }
       }
@@ -170,7 +182,13 @@ export default function CreateTaskPage() {
       } else {
         toast.success('Task created');
       }
-      router.push(`/projects/${projectId}/tasks/${task.id}`);
+      if (hitStorageLimit) {
+        // Hold the redirect until the modal is dismissed — see
+        // createdTaskId/storageFull state above.
+        setCreatedTaskId(task.id);
+      } else {
+        router.push(`/projects/${projectId}/tasks/${task.id}`);
+      }
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Failed to create task');
     } finally { setSaving(false); }
@@ -332,6 +350,12 @@ export default function CreateTaskPage() {
           }}>Cancel</button>
         </div>
       </form>
+      {storageFull && (
+        <StorageLimitModal onClose={() => {
+          setStorageFull(false);
+          if (createdTaskId) router.push(`/projects/${projectId}/tasks/${createdTaskId}`);
+        }} />
+      )}
     </DashboardLayout>
   );
 }

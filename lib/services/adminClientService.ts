@@ -27,6 +27,18 @@ export interface ManagedCompany {
   is_active: boolean;
   suspended_at: string | null;
   suspension_reason: string | null;
+  created_at: string;
+  // A Company can only ever be created by the Admin who owns it (no staff
+  // route to create one exists), so this is always the creator — no
+  // separate created_by column needed, unlike Employee/Client/Lead.
+  admin: { id: number; name: string } | null;
+}
+
+export interface CompanyHistoryEntry {
+  action: string;
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+  created_at: string;
 }
 
 /**
@@ -94,6 +106,11 @@ export const adminClientService = {
 
   reactivateCompany: async (id: number): Promise<{ company: ManagedCompany; fully_active: boolean; remaining_restriction: string | null }> => {
     const res = await api.patch(`/admin/companies/${id}/reactivate`);
+    return res.data.data;
+  },
+
+  companyHistory: async (id: number): Promise<CompanyHistoryEntry[]> => {
+    const res = await api.get(`/admin/companies/${id}/history`);
     return res.data.data;
   },
 

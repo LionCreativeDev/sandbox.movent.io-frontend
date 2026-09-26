@@ -23,6 +23,7 @@ import {
 } from "@/lib/services/adminProjectService";
 import { handleNotFound } from "@/lib/notFound";
 import { chatSenderName } from '@/lib/chatSender';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 function roleLabel(role: string | null | undefined): string {
     if (!role) return "";
@@ -61,6 +62,7 @@ export default function AdminProjectChatPage() {
     const [text, setText] = useState("");
     const [file, setFile] = useState<File | null>(null);
     const [sending, setSending] = useState(false);
+    const [storageFull, setStorageFull] = useState(false);
 
     const [eligibleUsers, setEligibleUsers] = useState<
         ProjectMessengerEligibleUser[]
@@ -172,7 +174,8 @@ export default function AdminProjectChatPage() {
             setSelectedMentions([]);
             loadMessages();
         } catch (err: any) {
-            toast.error(
+            if (isStorageLimitError(err)) setStorageFull(true);
+            else toast.error(
                 err?.response?.data?.message || "Failed to send message",
             );
         } finally {
@@ -1096,6 +1099,7 @@ export default function AdminProjectChatPage() {
                     )}
                 </div>
             </div>
+            {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
         </DashboardLayout>
     );
 }

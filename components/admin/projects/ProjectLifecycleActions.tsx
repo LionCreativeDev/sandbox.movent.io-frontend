@@ -2,6 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { Project, ProjectStatus, CompletionStatus } from '@/lib/services/adminProjectService';
 import { inp, lbl } from './shared';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 interface LifecycleService {
   completionStatus: (id: number) => Promise<CompletionStatus>;
@@ -110,6 +111,7 @@ export default function ProjectLifecycleActions({
   const [unpaidWarning, setUnpaidWarning] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
   const [deliveryFile, setDeliveryFile] = useState<File | null>(null);
+  const [storageFull, setStorageFull] = useState(false);
 
   const isTerminal = status === 'completed' || status === 'closed';
 
@@ -219,7 +221,8 @@ export default function ProjectLifecycleActions({
       onUpdated(updated);
       close();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to submit project delivery');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to submit project delivery');
     } finally { setSubmitting(false); }
   };
 
@@ -238,7 +241,8 @@ export default function ProjectLifecycleActions({
       onUpdated(updated);
       close();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to deliver project');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to deliver project');
     } finally { setSubmitting(false); }
   };
 
@@ -565,6 +569,8 @@ export default function ProjectLifecycleActions({
           </div>
         </div>
       )}
+
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </>
   );
 }

@@ -6,6 +6,7 @@ import { TICKET_CATEGORIES } from '@/lib/services/adminSupportService';
 import toast from 'react-hot-toast';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 const GREEN = '#081B2D';
 
@@ -22,6 +23,7 @@ export default function ClientCreateTicketPage() {
   const [loading, setLoading]     = useState(false);
   const [projects, setProjects]   = useState<ClientProject[]>([]);
   const [invoices, setInvoices]   = useState<ClientInvoice[]>([]);
+  const [storageFull, setStorageFull] = useState(false);
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -63,7 +65,8 @@ export default function ClientCreateTicketPage() {
       toast.success('Ticket raised successfully!');
       router.push('/client/support');
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to create ticket');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to create ticket');
     } finally {
       setLoading(false);
     }
@@ -178,6 +181,7 @@ export default function ClientCreateTicketPage() {
           </div>
         </form>
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </div>
   );
 }

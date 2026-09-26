@@ -8,6 +8,7 @@ import { mentionQueryOf, matchMentionables, applyMention, renderWithMentions, ro
 import { clientPortalSenderName, isOwnClientMessage } from '@/lib/chatSender';
 import { handleNotFound } from '@/lib/notFound';
 import RichText from '@/components/ui/RichText';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 const GREEN = '#081B2D';
 const SC: Record<string, { bg: string; color: string }> = {
@@ -76,6 +77,7 @@ export default function ClientProjectDetailPage() {
   const [chatText, setChatText]   = useState('');
   const [chatFile, setChatFile]   = useState<File | null>(null);
   const [chatSending, setChatSending] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   // @mentions — the client can tag their Seller and Company Admin, plus the
   // Project Manager once the Seller has invited them into this conversation.
@@ -135,7 +137,8 @@ export default function ClientProjectDetailPage() {
       setMentionQuery(null);
       loadChat();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to send message');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to send message');
     } finally { setChatSending(false); }
   };
 
@@ -446,6 +449,7 @@ export default function ClientProjectDetailPage() {
         </div>
       )}
 
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </div>
   );
 }

@@ -22,6 +22,7 @@ import { handleNotFound } from "@/lib/notFound";
 import { Admin } from "@/types";
 import RichTextField from "@/components/ui/RichTextField";
 import { companyServiceService } from "@/lib/services/companyServiceService";
+import StorageLimitModal, { isStorageLimitError } from "@/components/storage/StorageLimitModal";
 
 interface ClientOption {
     id: number;
@@ -51,6 +52,7 @@ export default function EditProjectPage() {
     const [attachments, setAttachments] = useState<ProjectAttachment[]>([]);
     const [attLoading, setAttLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [storageFull, setStorageFull] = useState(false);
 
     const [form, setForm] = useState({
         client_id: "",
@@ -164,9 +166,10 @@ export default function EditProjectPage() {
             }
             try {
                 await adminProjectService.attachments.upload(Number(id), file);
-            } catch {
+            } catch (err) {
                 failed++;
-                toast.error(`${file.name}: upload failed`);
+                if (isStorageLimitError(err)) setStorageFull(true);
+                else toast.error(`${file.name}: upload failed`);
             }
         }
         if (failed < files.length) toast.success("Attachment(s) uploaded");
@@ -690,6 +693,7 @@ export default function EditProjectPage() {
                     </button>
                 </div>
             </form>
+            {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
         </DashboardLayout>
     );
 }

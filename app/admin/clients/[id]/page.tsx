@@ -6,6 +6,7 @@ import api from "@/lib/axios";
 import toast from "react-hot-toast";
 import { handleNotFound } from "@/lib/notFound";
 import { adminSalesChatService } from "@/lib/services/salesChatService";
+import StorageLimitModal, { isStorageLimitError } from "@/components/storage/StorageLimitModal";
 import {
   adminClientService,
   InvoiceReceipt,
@@ -193,6 +194,7 @@ export default function ClientDetailPage() {
   const [chatText, setChatText] = useState("");
   const [chatFile, setChatFile] = useState<File | null>(null);
   const [sendingChat, setSendingChat] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
 
   // Invoice Receipts — the receipts generated for this client's confirmed
   // payments. Loaded only when the tab is opened (each card pulls an image),
@@ -323,7 +325,8 @@ export default function ClientDetailPage() {
       setChatFile(null);
       loadChat();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || "Failed to send message");
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || "Failed to send message");
     } finally {
       setSendingChat(false);
     }
@@ -2054,6 +2057,7 @@ export default function ClientDetailPage() {
           </div>
         </div>
       )}
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

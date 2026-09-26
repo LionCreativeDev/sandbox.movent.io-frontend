@@ -17,6 +17,7 @@ import { Client, Invoice } from '@/types';
 import { handleNotFound } from '@/lib/notFound';
 import toast from 'react-hot-toast';
 import { chatSenderName } from '@/lib/chatSender';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 import {
   HiArrowLeft, HiPencilSquare, HiCheckCircle, HiXCircle,
   HiDocumentText, HiPlusCircle, HiTrash, HiArrowsRightLeft
@@ -122,6 +123,7 @@ export default function ClientProfilePage() {
   const [chatText, setChatText] = useState('');
   const [chatFile, setChatFile] = useState<File | null>(null);
   const [sendingChat, setSendingChat] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
 
   // Client Messages (restricted Direct Chat — see Client Communication Rules)
   const dmBase = isSubUser ? '/user' : '/admin';
@@ -226,7 +228,8 @@ export default function ClientProfilePage() {
       setChatFile(null);
       loadChat();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to send message');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to send message');
     } finally { setSendingChat(false); }
   };
 
@@ -911,6 +914,7 @@ export default function ClientProfilePage() {
           </div>
         )}
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

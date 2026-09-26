@@ -7,6 +7,7 @@ import { adminProjectService, Deliverable, Project, Task } from '@/lib/services/
 import { adminClientService } from '@/lib/services/adminClientService';
 import { Client } from '@/types';
 import { inp, lbl, card, Badge, DELIVERABLE_SC, fmtDate } from '@/components/admin/projects/shared';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 export default function DeliverablesPage() {
   useModuleGuard('projects');
@@ -24,6 +25,7 @@ export default function DeliverablesPage() {
   const [uploadTaskId, setUploadTaskId] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
   const [approvingDelivery, setApprovingDelivery] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [clientSelections, setClientSelections] = useState<Record<number, string>>({});
@@ -64,7 +66,10 @@ export default function DeliverablesPage() {
       toast.success('Deliverable uploaded');
       setUploadTitle(''); setUploadTaskId(''); setUploadFile(null);
       load(projectId);
-    } catch { toast.error('Failed to upload deliverable'); }
+    } catch (err) {
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error('Failed to upload deliverable');
+    }
     finally { setUploading(false); }
   };
 
@@ -513,6 +518,7 @@ export default function DeliverablesPage() {
           )}
         </div>
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

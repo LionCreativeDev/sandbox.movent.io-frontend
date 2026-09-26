@@ -16,6 +16,7 @@ import { User } from '@/types';
 import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
 import RichTextField from '@/components/ui/RichTextField';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 const hasProjectManagementAccess = (u: User) =>
   (u.company_assignments ?? []).some(a => (a.permissions?.project_management ?? []).length > 0);
@@ -73,6 +74,7 @@ export default function ProjectTasksPage() {
   const [existingAttachments, setExistingAttachments] = useState<ProjectTaskAttachment[]>([]);
   const [existingAttLoading, setExistingAttLoading] = useState(false);
   const [uploadingExisting, setUploadingExisting] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
   // Only fetched to know whether the project is closed (read-only) — hides
   // "+ Add Task"/row actions rather than letting the backend 422 on submit.
   const [projectClosed, setProjectClosed] = useState(false);
@@ -195,7 +197,11 @@ export default function ProjectTasksPage() {
       // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
       // otherwise (see AttachmentStorageService::maxUploadKb()).
       try { await adminProjectService.taskAttachments.upload(projectId, editingId, file); }
-      catch { failed++; toast.error(`${file.name}: upload failed`); }
+      catch (err) {
+        failed++;
+        if (isStorageLimitError(err)) setStorageFull(true);
+        else toast.error(`${file.name}: upload failed`);
+      }
     }
     if (failed < files.length) toast.success('Attachment(s) uploaded');
     setUploadingExisting(false);
@@ -241,7 +247,11 @@ export default function ProjectTasksPage() {
         if (attachments.length > 0) {
           for (const file of attachments) {
             try { await adminProjectService.taskAttachments.upload(projectId, task.id, file); }
-            catch { failedCount++; toast.error(`${file.name}: upload failed`); }
+            catch (err) {
+              failedCount++;
+              if (isStorageLimitError(err)) setStorageFull(true);
+              else toast.error(`${file.name}: upload failed`);
+            }
           }
         }
         if (failedCount > 0) {
@@ -535,6 +545,7 @@ export default function ProjectTasksPage() {
           </table>
         )}
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

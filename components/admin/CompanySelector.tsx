@@ -40,36 +40,48 @@ export default function CompanySelector({ onChange }: { onChange?: (companyId: n
   const [selected, setSelected] = useState<number | 'all' | null>(null);
 
   useEffect(() => {
-    api.get('/admin/companies')
-      .then(r => {
-        const list: CompanyOption[] = r.data.data || [];
-        setCompanies(list);
-        if (list.length === 0) return;
+    // Named so it can run again live off 'auth_refreshed' — dispatched by
+    // admin/companies/page.tsx right after a Suspend/Reactivate changes how
+    // many companies are actually operational, so this picker (and its
+    // show/hide-when-<=1 rule below) updates without a page reload, same as
+    // every other 'auth_refreshed' listener (Sidebar's modules, Navbar) already
+    // reacts live to a session-affecting change made elsewhere in the app.
+    const loadCompanies = () => {
+      api.get('/admin/companies')
+        .then(r => {
+          const list: CompanyOption[] = r.data.data || [];
+          setCompanies(list);
+          if (list.length === 0) return;
 
-        // Default selected company follows whatever's already active
-        // (including "All Companies", preserved across reloads); if
-        // nothing valid is set yet (first visit, or a stale id from a
-        // company that's since disappeared), default to the LOWEST company
-        // id — not list[0] (this endpoint orders alphabetically by name for
-        // a nicer picker UX). Every backend fallback (e.g.
-        // ScopesToActiveCompany::activeCompanyId(), used the instant any
-        // list page loads before this effect's setActiveCompany() below has
-        // even run) picks companyIds()[0], which is unordered/lowest-id —
-        // defaulting to a *different* company here than that silent
-        // fallback just resolved to made the dropdown and the already-
-        // loaded list disagree on first visit.
-        const current = getActiveCompany();
-        const lowestIdCompany = list.reduce((min, c) => (c.id < min.id ? c : min), list[0]);
-        const initial = current === 'all' || (current && list.some(c => c.id === current))
-          ? current
-          : lowestIdCompany.id;
-        setSelected(initial);
-        if (initial !== current) {
-          setActiveCompany(initial);
-          refreshAdminSession();
-        }
-      })
-      .catch(() => {});
+          // Default selected company follows whatever's already active
+          // (including "All Companies", preserved across reloads); if
+          // nothing valid is set yet (first visit, or a stale id from a
+          // company that's since disappeared — e.g. it just got suspended),
+          // default to the LOWEST company id — not list[0] (this endpoint
+          // orders alphabetically by name for a nicer picker UX). Every
+          // backend fallback (e.g. ScopesToActiveCompany::activeCompanyId(),
+          // used the instant any list page loads before this effect's
+          // setActiveCompany() below has even run) picks companyIds()[0],
+          // which is unordered/lowest-id — defaulting to a *different*
+          // company here than that silent fallback just resolved to made the
+          // dropdown and the already-loaded list disagree on first visit.
+          const current = getActiveCompany();
+          const lowestIdCompany = list.reduce((min, c) => (c.id < min.id ? c : min), list[0]);
+          const initial = current === 'all' || (current && list.some(c => c.id === current))
+            ? current
+            : lowestIdCompany.id;
+          setSelected(initial);
+          if (initial !== current) {
+            setActiveCompany(initial);
+            refreshAdminSession();
+          }
+        })
+        .catch(() => {});
+    };
+
+    loadCompanies();
+    window.addEventListener('auth_refreshed', loadCompanies);
+    return () => window.removeEventListener('auth_refreshed', loadCompanies);
   }, []);
 
   // A single-company Admin (the common case) has nothing to actually

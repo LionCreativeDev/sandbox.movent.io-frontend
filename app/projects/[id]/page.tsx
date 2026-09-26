@@ -50,6 +50,7 @@ import SubmitButton from "@/components/ui/SubmitButton";
 import LoadingOverlay from "@/components/ui/LoadingOverlay";
 import RichText from "@/components/ui/RichText";
 import RichTextField from "@/components/ui/RichTextField";
+import StorageLimitModal, { isStorageLimitError } from "@/components/storage/StorageLimitModal";
 
 const TASK_TYPE_LABEL: Record<string, string> = {
     general: "General",
@@ -135,6 +136,7 @@ export default function UserProjectDetailPage() {
     const [comments, setComments] = useState<ProjectComment[]>([]);
     const [attachments, setAttachments] = useState<ProjectAttachment[]>([]);
     const [uploading, setUploading] = useState(false);
+    const [storageFull, setStorageFull] = useState(false);
 
     const canEditProjects = can("project_management", "canEditProjects");
     const canManageProjectInvoices = can(
@@ -503,9 +505,10 @@ export default function UserProjectDetailPage() {
             // otherwise (see AttachmentStorageService::maxUploadKb()).
             try {
                 await userProjectService.attachments.upload(id, file);
-            } catch {
+            } catch (err) {
                 failed++;
-                toast.error(`${file.name}: upload failed`);
+                if (isStorageLimitError(err)) setStorageFull(true);
+                else toast.error(`${file.name}: upload failed`);
             }
         }
         if (failed < files.length) toast.success("Attachment(s) uploaded");
@@ -617,8 +620,9 @@ export default function UserProjectDetailPage() {
                         comment.id,
                         commentFile,
                     );
-                } catch {
-                    toast.error(
+                } catch (err) {
+                    if (isStorageLimitError(err)) setStorageFull(true);
+                    else toast.error(
                         "Comment posted, but the attachment failed to upload.",
                     );
                 }
@@ -4149,6 +4153,7 @@ export default function UserProjectDetailPage() {
                     </form>
                 </div>
             </div>
+            {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
         </DashboardLayout>
     );
 }

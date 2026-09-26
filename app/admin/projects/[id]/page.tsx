@@ -13,6 +13,7 @@ import ProjectLifecycleActions from '@/components/admin/projects/ProjectLifecycl
 import { card, lbl, inp, Badge, ThumbIcon, STATUS_SC, PRIORITY_SC, fmtDate, ALLOWED_ATTACHMENT_TYPES, fmtFileSize, asRelation, DRAFT_HINT, DraftNotice } from '@/components/admin/projects/shared';
 import { handleNotFound } from '@/lib/notFound';
 import RichText from '@/components/ui/RichText';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 // Groups a flat, newest-first comment list into proper reply threads — each
 // root comment immediately followed by all of its replies (oldest first,
@@ -67,6 +68,7 @@ export default function ProjectOverviewPage() {
   const [commentBody, setCommentBody] = useState('');
   const [postingComment, setPostingComment] = useState(false);
   const [commentFile, setCommentFile] = useState<File | null>(null);
+  const [storageFull, setStorageFull] = useState(false);
   const [mentionCandidates, setMentionCandidates] = useState<MentionableUser[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // non-null while the '@' picker is open
   const [selectedMentions, setSelectedMentions] = useState<MentionableUser[]>([]);
@@ -141,7 +143,10 @@ export default function ProjectOverviewPage() {
       const comment = await adminProjectService.comments.add(Number(id), commentBody.trim(), undefined, 'internal', selectedMentions.map(m => m.user_id));
       if (commentFile) {
         try { await adminProjectService.comments.attachments.upload(Number(id), comment.id, commentFile); }
-        catch { toast.error('Comment posted, but the attachment failed to upload.'); }
+        catch (err) {
+          if (isStorageLimitError(err)) setStorageFull(true);
+          else toast.error('Comment posted, but the attachment failed to upload.');
+        }
       }
       setCommentBody('');
       setCommentFile(null);
@@ -694,6 +699,7 @@ export default function ProjectOverviewPage() {
             </form>
           </div>
         </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

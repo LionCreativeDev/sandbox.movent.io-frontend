@@ -12,6 +12,7 @@ import { Admin } from '@/types';
 import { handleNotFound } from '@/lib/notFound';
 import toast from 'react-hot-toast';
 import { chatSenderName } from '@/lib/chatSender';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 import {
   HiArrowLeft, HiPencilSquare, HiTrash, HiArrowPath,
   HiPlus, HiCheckCircle, HiXCircle, HiClock, HiCalendarDays,
@@ -172,6 +173,7 @@ export default function LeadDetailPage() {
   // so without this a reply arriving while you read stays off-screen.
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const [sendingChat, setSendingChat] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
 
   // Transfer Lead modal
   const [transferModal, setTransferModal]       = useState(false);
@@ -327,7 +329,8 @@ export default function LeadDetailPage() {
       setChatFile(null);
       loadChat();
     } catch (err: unknown) {
-      toast.error(errorMessage(err, 'Failed to send message'));
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(errorMessage(err, 'Failed to send message'));
     } finally { setSendingChat(false); }
   };
 
@@ -1112,6 +1115,7 @@ export default function LeadDetailPage() {
         </div>
       )}
 
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

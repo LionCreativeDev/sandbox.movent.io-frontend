@@ -8,6 +8,7 @@ import { Project, Deliverable } from '@/lib/services/adminProjectService';
 import { can, getAuthUser } from '@/lib/auth';
 import { Badge, DELIVERABLE_SC, fmtFileSize, fmtDate, asRelation } from '@/components/admin/projects/shared';
 import toast from 'react-hot-toast';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 export default function UserDeliverablesPage() {
   useAdminGuard();
@@ -21,6 +22,7 @@ export default function UserDeliverablesPage() {
   const [uploading, setUploading] = useState(false);
   const [deliveryFile, setDeliveryFile] = useState<File | null>(null);
   const [submittingDelivery, setSubmittingDelivery] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
 
   const canUpload   = can('project_management', 'canUploadDeliverables');
   const canCompleteProjects = can('project_management', 'canCompleteProjects');
@@ -73,7 +75,8 @@ export default function UserDeliverablesPage() {
       setTitle(''); setFile(null);
       loadDeliverables(projectId);
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to upload');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to upload');
     } finally { setUploading(false); }
   };
 
@@ -87,7 +90,8 @@ export default function UserDeliverablesPage() {
       setDeliveryFile(null);
       toast.success('Project submitted for admin review');
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to submit project delivery');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to submit project delivery');
     } finally { setSubmittingDelivery(false); }
   };
 
@@ -190,6 +194,7 @@ export default function UserDeliverablesPage() {
           )}
         </div>
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

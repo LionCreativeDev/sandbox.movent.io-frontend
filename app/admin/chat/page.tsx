@@ -7,6 +7,7 @@ import { inp, ALLOWED_ATTACHMENT_TYPES, fmtFileSize } from '@/components/admin/p
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
 import { chatSenderName } from '@/lib/chatSender';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 interface Company { id: number; name: string }
 type CompanyUser = EligibleChatUser;
@@ -49,6 +50,7 @@ export default function AdminChatPage() {
   const [text, setText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
 
@@ -166,7 +168,8 @@ export default function AdminChatPage() {
       loadMessages(activeThreadId);
       loadThreads();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to send message');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to send message');
     } finally { setSending(false); }
   };
 
@@ -426,6 +429,7 @@ export default function AdminChatPage() {
           )}
         </div>
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

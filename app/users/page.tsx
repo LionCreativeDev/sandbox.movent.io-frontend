@@ -29,10 +29,10 @@ const STATUS_CFG: Record<string, { color: string; bg: string; label: string }> =
   {
     active: { color: "#059669", bg: "#ecfdf5", label: "Active" },
     invited: { color: "#d97706", bg: "#fffbeb", label: "Invited" },
-    suspended: { color: "#dc2626", bg: "#fef2f2", label: "Suspended" },
+    suspended: { color: "#dc2626", bg: "#fef2f2", label: "Deactivated" },
   };
 
-// Delete is hidden on the Users list. Suspend/Activate covers day-to-day
+// Delete is hidden on the Users list. Deactivate/Activate covers day-to-day
 // offboarding and is reversible; removing an account (and its assignments) is
 // deliberately not offered as a row action here. The whole flow behind it —
 // handleDelete(), DeleteCompanyPicker, DeleteUserModal and
@@ -167,11 +167,11 @@ export default function UsersPage() {
   const assignmentsOf = (user: User): CompanyAssignment[] =>
     user.company_assignments ?? [];
 
-  // Suspension is per company on the server (CompanyUserAssignment.status;
-  // users.status is only a rollup — "suspended" there means suspended
+  // Deactivation is per company on the server (CompanyUserAssignment.status;
+  // users.status is only a rollup — "suspended" there means deactivated
   // EVERYWHERE). So while one company is selected, this row must report that
-  // company's own state: otherwise suspending a user who also belongs to
-  // another company left the row still reading "Active" with a "Suspend"
+  // company's own state: otherwise deactivating a user who also belongs to
+  // another company left the row still reading "Active" with a "Deactivate"
   // button, as if the click had done nothing. Under "All Companies" the
   // rollup is the honest answer, and the per-company detail is in the
   // Companies column's pills and the picker dialog.
@@ -255,7 +255,7 @@ export default function UsersPage() {
         (user.status ?? "active") === "active" ? "suspended" : "active";
       if (
         !confirm(
-          `${newStatus === "suspended" ? "Suspend" : "Reactivate"} ${user.name}?`,
+          `${newStatus === "suspended" ? "Deactivate" : "Activate"} ${user.name}?`,
         )
       )
         return;
@@ -670,7 +670,7 @@ export default function UsersPage() {
                                   key={a.company_id}
                                   title={
                                     a.status === "suspended"
-                                      ? "Suspended"
+                                      ? "Deactivated"
                                       : undefined
                                   }
                                   style={{
@@ -959,7 +959,7 @@ export default function UsersPage() {
                                   ) : (
                                     <HiPlay size={13} />
                                   )}
-                                  {status === "active" ? "Suspend" : "Activate"}
+                                  {status === "active" ? "Deactivate" : "Activate"}
                                 </button>
                                 <button
                                   onClick={() => handleResetPassword(user)}
@@ -1083,7 +1083,7 @@ export default function UsersPage() {
               </button>
             </div>
             <p style={{ fontSize: 12.5, color: "#64748b", margin: "0 0 16px" }}>
-              Access is suspended per company. Pick the company to change for{" "}
+              Access is set per company. Pick the company to change for{" "}
               <strong style={{ color: "#334155" }}>
                 {companyPickFor.name}
               </strong>{" "}
@@ -1124,7 +1124,7 @@ export default function UsersPage() {
                           marginTop: 2,
                         }}
                       >
-                        {suspended ? "Suspended here" : "Active here"}
+                        {suspended ? "Deactivated here" : "Active here"}
                       </div>
                     </div>
                     <button
@@ -1158,7 +1158,7 @@ export default function UsersPage() {
                       ) : (
                         <HiNoSymbol size={13} />
                       )}
-                      {suspended ? "Activate" : "Suspend"}
+                      {suspended ? "Activate" : "Deactivate"}
                     </button>
                   </div>
                 );

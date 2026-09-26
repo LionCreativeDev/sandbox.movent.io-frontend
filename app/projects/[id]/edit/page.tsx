@@ -12,6 +12,7 @@ import { ALLOWED_ATTACHMENT_TYPES, DRAFT_HINT, fmtDate, fmtFileSize, inp, lbl } 
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
 import RichTextField from '@/components/ui/RichTextField';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 const card: React.CSSProperties = {
   background: '#fff',
@@ -33,6 +34,7 @@ export default function UserEditProjectPage() {
   const [attLoading, setAttLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [form, setForm] = useState({
     name: '',
@@ -131,9 +133,10 @@ export default function UserEditProjectPage() {
       // otherwise (see AttachmentStorageService::maxUploadKb()).
       try {
         await userProjectService.attachments.upload(projectId, file);
-      } catch {
+      } catch (err) {
         failed++;
-        toast.error(`${file.name}: upload failed`);
+        if (isStorageLimitError(err)) setStorageFull(true);
+        else toast.error(`${file.name}: upload failed`);
       }
     }
     if (failed < files.length) toast.success('Attachment(s) uploaded');
@@ -336,6 +339,7 @@ export default function UserEditProjectPage() {
           </div>
         </form>
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

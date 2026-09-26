@@ -12,6 +12,7 @@ import { Badge, ThumbIcon, TASK_SC, PRIORITY_SC, card, inp, lbl, fmtDate, fmtFil
 import toast from 'react-hot-toast';
 import { handleNotFound } from '@/lib/notFound';
 import RichText from '@/components/ui/RichText';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 const TASK_TYPE_LABEL: Record<string, string> = {
   general: 'General', production: 'Production', client_request: 'Client Request', internal: 'Internal',
@@ -83,6 +84,7 @@ export default function UserTaskDetailPage() {
   const [attachments, setAttachments] = useState<ProjectTaskAttachment[]>([]);
   const [attLoading, setAttLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [storageFull, setStorageFull] = useState(false);
   // "Edit Tasks" is its own assignable/revocable permission (pm_edit_tasks →
   // canEditTasks) — permission-only, no PM-tier bypass, mirroring
   // Api\User\TaskController::update()'s $canEdit.
@@ -164,7 +166,11 @@ export default function UserTaskDetailPage() {
       // once the company has Google Drive connected and at MAX_ATTACHMENT_MB
       // otherwise (see AttachmentStorageService::maxUploadKb()).
       try { await userProjectService.taskAttachments.upload(projectId, taskId, file); }
-      catch { failed++; toast.error(`${file.name}: upload failed`); }
+      catch (err) {
+        failed++;
+        if (isStorageLimitError(err)) setStorageFull(true);
+        else toast.error(`${file.name}: upload failed`);
+      }
     }
     if (failed < files.length) toast.success('Attachment(s) uploaded');
     setUploading(false);
@@ -214,7 +220,10 @@ export default function UserTaskDetailPage() {
       const comment = await userProjectService.comments.add(projectId, commentBody.trim(), taskId, visibility, selectedMentions.map(m => m.user_id));
       if (commentFile) {
         try { await userProjectService.comments.attachments.upload(projectId, comment.id, commentFile); }
-        catch { toast.error('Comment posted, but the attachment failed to upload.'); }
+        catch (err) {
+          if (isStorageLimitError(err)) setStorageFull(true);
+          else toast.error('Comment posted, but the attachment failed to upload.');
+        }
       }
       setCommentBody('');
       setCommentFile(null);
@@ -722,6 +731,7 @@ export default function UserTaskDetailPage() {
           )}
         </div>
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

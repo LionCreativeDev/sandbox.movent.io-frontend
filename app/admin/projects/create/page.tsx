@@ -16,6 +16,7 @@ import SubmitButton from '@/components/ui/SubmitButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
 import RichTextField from '@/components/ui/RichTextField';
 import { companyServiceService } from '@/lib/services/companyServiceService';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 interface Company {
     id: number;
@@ -60,6 +61,11 @@ function CreateProjectForm() {
     const [usersLoading, setUsersLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [attachments, setAttachments] = useState<File[]>([]);
+    const [storageFull, setStorageFull] = useState(false);
+    // Set once the project itself is created — used to hold the redirect
+    // until the storage-limit modal (if shown) is dismissed, so it isn't
+    // unmounted by navigation before the user can read it.
+    const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
     const [leadName, setLeadName] = useState<string | null>(null);
     const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null);
 
@@ -279,6 +285,7 @@ function CreateProjectForm() {
                     : null,
             });
 
+            let hitStorageLimit = false;
             if (attachments.length > 0) {
                 let failed = 0;
                 for (const file of attachments) {
@@ -287,11 +294,14 @@ function CreateProjectForm() {
                             project.id,
                             file,
                         );
-                    } catch {
+                    } catch (err) {
                         failed++;
+                        if (isStorageLimitError(err)) hitStorageLimit = true;
                     }
                 }
-                if (failed > 0) {
+                if (hitStorageLimit) {
+                    setStorageFull(true);
+                } else if (failed > 0) {
                     toast.error(
                         `Project created, but ${failed} of ${attachments.length} attachment(s) failed to upload. You can retry from the project page.`,
                     );
@@ -299,7 +309,13 @@ function CreateProjectForm() {
             }
 
             toast.success("Project created!");
-            router.push(`/admin/projects/${project.id}`);
+            if (hitStorageLimit) {
+                // Hold the redirect until the modal is dismissed — see
+                // createdProjectId/storageFull state above.
+                setCreatedProjectId(project.id);
+            } else {
+                router.push(`/admin/projects/${project.id}`);
+            }
         } catch (err: unknown) {
             const e2 = err as { response?: { data?: { message?: string } } };
             toast.error(
@@ -684,6 +700,12 @@ function CreateProjectForm() {
           }}>Cancel</button>
         </div>
       </form>
+      {storageFull && (
+        <StorageLimitModal onClose={() => {
+          setStorageFull(false);
+          if (createdProjectId) router.push(`/admin/projects/${createdProjectId}`);
+        }} />
+      )}
     </DashboardLayout>
   );
 }

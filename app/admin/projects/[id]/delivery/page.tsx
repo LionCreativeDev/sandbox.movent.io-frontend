@@ -8,6 +8,7 @@ import { adminProjectService, DeliverySubmission, Project } from '@/lib/services
 import ProjectTabs from '@/components/admin/projects/ProjectTabs';
 import { card, fmtFileSize, DraftNotice } from '@/components/admin/projects/shared';
 import { handleNotFound } from '@/lib/notFound';
+import StorageLimitModal, { isStorageLimitError } from '@/components/storage/StorageLimitModal';
 
 function fmtDateTime(d?: string | null): string {
   if (!d) return '—';
@@ -27,6 +28,7 @@ export default function ProjectDeliveryPage() {
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deliveryEmail, setDeliveryEmail] = useState('');
+  const [storageFull, setStorageFull] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -76,7 +78,8 @@ export default function ProjectDeliveryPage() {
       toast.success('Project delivered to client');
       loadHistory();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to deliver project');
+      if (isStorageLimitError(err)) setStorageFull(true);
+      else toast.error(err?.response?.data?.message || 'Failed to deliver project');
     } finally { setSubmitting(false); }
   };
 
@@ -289,6 +292,7 @@ export default function ProjectDeliveryPage() {
           </div>
         )}
       </div>
+      {storageFull && <StorageLimitModal onClose={() => setStorageFull(false)} />}
     </DashboardLayout>
   );
 }

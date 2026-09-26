@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import toast from 'react-hot-toast';
@@ -12,6 +12,16 @@ import { handleNotFound } from '@/lib/notFound';
 import { ROLE_LABELS } from '@/lib/roleUtils';
 import { User } from '@/types';
 import Link from 'next/link';
+
+// Every ACTIVE company this user belongs to, comma-joined — a user assigned
+// to only one company still shows just that one, same as the single
+// `u.company?.name` this replaces. Falls back to `company` when
+// `company_assignments` wasn't loaded for this response at all.
+const companyNamesFor = (u: User | undefined | null): string => {
+  const active = (u?.company_assignments ?? []).filter(a => a.status === 'active');
+  if (active.length > 0) return active.map(a => a.company_name).join(', ');
+  return u?.company?.name ?? '';
+};
 
 const hasProjectManagementAccess = (u: User) =>
   (u.company_assignments ?? []).some(a => (a.permissions?.project_management ?? []).length > 0);
@@ -108,6 +118,10 @@ export default function ProjectTeamPage() {
   // and to roles that can meaningfully sit on a project team.
   const eligibleUsers = users.filter(u => isEligibleForProjectCompany(u, projectCompanyId));
   const selectedUser = eligibleUsers.find(u => String(u.id) === userId) ?? null;
+  // TeamMember.user is a minimal shape (no company_assignments) — look the
+  // full record back up from the already-fetched `users` list so the roster
+  // below can show the same multi-company names as the picker above.
+  const usersById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
 
   const addMember = async (e: { preventDefault(): void }) => {
     e.preventDefault();
@@ -167,7 +181,7 @@ export default function ProjectTeamPage() {
               <option value="">Select user…</option>
               {eligibleUsers.map(u => (
                 <option key={u.id} value={u.id}>
-                  {u.name} — {ROLE_LABELS[u.role_type] ?? u.role_type}{u.company?.name ? ` (${u.company.name})` : ''}
+                  {u.name} — {ROLE_LABELS[u.role_type] ?? u.role_type}{companyNamesFor(u) ? ` (${companyNamesFor(u)})` : ''}
                 </option>
               ))}
             </select>
@@ -212,17 +226,21 @@ export default function ProjectTeamPage() {
               </tr>
             </thead>
             <tbody>
-              {members.map(m => (
+              {members.map(m => {
+                const companyNames = companyNamesFor(usersById.get(m.user?.id ?? -1));
+                return (
                 <tr key={m.id} style={{ borderBottom: '1px solid #f8fafc' }}>
                   <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#1e293b' }}>
                     {m.user?.name ?? '—'}
                     <span style={{ fontWeight: 400, color: '#94a3b8' }}> ({memberRoleLabel(m)})</span>
+                    {companyNames && <span style={{ fontWeight: 400, color: '#94a3b8' }}> · {companyNames}</span>}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     {!projectClosed && <button onClick={() => removeMember(m.id)} style={{ padding: '4px 10px', fontSize: 11, fontWeight: 500, cursor: 'pointer', background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6 }}>Remove</button>}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
